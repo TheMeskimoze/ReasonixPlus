@@ -7,6 +7,7 @@ import { I } from "../icons";
 import type { SessionPlanLabel } from "../plan-labels";
 import { clearPartition } from "../sessions-store";
 import { formatTokensPerSecond } from "../stream-rate";
+import { workspaceBasename } from "../workspace-path";
 import { useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { ListControl } from "./list-controls";
@@ -97,7 +98,7 @@ export function Sidebar({
   // this surface never restates it as a second throbber.
   const busy = sessionMutation != null;
   const workspaceLabel = workspaceDir
-    ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
+    ? workspaceBasename(workspaceDir) || workspaceDir
     : t("sidebarPanel.noWorkspace");
   const filtered = useMemo(() => {
     const sorted = [...sessions].sort(sortSessionsByCreationDescending);

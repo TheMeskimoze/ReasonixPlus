@@ -3,6 +3,9 @@
  *  and desktop consumers never touch these (subpath import only). */
 
 import { isAbsolute, relative } from "node:path";
+import { toPosixPath } from "./posix-path.js";
+
+export { toPosixPath };
 
 /** True when `child` is `parent` itself or lexically inside it. Single source
  *  for every sandbox-containment check (edit gate, filesystem tools, shell
@@ -19,12 +22,6 @@ export function looksLikeAbsoluteSystemPath(raw: string): boolean {
   return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
     raw,
   );
-}
-
-/** Forward-slash form of a path — the display/compare form shared by relative
- *  path rendering, search results and executable-name matching. */
-export function toPosixPath(p: string): string {
-  return p.replaceAll("\\", "/");
 }
 
 /** Basename of a path or argv[0] in either slash style (case preserved). */

@@ -671,11 +671,19 @@ function serverStatusLabel(
   }
 }
 
-/** Copy for each install state a managed build can report. */
-const BUILD_STATE_LABEL_KEYS: Record<PlaywrightManagedBrowserInstallState["state"], TKey> = {
+/** Every state a build row can show: the daemon probe's answer, a live install that
+ *  outranks it, and the gap before the probe has answered. */
+type ManagedBuildDisplayState =
+  | PlaywrightManagedBrowserInstallState["state"]
+  | "installing"
+  | "unknown";
+
+const BUILD_STATE_LABEL_KEYS: Record<ManagedBuildDisplayState, TKey> = {
   installed: "settings.mcpBuildInstalled",
   missing: "settings.mcpBuildMissing",
   system: "settings.mcpBuildSystem",
+  installing: "settings.mcpBuildInstalling",
+  unknown: "settings.mcpBuildUnknown",
 };
 
 /** The recorded install state of one managed build, or undefined while it is unknown. */
@@ -684,6 +692,18 @@ function buildStateOf(
   browser: PlaywrightManagedBrowser,
 ): PlaywrightManagedBrowserInstallState["state"] | undefined {
   return installs?.find((entry) => entry.browser === browser)?.state;
+}
+
+/** What one build row shows. A live install outranks the probe: Playwright writes its
+ *  completion marker before the installer exits, so the probe can answer "installed"
+ *  while the job is still running. */
+function buildDisplayState(
+  installs: readonly PlaywrightManagedBrowserInstallState[] | null | undefined,
+  browser: PlaywrightManagedBrowser,
+  installing: PlaywrightManagedBrowser | null,
+): ManagedBuildDisplayState {
+  if (installing === browser) return "installing";
+  return buildStateOf(installs, browser) ?? "unknown";
 }
 
 /** A build is present unless the daemon reports it missing: an unknown state is not
@@ -3370,16 +3390,14 @@ export function PageMCP({
       <div className="mcp-builds">
         <div className="mcp-builds-head">{t("settings.mcpBuildStateLabel")}</div>
         {PLAYWRIGHT_MANAGED_BROWSERS.map((browser) => {
-          const state = buildStateOf(builds, browser);
+          const state = buildDisplayState(builds, browser, installingBrowser);
           const missing = state === "missing";
           return (
             <div key={browser} className="mcp-build-row" data-missing={missing}>
               <span className="mcp-build-name">{modeLabel(browser)}</span>
               <span className="mcp-build-side">
-                <span className="mcp-build-state">
-                  {state ? t(BUILD_STATE_LABEL_KEYS[state]) : t("settings.mcpBuildUnknown")}
-                </span>
-                {installingBrowser === browser ? (
+                <span className="mcp-build-state">{t(BUILD_STATE_LABEL_KEYS[state])}</span>
+                {state === "installing" ? (
                   <button
                     type="button"
                     className="btn danger"

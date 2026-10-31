@@ -124,6 +124,22 @@ describe("normalizeWorkspaceTabGroups — one visual tab per workspace", () => {
     expect(normalized[0]!.groupId).toBe("g1");
     expect(normalized[1]!.groupId).toBe("new-1");
   });
+
+  it("never merges a workspace with the local workspace nested inside it", () => {
+    let next = 0;
+    const normalized = normalizeWorkspaceTabGroups(
+      [
+        { dir: "C:\\Users\\uraan\\Documents\\ReasonixPlus", groupId: "g162" },
+        { dir: "c:/users/uraan/documents/ReasonixPlus", groupId: "g162" },
+        { dir: "C:/users/uraan/documents/ReasonixPlus/local", groupId: "g164" },
+      ],
+      () => `new-${++next}`,
+    );
+
+    // The first two are one workspace spelled two ways; the nested local
+    // workspace is a different one and keeps its own tab.
+    expect(normalized.map((entry) => entry.groupId)).toEqual(["g162", "g162", "g164"]);
+  });
 });
 
 describe("channelsInWorkspaceTab — workspace tab owns all child agents", () => {

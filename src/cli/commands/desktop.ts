@@ -371,6 +371,7 @@ import {
   searchSharedCredential,
   syntheticUsageView,
   usageMinIntervalMs,
+  workspacePathKey,
   zaiUsageView,
 } from "@reasonix/core-utils";
 import {
@@ -509,7 +510,7 @@ import {
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { StepCompletion } from "../../tools/plan.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
-import { VERSION, reasonixDefaultWorkspaceDir, reasonixInstallDir } from "../../version.js";
+import { VERSION, reasonixDefaultWorkspaceDir } from "../../version.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import {
   type McpRuntime,
@@ -2045,9 +2046,7 @@ function emitSettings(tab: Tab, opts: { turnReleased?: boolean } = {}): void {
   const ep = loadEndpoint();
   const editMode = loadEditMode();
   if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
-  const recent = loadRecentWorkspaces().filter(
-    (p) => !sameWorkspaceDir(p, tab.rootDir) && !sameWorkspaceDir(p, reasonixInstallDir()),
-  );
+  const recent = loadRecentWorkspaces().filter((p) => !sameWorkspaceDir(p, tab.rootDir));
   // Sourced from the registry the dispatch gate consults, so the mode-rules card
   // can't drift from what read-only actually refuses.
   const toolsetTools = tab.toolset?.tools;
@@ -5906,11 +5905,11 @@ function nextGroupId(): string {
   return `g${groupCounter}`;
 }
 
-/** Absolute, case-folded directory key: Windows paths are case-insensitive, so the
- *  same workspace can arrive with different casing. */
+/** Absolute canonical directory key: the shared workspace identity rule applied
+ *  to the resolved path, so this daemon and the desktop can never disagree about
+ *  which directories are one workspace. */
 function workspaceKey(dir: string): string {
-  const resolved = resolve(dir);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  return workspacePathKey(resolve(dir));
 }
 
 /** True when two workspace dirs point at one directory. */
@@ -6945,14 +6944,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     pending = false,
   ): Tab {
     const defaultDir = reasonixDefaultWorkspaceDir();
-    const configuredDir = loadWorkspaceDir();
-    const fallbackDir =
-      configuredDir && !sameWorkspaceDir(configuredDir, reasonixInstallDir())
-        ? configuredDir
-        : defaultDir;
-    const resolvedInitial =
-      initialDir && sameWorkspaceDir(initialDir, reasonixInstallDir()) ? defaultDir : initialDir;
-    const dir = pending ? "" : resolve(resolvedInitial ?? opts.dir ?? fallbackDir);
+    // The tab works in exactly the directory it was given: the install dir is a
+    // workspace of its own, never an alias for `<installDir>/local`.
+    const dir = pending ? "" : resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? defaultDir);
     if (!pending) pushRecentWorkspace(dir);
     const model = restore?.model || opts.model || loadModel() || DEFAULT_MODEL;
     // Restored tabs keep their persisted id so a backend restart doesn't
@@ -8214,20 +8208,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       await closeChannel(sibling, { ensureFallback: false, persist: false });
     }
 
-    // The target may already have a workspace tab. In that case this source tab
-    // is removed as a unit and the request becomes a new independent session in
-    // the existing target tab—never a duplicate workspace ribbon entry.
+    // The target may already have a workspace tab. This channel JOINS that tab's
+    // group instead of being replaced by it: the pick applies to the tab the user
+    // is acting from, and no tab is closed to make room for it.
     const targetTab = tabsInWorkspace(target).find((candidate) => candidate.id !== tab.id);
-    if (targetTab) {
-      await closeChannel(tab, { ensureFallback: false, persist: false });
-      const opened = bootstrapTab(target, {
-        active: true,
-        groupId: targetTab.groupId,
-      });
-      lastActiveTabId = opened.id;
-      persistOpenTabs();
-      return;
-    }
 
     abortTurn(tab);
     cancelPendingGates(tab);
@@ -8247,7 +8231,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.pending = false;
     // The reused channel becomes the sole initial session in a new workspace
     // tab. Its former sibling agents were closed above.
-    tab.groupId = nextGroupId();
+    tab.groupId = targetTab?.groupId ?? nextGroupId();
     saveWorkspaceDir(target);
     pushRecentWorkspace(target);
     tab.fileIndex = null;
@@ -9632,20 +9616,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // loaded session and focused tab (issues #933, #1244). Missing dirs
   // are silently skipped — a deleted workspace shouldn't break boot.
   const savedTabs = normalizeWorkspaceTabGroups(
-    loadDesktopOpenTabs()
-      .map((t) => {
-        if (sameWorkspaceDir(t.dir, reasonixInstallDir())) {
-          return { ...t, dir: reasonixDefaultWorkspaceDir() };
-        }
-        return t;
-      })
-      .filter((t) => {
-        try {
-          return existsSync(t.dir) && statSync(t.dir).isDirectory();
-        } catch {
-          return false;
-        }
-      }),
+    loadDesktopOpenTabs().filter((t) => {
+      try {
+        return existsSync(t.dir) && statSync(t.dir).isDirectory();
+      } catch {
+        return false;
+      }
+    }),
   );
   // Never restore the same session into two channels — a session is a single
   // agent. Keep the first occurrence's session; later duplicates open fresh.

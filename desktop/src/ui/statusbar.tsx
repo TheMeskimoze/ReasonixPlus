@@ -13,6 +13,7 @@ import type { JobInfo } from "../protocol";
 import { rateChips } from "../rate-chips";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { resolveRibbonFunds } from "../usage-ribbon";
+import { workspaceBasename } from "../workspace-path";
 import { hitPercent, tokenLabel } from "./format";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
@@ -435,7 +436,7 @@ export function StatusBar({
           })}
         >
           <I.folder size={11} />
-          <span className="v">{settings.workspaceDir.split(/[\\/]/).pop() || "ws"}</span>
+          <span className="v">{workspaceBasename(settings.workspaceDir) || "ws"}</span>
         </span>
       ) : null}
       {showBalance && funds.chip === "quota" ? (

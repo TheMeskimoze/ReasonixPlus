@@ -220,10 +220,12 @@ import { useResizable } from "./ui/useResizable";
 import { useTurnWatchdog } from "./ui/useTurnWatchdog";
 import type { SoundPackDraft } from "./ui/pack-wizard";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { WorkspaceRowView } from "./ui/workspace-row";
 import { mergeSoundPacks } from "./user-sound-packs";
 import { anyVoiceModelDownloaded } from "./voice/model-cache";
 import { areWorkspacesLoaded, isWorkspaceRevealReady } from "./workspace-loading";
-import { normalizeWorkspacePath, toWorkspaceRelative } from "./workspace-path";
+import { normalizeWorkspacePath, toWorkspaceRelative, workspaceBasename } from "./workspace-path";
+import { workspacePickerRows } from "./workspace-rows";
 
 /** Thumbnail icons for queued audio/video attachments — real data-URL images so
  *  the existing pending/queue <img> renders need no per-kind branches. */
@@ -4256,19 +4258,15 @@ const TabRuntime = memo(function TabRuntime({
       .filter((ws): ws is string => typeof ws === "string" && ws.length > 0);
   }, [tabsList]);
 
+  // One row per workspace, keyed by the same identity the ribbon groups tabs by:
+  // the picker can never offer a directory twice, and never hides one because it
+  // happens to sit inside another.
   const mergedWorkspaces = useMemo(() => {
     const seen = new Set<string>();
     const list: string[] = [];
-    for (const ws of openTabWorkspaces) {
-      const key = ws.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        list.push(ws);
-      }
-    }
-    for (const ws of state.settings?.recentWorkspaces ?? []) {
-      const key = ws.toLowerCase();
-      if (!seen.has(key)) {
+    for (const ws of [...openTabWorkspaces, ...(state.settings?.recentWorkspaces ?? [])]) {
+      const key = normalizeWorkspacePath(ws);
+      if (key && !seen.has(key)) {
         seen.add(key);
         list.push(ws);
       }
@@ -5000,7 +4998,7 @@ const TabRuntime = memo(function TabRuntime({
   // poll; keeping them out of App state avoids a whole-transcript re-render
   // every second while a turn runs, which stuttered typing in the composer.
   const workspaceLabel = state.settings?.workspaceDir
-    ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
+    ? workspaceBasename(state.settings.workspaceDir) || "workspace"
     : "Reasonix+";
   const session = (() => {
     if (state.currentSession) {
@@ -6311,12 +6309,7 @@ export function TabBar({
         const head = activeInGroup ?? g.items.find((t) => t.id === rememberedId) ?? g.items[0];
         if (!head) return null;
         const ws = head.workspaceDir ?? "";
-        const label = ws
-          ? ws
-              .replace(/[\\/]$/, "")
-              .split(/[\\/]/)
-              .pop() || "workspace"
-          : t("sidebarPanel.noWorkspace");
+        const label = ws ? workspaceBasename(ws) || "workspace" : t("sidebarPanel.noWorkspace");
         // Active agents = sessions in this tab with a running turn. No dot when
         // nothing is running.
         const activeAgents = g.items.filter((t) => t.busy).length;
@@ -6425,7 +6418,7 @@ export function MainHead({
   }, [title, session, onRename]);
 
   const wsLabel = workspaceDir
-    ? workspaceDir.split(/[\\/]/).pop() || "workspace"
+    ? workspaceBasename(workspaceDir) || "workspace"
     : t("app.header.noWorkspace");
   return (
     <div className="main-head">
@@ -6522,6 +6515,7 @@ function PendingWorkspaceView({
   onBrowse: () => void;
 }) {
   useLang();
+  const rows = workspacePickerRows({ local, recent });
   return (
     <div className="pending-workspace">
       <div className="pw-card">
@@ -6531,44 +6525,9 @@ function PendingWorkspaceView({
         </div>
         <p className="pw-sub">{t("workdir.newTabBody")}</p>
         <div className="wd-list pw-list">
-          {local ? (
-            <div
-              className="wd-row"
-              onClick={() => onPick(local)}
-              onKeyDown={activationHandler(() => onPick(local))}
-              title={local}
-            >
-              <span className="ic">
-                <I.terminal size={12} />
-              </span>
-              <div className="b">
-                <div className="p">{t("workdir.reasonixLocal")}</div>
-                <div className="br">{local}</div>
-              </div>
-            </div>
-          ) : null}
-          {recent
-            .filter((p) => p !== local)
-            .map((p) => {
-              const name = p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-              return (
-                <div
-                  key={p}
-                  className="wd-row"
-                  onClick={() => onPick(p)}
-                  onKeyDown={activationHandler(() => onPick(p))}
-                  title={p}
-                >
-                  <span className="ic">
-                    <I.folder size={12} />
-                  </span>
-                  <div className="b">
-                    <div className="p">{name}</div>
-                    <div className="br">{p}</div>
-                  </div>
-                </div>
-              );
-            })}
+          {rows.map((row) => (
+            <WorkspaceRowView key={row.key} row={row} onPick={() => onPick(row.path)} />
+          ))}
         </div>
         <div className="pw-foot">
           <button type="button" className="btn" onClick={onBrowse}>
@@ -6624,7 +6583,7 @@ function EmptyState({
     t("app.empty.suggestion2"),
     t("app.empty.suggestion3"),
   ];
-  const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() : null;
+  const wsLabel = workspaceDir ? workspaceBasename(workspaceDir) : null;
   return (
     <EmptyPanel
       title={t("app.empty.welcome")}

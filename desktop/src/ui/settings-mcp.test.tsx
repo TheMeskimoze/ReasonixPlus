@@ -383,6 +383,30 @@ describe("PageMCP — playwright connection status", () => {
     expect(onCancel).toHaveBeenCalledWith("firefox");
   });
 
+  it("reports a running install as installing even when the probe already says installed", () => {
+    const status = extensionStatus();
+    status.server.mode = "firefox";
+    status.server.hasExtensionArg = false;
+    renderCard([spec()], status, null, vi.fn(), vi.fn(), {
+      phase: "running",
+      browser: "firefox",
+      source: "official",
+    });
+    const row = within(document.querySelector(".mcp-builds") as HTMLElement)
+      .getByText("Managed Firefox")
+      .closest(".mcp-build-row") as HTMLElement;
+    expect(within(row).getByText("installing")).toBeTruthy();
+    expect(within(row).queryByText("installed")).toBeNull();
+  });
+
+  it("reports a pending probe as checking, not as installed", () => {
+    renderCard([spec()], null);
+    const row = within(document.querySelector(".mcp-builds") as HTMLElement)
+      .getByText("Managed WebKit")
+      .closest(".mcp-build-row") as HTMLElement;
+    expect(within(row).getByText("checking…")).toBeTruthy();
+  });
+
   it("shows managed-browser installation progress and results", () => {
     const status = extensionStatus();
     status.server.mode = "firefox";

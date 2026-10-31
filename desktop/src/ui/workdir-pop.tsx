@@ -1,78 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
-import { activationHandler } from "./keyboard";
+import { workspacePickerRows } from "../workspace-rows";
 import { Shortcut } from "./shortcut";
+import { WorkspaceRowView } from "./workspace-row";
 
 type Anchor = { top?: number; bottom?: number; left: number };
-
-/** One clickable workspace row: folder/terminal icon, name, full path, and a
- *  current-check or remove button. Shared by the pinned Reasonix+ Local entry
- *  and the recent list. */
-function WorkdirRow({
-  path,
-  label,
-  icon,
-  isCurrent,
-  canRemove,
-  locked,
-  onPick,
-  onRemove,
-}: {
-  path: string;
-  label?: string;
-  icon: React.ReactNode;
-  isCurrent: boolean;
-  canRemove: boolean;
-  /** A session mutation is in flight: the row switches nothing and removes nothing. */
-  locked: boolean;
-  onPick: () => void;
-  onRemove: () => void;
-}) {
-  const name = label ?? path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-  return (
-    <div
-      className="wd-row"
-      onClick={locked ? undefined : onPick}
-      onKeyDown={locked ? undefined : activationHandler(onPick)}
-      title={path}
-      aria-disabled={locked || undefined}
-      data-locked={locked ? "true" : undefined}
-    >
-      <span className="ic">{icon}</span>
-      <div className="b">
-        <div className="p">{name}</div>
-        <div className="br">{path}</div>
-      </div>
-      {isCurrent ? (
-        <span className="pin">
-          <I.check size={11} />
-        </span>
-      ) : canRemove ? (
-        <button
-          type="button"
-          className="wd-del"
-          title={t("workdir.removeRecent")}
-          aria-label={t("workdir.removeRecent")}
-          disabled={locked}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.stopPropagation();
-              onRemove();
-            }
-          }}
-        >
-          <I.x size={11} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
 
 export function WorkdirPop({
   open,
@@ -90,7 +23,8 @@ export function WorkdirPop({
   onClose: () => void;
   recent: string[];
   /** Local Reasonix+ workspace dir — pinned above the recents as an always-
-   *  available workspace choice. */
+   *  available workspace choice, and a workspace of its own: a directory that
+   *  merely contains it is a different workspace. */
   local?: string;
   current?: string;
   anchor?: Anchor;
@@ -112,13 +46,21 @@ export function WorkdirPop({
     return () => window.clearTimeout(id);
   }, [open]);
 
-  const items = useMemo(() => {
-    const list = recent.length > 0 ? recent : current ? [current] : [];
-    const q = query.trim().toLowerCase();
-    const filtered = q ? list.filter((p) => p.toLowerCase().includes(q)) : list;
-    // The local workspace dir is pinned above the list — never duplicate it here.
-    return local ? filtered.filter((p) => p !== local) : filtered;
-  }, [recent, current, query, local]);
+  const rows = useMemo(
+    () => workspacePickerRows({ local, recent, current }),
+    [local, recent, current],
+  );
+  // The local workspace is pinned above the list, so the search narrows only the
+  // rows below it.
+  const pinned = rows.find((row) => row.local);
+  const offered = useMemo(() => {
+    const rest = rows.filter((row) => !row.local);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return rest;
+    return rest.filter(
+      (row) => row.path.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle),
+    );
+  }, [rows, query]);
 
   if (!open) return null;
 
@@ -155,30 +97,25 @@ export function WorkdirPop({
             if (e.key === "Escape") {
               e.preventDefault();
               onClose();
-            } else if (e.key === "Enter" && items[0]) {
+            } else if (e.key === "Enter" && offered[0]) {
               e.preventDefault();
-              onPick(items[0]);
+              onPick(offered[0].path);
               onClose();
             }
           }}
         />
         <div className="wd-list">
-          {local ? (
-            <WorkdirRow
-              path={local}
-              label={t("workdir.reasonixLocal")}
-              icon={<I.terminal size={12} />}
-              isCurrent={local === current}
-              canRemove={false}
+          {pinned ? (
+            <WorkspaceRowView
+              row={pinned}
               locked={locked}
               onPick={() => {
-                if (local !== current) onPick(local);
+                onPick(pinned.path);
                 onClose();
               }}
-              onRemove={() => undefined}
             />
           ) : null}
-          {items.length === 0 && !local ? (
+          {offered.length === 0 && !pinned ? (
             <div
               style={{
                 padding: "16px 12px",
@@ -190,24 +127,18 @@ export function WorkdirPop({
               {t("workdir.empty")}
             </div>
           ) : null}
-          {items.map((p) => {
-            const isCurrent = p === current;
-            return (
-              <WorkdirRow
-                key={p}
-                path={p}
-                icon={<I.folder size={12} />}
-                isCurrent={isCurrent}
-                canRemove={Boolean(onRemove)}
-                locked={locked}
-                onPick={() => {
-                  if (!isCurrent) onPick(p);
-                  onClose();
-                }}
-                onRemove={() => onRemove?.(p)}
-              />
-            );
-          })}
+          {offered.map((row) => (
+            <WorkspaceRowView
+              key={row.key}
+              row={row}
+              locked={locked}
+              onPick={() => {
+                onPick(row.path);
+                onClose();
+              }}
+              onRemove={onRemove ? () => onRemove(row.path) : undefined}
+            />
+          ))}
         </div>
         <div className="wd-foot">
           <button

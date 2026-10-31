@@ -5544,6 +5544,17 @@ describe("groupTabsByWorkspace — one ribbon tab per workspace", () => {
     expect(groups).toHaveLength(2);
   });
 
+  it("keeps the install dir and the local workspace nested in it as two ribbon tabs", () => {
+    const groups = groupTabsByWorkspace([
+      { id: "t1", workspaceDir: "C:\\Users\\uraan\\Documents\\ReasonixPlus" },
+      { id: "t2", workspaceDir: "C:\\Users\\uraan\\Documents\\ReasonixPlus\\local" },
+      { id: "t3", workspaceDir: "c:/users/uraan/documents/reasonixplus" },
+    ]);
+
+    // t1 and t3 are one workspace; the local workspace inside it is another.
+    expect(groups.map((group) => group.items.map((tab) => tab.id))).toEqual([["t1", "t3"], ["t2"]]);
+  });
+
   it("keeps pending channels separate unless their backend group matches", () => {
     const groups = groupTabsByWorkspace([
       { id: "t1", group: "g1" },

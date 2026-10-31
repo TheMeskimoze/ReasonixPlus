@@ -299,6 +299,7 @@
     "mcpModeCdp": "Other Chromium browser (CDP)",
     "mcpBuildStateLabel": "Managed builds",
     "mcpBuildInstalled": "installed",
+    "mcpBuildInstalling": "installing",
     "mcpBuildMissing": "not installed",
     "mcpBuildSystem": "installed with the vendor browser",
     "mcpBuildUnknown": "checking…",

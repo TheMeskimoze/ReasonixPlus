@@ -1,3 +1,4 @@
+import { toPosixPath, workspacePathKey } from "@reasonix/core-utils";
 import { LruCache } from "./cache";
 
 function isWindowsPath(path: string): boolean {
@@ -5,25 +6,29 @@ function isWindowsPath(path: string): boolean {
 }
 
 /** Grouping re-normalizes the same handful of workspace dirs many times per
- *  render, so the regex work is cached (and bounded, in case dirs churn). */
+ *  render, so the key work is cached (and bounded, in case dirs churn). */
 const normalizedPaths = new LruCache<string, string>(2000);
 
-/** Compare workspace dirs across separator flavor and trailing slashes.
- *  Windows drive/UNC paths are case-insensitive; POSIX paths are not. */
+/** Workspace identity, shared with the daemon through `workspacePathKey`: one
+ *  workspace has one key on both sides, so a directory the backend counted as
+ *  one workspace is never rendered as two tabs, and two directories are never
+ *  rendered as one. */
 export function normalizeWorkspacePath(path?: string): string {
   const raw = path ?? "";
   const cached = normalizedPaths.get(raw);
   if (cached !== undefined) return cached;
-  const normalized = raw.replace(/\\/g, "/").replace(/\/+$/, "");
-  const windowsPath =
-    raw.includes("\\") || /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
-  const value = windowsPath ? normalized.toLowerCase() : normalized;
+  const value = workspacePathKey(raw);
   normalizedPaths.set(raw, value);
   return value;
 }
 
-function normalizeForComparison(path: string): string {
-  return normalizeWorkspacePath(path);
+/** The workspace's own name, for tab and header labels. Case is preserved: this
+ *  is display text, not identity. */
+export function workspaceBasename(path?: string): string {
+  const posix = toPosixPath(path ?? "");
+  const trimmed = posix.replace(/\/+$/, "");
+  if (!trimmed) return posix;
+  return trimmed.split("/").filter(Boolean).pop() ?? trimmed;
 }
 
 /** Resolve a workspace-relative path while preserving the workspace platform's separator. */
@@ -48,8 +53,8 @@ export function toWorkspaceRelative(path: string, workspaceDir?: string): string
   if (!workspaceDir) return path.replace(/\\/g, "/");
   const target = path.replace(/\\/g, "/");
   const workspace = workspaceDir.replace(/\\/g, "/").replace(/\/+$/, "");
-  const targetComparable = normalizeForComparison(path);
-  const workspaceComparable = normalizeForComparison(workspaceDir);
+  const targetComparable = normalizeWorkspacePath(path);
+  const workspaceComparable = normalizeWorkspacePath(workspaceDir);
   if (targetComparable === workspaceComparable) return ".";
   if (!targetComparable.startsWith(`${workspaceComparable}/`)) return target;
   return target.slice(workspace.length).replace(/^\/+/, "") || ".";

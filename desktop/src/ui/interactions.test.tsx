@@ -1121,6 +1121,43 @@ describe("workdir-pop", () => {
       expect(screen.getByText("alpha")).toBeTruthy();
     });
 
+    it("offers the install dir and Reasonix+ Local as two separate workspaces", () => {
+      const install = "C:\\Users\\uraan\\Documents\\ReasonixPlus";
+      render(
+        <WorkdirPop
+          open
+          onClose={vi.fn()}
+          recent={[install]}
+          local={`${install}\\local`}
+          current={install}
+          onPick={vi.fn()}
+          onBrowse={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Reasonix+ Local")).toBeTruthy();
+      expect(screen.getByText(install)).toBeTruthy();
+      expect(screen.getAllByText("ReasonixPlus").length).toBe(1);
+    });
+
+    it("collapses a recent row that spells the pinned local workspace differently", () => {
+      const local = "C:\\Users\\uraan\\Documents\\ReasonixPlus\\local";
+      render(
+        <WorkdirPop
+          open
+          onClose={vi.fn()}
+          recent={["c:/users/uraan/documents/reasonixplus/LOCAL/"]}
+          local={local}
+          onPick={vi.fn()}
+          onBrowse={vi.fn()}
+        />,
+      );
+
+      // One workspace, one row: the pinned label wins, the respelled duplicate is gone.
+      expect(screen.getAllByText("Reasonix+ Local").length).toBe(1);
+      expect(screen.queryByText("c:/users/uraan/documents/reasonixplus/LOCAL/")).toBeNull();
+    });
+
     it("turns inert while a session mutation is in flight", () => {
       // A mutation can start in a sibling channel while the picker is already open,
       // so the lock cannot rely on the popover merely not opening.

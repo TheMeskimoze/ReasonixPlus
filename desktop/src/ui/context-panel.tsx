@@ -27,7 +27,7 @@ import type {
   SettingsPatch,
   SkillInfo,
 } from "../protocol";
-import { toWorkspaceAbsolute } from "../workspace-path";
+import { toWorkspaceAbsolute, workspaceBasename } from "../workspace-path";
 import { PanelErrorBoundary } from "./error-boundary";
 import type { TranscriptRecord } from "./events";
 import { EventsPanel } from "./events";
@@ -2453,7 +2453,7 @@ function CtxRules({
                             setCopyOpen(false);
                           }}
                         >
-                          {w.rootDir.split(/[\\/]/).filter(Boolean).pop() ?? w.rootDir}
+                          {workspaceBasename(w.rootDir) || w.rootDir}
                         </button>
                       ))}
                     </div>
