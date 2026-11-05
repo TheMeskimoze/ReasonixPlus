@@ -7,6 +7,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { loadSessionMessages } from "../src/memory/session.js";
 import type { ChatMessage } from "../src/types.js";
+import { withoutClockStamp } from "./support/clock-stamp.js";
 
 describe("loop persists user message at step entry (issue #943)", () => {
   let tmp: string;
@@ -220,7 +221,7 @@ describe("loop persists user message at step entry (issue #943)", () => {
 
     const secondRequestUsers = requestMessages[1]!
       .filter((m) => m.role === "user")
-      .map((m) => m.content);
+      .map((m) => withoutClockStamp(m.content));
     expect(secondRequestUsers).toEqual(["请按这次要求完整重写，不要局部微调"]);
     expect(loadSessionMessages(sessionName).filter((m) => m.role === "user")).toHaveLength(1);
   });
