@@ -53,7 +53,11 @@ import {
   pruneOldImageParts,
   shrinkImagePartsForRetry,
 } from "./loop/image-retry.js";
-import { buildAssistantMessage, buildSyntheticAssistantMessage } from "./loop/messages.js";
+import {
+  buildAssistantMessage,
+  buildSyntheticAssistantMessage,
+  stampUserTurns,
+} from "./loop/messages.js";
 import { looksCutOffMidSentence, looksLikePrematureStop } from "./loop/premature-stop.js";
 import { stripDroppableReasoningContent } from "./loop/reasoning-retention.js";
 import {
@@ -956,7 +960,10 @@ export class CacheFirstLoop {
       planContext.length > 0 && tail?.role === "user"
         ? [...history.slice(0, -1), ...planContext, tail]
         : [...history, ...planContext];
-    return pruneOldImageParts(ordered, this.keepImages);
+    // The request carries when each typed prompt was sent, read from the entry's own
+    // `ts` and never from the clock: a send-time stamp would churn the cache on every
+    // call, and the log keeps the user's text unstamped for the UI and the transcript.
+    return stampUserTurns(pruneOldImageParts(ordered, this.keepImages));
   }
 
   /** Record the window a server states in its own refusal, unless it is already recorded.

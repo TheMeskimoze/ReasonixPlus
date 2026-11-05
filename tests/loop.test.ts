@@ -17,6 +17,7 @@ import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerChoiceTool } from "../src/tools/choice.js";
 import type { ChatMessage } from "../src/types.js";
+import { withoutClockStamp } from "./support/clock-stamp.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
 
@@ -1385,7 +1386,9 @@ describe("CacheFirstLoop - clearLog / retryLastUser", () => {
       /* drain */
     }
     const sent = JSON.parse((fetchSpy as any).mock.calls[0][1].body).messages as ChatMessage[];
-    const userBodies = sent.filter((m) => m.role === "user").map((m) => m.content);
+    const userBodies = sent
+      .filter((m) => m.role === "user")
+      .map((m) => withoutClockStamp(m.content));
     expect(userBodies).toEqual(["hello"]);
   });
 

@@ -7,6 +7,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerSeeImageTool } from "../src/tools/see-image.js";
+import { hasClockStamp, withoutClockStamp } from "./support/clock-stamp.js";
 import { makeFakeClient } from "./support/fake-client.js";
 
 const DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
@@ -40,7 +41,7 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     await consume(loop, "what does this show?", [DATA_URL]);
 
     const userMsg = captured[0]!.messages.find((m) => m.role === "user");
-    expect(userMsg?.content).toEqual([
+    expect(withoutClockStamp(userMsg?.content)).toEqual([
       { type: "text", text: "what does this show?" },
       { type: "image_url", image_url: { url: DATA_URL, detail: "low" } },
     ]);
@@ -72,7 +73,10 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     await consume(loop, "hello");
 
     const userMsg = captured[0]!.messages.find((m) => m.role === "user");
-    expect(userMsg?.content).toBe("hello");
+    // Still one plain string, so the prefix keeps its shape turn to turn.
+    expect(typeof userMsg?.content).toBe("string");
+    expect(hasClockStamp(userMsg?.content)).toBe(true);
+    expect(withoutClockStamp(userMsg?.content)).toBe("hello");
   });
 
   it("allows an image-only message with empty text", async () => {
@@ -85,7 +89,7 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     await consume(loop, "", [DATA_URL]);
 
     const userMsg = captured[0]!.messages.find((m) => m.role === "user");
-    expect(userMsg?.content).toEqual([
+    expect(withoutClockStamp(userMsg?.content)).toEqual([
       { type: "image_url", image_url: { url: DATA_URL, detail: "low" } },
     ]);
   });
@@ -231,7 +235,7 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     ]);
 
     const userMsg = captured[0]!.messages.find((m) => m.role === "user");
-    expect(userMsg?.content).toEqual([
+    expect(withoutClockStamp(userMsg?.content)).toEqual([
       { type: "text", text: "describe these" },
       {
         type: "text",
@@ -260,7 +264,7 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     ]);
 
     const userMsg = captured[0]!.messages.find((m) => m.role === "user");
-    expect(userMsg?.content).toEqual([
+    expect(withoutClockStamp(userMsg?.content)).toEqual([
       { type: "text", text: "watch" },
       {
         type: "video_url",

@@ -49,3 +49,36 @@ export function messageText(m: ChatMessage, textOnly = false): string {
         .map((part) => (part.type === "text" ? part.text : `[${part.type} attached]`))
         .join("\n");
 }
+
+/** `2026-11-05 13:10:04 UTC`: UTC and second precision, so no locale data is involved and
+ *  two prompts inside one minute still order. "" for an unusable instant, so a corrupt
+ *  stamp can never throw inside a request build. */
+export function formatClockUtc(ts: number): string {
+  const at = new Date(ts);
+  if (Number.isNaN(at.getTime())) return "";
+  const iso = at.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+}
+
+/** Stamp the outgoing copy with when each real prompt was written, so the model can read
+ *  elapsed time off consecutive turns. `ts` is the only clock: a send-time stamp would
+ *  churn the cache and invent gaps. Records nobody typed and stamp-less ones pass through. */
+export function stampUserTurns(messages: readonly ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.role !== "user" || message.synthetic === true || message.injected === true) {
+      return message;
+    }
+    const { ts } = message;
+    if (typeof ts !== "number") return message;
+    const clock = formatClockUtc(ts);
+    if (!clock) return message;
+    const header = `[${clock}]`;
+    if (typeof message.content === "string") {
+      return { ...message, content: `${header}\n${message.content}` };
+    }
+    if (Array.isArray(message.content)) {
+      return { ...message, content: [{ type: "text" as const, text: header }, ...message.content] };
+    }
+    return message;
+  });
+}

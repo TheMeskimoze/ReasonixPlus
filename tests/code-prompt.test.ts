@@ -15,7 +15,7 @@ import {
   DROPPED_WORK_NOTICE_PREFIX,
   FOLD_NOTICE_PREFIX,
 } from "../src/loop/compaction.js";
-import { DELEGATION_TRIGGER } from "../src/prompt-fragments.js";
+import { DELEGATION_TRIGGER, TIME_STAMP_RULE } from "../src/prompt-fragments.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
@@ -581,6 +581,13 @@ describe("prompt hardening", () => {
     expect(CODE_SYSTEM_PROMPT).toContain("# No limits");
     expect(CODE_SYSTEM_PROMPT).toContain("no turn, step or tool-call budget");
     expect(CODE_SYSTEM_PROMPT).toContain(CONTEXT_BOUND_RULE);
+  });
+
+  it("gives the agent the only clock it has, and says how to read it", () => {
+    // The stamps arrive on the wire; without this rule the model has no way to know
+    // that the bracketed line is a time rather than part of the request.
+    expect(CODE_SYSTEM_PROMPT).toContain("# Time");
+    expect(CODE_SYSTEM_PROMPT).toContain(TIME_STAMP_RULE);
   });
 
   it("names every fold marker the loop writes", () => {

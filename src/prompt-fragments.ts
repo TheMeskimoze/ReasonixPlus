@@ -1,5 +1,7 @@
 /** Shared prompt fragments — single source so house-style rules can't drift across the agent and subagent prompts. */
 
+import { formatClockUtc } from "./loop/messages.js";
+
 /** Embedded literally — no interpolation, so prefix-cache hash stays stable across sessions. */
 export const TUI_FORMATTING_RULES = `Formatting (rendered in a TUI markdown renderer):
 - Tables: GitHub-Flavored Markdown with ASCII pipes (\`| a | b |\` and a \`| --- | --- |\` separator). Never use Unicode box-drawing characters (│ ─ ┼ ┌ ┐ └ ┘ ├ ┤): they break word-wrap into garbled columns.
@@ -36,3 +38,11 @@ export const DELEGATION_TRIGGER =
 /** A fan-out is one batch or it degrades into serial spawns. */
 export const DELEGATION_WAVE_RULE =
   "Issue independent spawns together, with no write, shell or MCP call between them: an interleaved unsafe call splits the burst, so the later spawns start only after the earlier ones finish.";
+
+/** The instant the instructions show as an example, derived so a format change cannot
+ *  leave the rule describing a shape nothing writes. */
+const STAMP_EXAMPLE = formatClockUtc(Date.UTC(2026, 10, 5, 13, 10, 4));
+
+/** How to read the only clock the agent gets. Every prompt is stamped on the wire with
+ *  the time its transcript entry was written; nothing else carries a time. */
+export const TIME_STAMP_RULE = `Each prompt you receive is stamped with the host clock at the moment it was sent, in UTC, on a bracketed line above the text: \`[${STAMP_EXAMPLE}]\`. That stamp is the only clock you have. Read elapsed time by subtracting two stamps and treat the difference as the real gap it is: a gap of hours means hours passed, not that the conversation paused. Nothing else you receive is stamped, and the stamps follow the host clock even when it jumps, so do not reason about time from anything else.`;

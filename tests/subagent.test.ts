@@ -12,7 +12,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { CONTEXT_BOUND_RULE } from "../src/loop/compaction.js";
 import { bridgeMcpTools } from "../src/mcp/registry.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import { DELEGATION_TRIGGER } from "../src/prompt-fragments.js";
+import { DELEGATION_TRIGGER, TIME_STAMP_RULE } from "../src/prompt-fragments.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerPlanTool } from "../src/tools/plan.js";
@@ -1747,6 +1747,10 @@ describe("subagent prompt", () => {
     // parent that folds it cannot describe the same event differently.
     expect(SUBAGENT_BASE_SYSTEM).toContain(CONTEXT_BOUND_RULE);
     expect(SUBAGENT_BASE_SYSTEM).toContain("no turn, step or tool-call budget");
+  });
+
+  it("tells the child how to read its prompt's clock stamp", () => {
+    expect(SUBAGENT_BASE_SYSTEM).toContain(TIME_STAMP_RULE);
   });
 
   it("never tells a child to spawn, because it has no spawn tool", () => {

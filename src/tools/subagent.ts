@@ -27,6 +27,7 @@ import {
   DELEGATION_WAVE_RULE,
   NEGATIVE_CLAIM_RULE,
   SHARED_WORKSPACE_SAFETY,
+  TIME_STAMP_RULE,
   TUI_FORMATTING_RULES,
   escalationContract,
 } from "../prompt-fragments.js";
@@ -232,6 +233,7 @@ Rules:
 - You must return an answer. Ending a run with nothing is a failure, and nobody will ask you again: stop calling tools and return the best answer you have when the task is done, naming what you could not verify.
 - There is no turn, step or tool-call budget. Nothing stops you for working long; if you believe you are near a limit or a maximum, you are not.
 - ${CONTEXT_BOUND_RULE}
+- ${TIME_STAMP_RULE}
 
 ${NEGATIVE_CLAIM_RULE}
 

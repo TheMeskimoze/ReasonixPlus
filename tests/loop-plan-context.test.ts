@@ -7,6 +7,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
+import { withoutClockStamp } from "./support/clock-stamp.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 let home: string;
 let previous: [string | undefined, string | undefined];
@@ -130,7 +131,7 @@ it("injects the plan note on the turn's first request, not on every iteration", 
   expect(captured).toHaveLength(2);
   expect(planNotes(captured[0]!.messages)).toHaveLength(1);
   // The turn's own query stays the last message; the note sits above it.
-  expect(String(captured[0]!.messages.at(-1)?.content)).toBe("go");
+  expect(withoutClockStamp(captured[0]!.messages.at(-1)?.content ?? null)).toBe("go");
   expect(planNotes(captured[1]!.messages)).toHaveLength(0);
 });
 

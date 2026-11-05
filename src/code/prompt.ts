@@ -7,6 +7,7 @@ import {
   DELEGATION_TRIGGER,
   DELEGATION_WAVE_RULE,
   SHARED_WORKSPACE_SAFETY,
+  TIME_STAMP_RULE,
   TUI_FORMATTING_RULES,
   escalationContract,
 } from "../prompt-fragments.js";
@@ -304,6 +305,10 @@ Exploration requests do not authorize edits. Modify files only when the user req
 This harness enforces no turn, step or tool-call budget. Nothing stops you for working long, and no counter is running that you should conserve against. A belief that you are near a limit, a budget or a maximum is always wrong here: keep working until the task is done.
 
 ${CONTEXT_BOUND_RULE}
+
+# Time
+
+${TIME_STAMP_RULE}
 
 # Planning tools
 
