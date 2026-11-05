@@ -27,3 +27,12 @@ With a search tool (\`search_content\`, \`grep\`, web search), search FIRST:
 - Nothing → state the absence WITH the query as evidence: \`No callers of \\\`foo()\\\` found (search_content "foo").\`
 
 With no search tool, qualify: "I have not verified this." Never assert absence with fake authority.`;
+
+/** When a session's main agent splits work out. One text for the prompt section and the
+ *  tool spec, so a hard task reads the same on both surfaces. */
+export const DELEGATION_TRIGGER =
+  "Spawn when the work splits into 2+ independent subtasks, or when a task is hard and wide: several unknowns that can be settled separately, a sweep across many files or servers, or a search whose trail you do not need to keep. Do a single grep, 1-3 file cross-references, work that needs the user, and work whose intermediate results you must track, yourself.";
+
+/** A fan-out is one batch or it degrades into serial spawns. */
+export const DELEGATION_WAVE_RULE =
+  "Issue independent spawns together, with no write, shell or MCP call between them: an interleaved unsafe call splits the burst, so the later spawns start only after the earlier ones finish.";

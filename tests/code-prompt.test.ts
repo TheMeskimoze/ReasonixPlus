@@ -9,6 +9,13 @@ import {
   SYSTEM_APPEND_MAX_CHARS,
   codeSystemPrompt,
 } from "../src/code/prompt.js";
+import {
+  COMPACTION_SUMMARY_PREFIX,
+  CONTEXT_BOUND_RULE,
+  DROPPED_WORK_NOTICE_PREFIX,
+  FOLD_NOTICE_PREFIX,
+} from "../src/loop/compaction.js";
+import { DELEGATION_TRIGGER } from "../src/prompt-fragments.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
@@ -291,6 +298,9 @@ describe("codeSystemPrompt", () => {
       const out = codeSystemPrompt(root, { configPath: cfgPath });
       expect(out).not.toContain("spawn_subagent");
       expect(out).not.toContain("# Subagents");
+      // The delegation rule rides with the section, so a session without the tool is
+      // never told to split work it cannot split.
+      expect(out).not.toContain(DELEGATION_TRIGGER);
     });
 
     it("renders the usage and task-authoring guidance only for an opted-in session", () => {
@@ -300,7 +310,10 @@ describe("codeSystemPrompt", () => {
       // Usage rule + how to write the brief, both load-bearing.
       expect(out).toContain("The task is the whole brief");
       expect(out).toContain("**Where to look**");
-      expect(out).toContain("**Default: don't delegate.**");
+      expect(out).toContain(DELEGATION_TRIGGER);
+      // The inverted default is prompt-only framing, so it is not covered by the shared
+      // trigger text: a hard task must not read as a solo task.
+      expect(out).toContain("Splitting is not a last resort.");
     });
 
     it("keeps the disabled prompt free of the section's scar", () => {
@@ -560,5 +573,25 @@ describe("prompt hardening", () => {
   it("tracks the persisted edit mode when the host does not pass one", () => {
     writeFileSync(cfgPath, JSON.stringify({ editMode: "never-ask" }), "utf8");
     expect(codeSystemPrompt(root)).toContain("Edit gate mode: **Never Ask**");
+  });
+
+  it("states the one real bound instead of claiming unbounded memory", () => {
+    // "No limit" is true of effort and false of memory, so the prefix carries the one
+    // shared rule instead of a second spelling of it.
+    expect(CODE_SYSTEM_PROMPT).toContain("# No limits");
+    expect(CODE_SYSTEM_PROMPT).toContain("no turn, step or tool-call budget");
+    expect(CODE_SYSTEM_PROMPT).toContain(CONTEXT_BOUND_RULE);
+  });
+
+  it("names every fold marker the loop writes", () => {
+    // Named by the shared rule from the constants the loop emits, so a rename cannot
+    // leave the prompts describing a marker nothing writes.
+    for (const marker of [
+      COMPACTION_SUMMARY_PREFIX,
+      FOLD_NOTICE_PREFIX,
+      DROPPED_WORK_NOTICE_PREFIX,
+    ]) {
+      expect(CONTEXT_BOUND_RULE).toContain(marker);
+    }
   });
 });

@@ -15,11 +15,27 @@ export const SUMMARIZER_INPUT_MAX_TOKENS = 100_000;
 
 export const COMPACTION_SUMMARY_PREFIX = "[COMPACT-SUMMARY]";
 export const DROPPED_WORK_NOTICE_PREFIX = "[DROPPED-WORK SUMMARY]";
+export const FOLD_NOTICE_PREFIX = "[CONTEXT-FOLDED]";
 
 const TRANSCRIPT_MESSAGE_MAX_CHARS = 4_000;
 const DIGEST_ENTRY_MAX_CHARS = 160;
 const NOTICE_REPLY_MAX_CHARS = 300;
 const NOTICE_PROMPT_MAX_CHARS = 120;
+
+/** What a fold costs a reader, stated once for the standing rule and the notice. */
+const FOLD_DETAIL_LOSS =
+  "A fold keeps work going but not detail: a summary carries decisions, file paths and intent, and drops most exact bytes, offsets, counts and line numbers.";
+
+/** The action a reader of a folded span must take before trusting a detail from it. */
+const RE_READ_HINT = "Re-read a file or re-run a command before relying on a specific value.";
+
+/** The one rule about memory bounds. Every agent prompt interpolates this text, so a
+ *  parent and a child cannot describe the fold differently. */
+export const CONTEXT_BOUND_RULE = `The one bound that is real is the context window, and it bounds memory rather than effort. As the request approaches that window the harness folds the log: the older span becomes a summary marked ${COMPACTION_SUMMARY_PREFIX} with a notice marked ${FOLD_NOTICE_PREFIX}, the recent tail survives verbatim, and a fold that cannot produce a summary lists the files and commands it dropped under ${DROPPED_WORK_NOTICE_PREFIX} instead. ${FOLD_DETAIL_LOSS} Put the plan, the exact values you measured and every partial finding in a file the moment you have them. ${RE_READ_HINT}`;
+
+/** Body of the notice that follows a summary fold, composed from the sentences the
+ *  standing rule already states. */
+const FOLD_NOTICE_BODY = `Earlier turns of this conversation were folded into the summary above. ${FOLD_DETAIL_LOSS} ${RE_READ_HINT}`;
 
 export function isCompactionSummary(m: ChatMessage): boolean {
   return messageText(m).trimStart().startsWith(COMPACTION_SUMMARY_PREFIX);
@@ -27,6 +43,11 @@ export function isCompactionSummary(m: ChatMessage): boolean {
 
 export function isDroppedWorkNotice(m: ChatMessage): boolean {
   return messageText(m).trimStart().startsWith(DROPPED_WORK_NOTICE_PREFIX);
+}
+
+/** The notice a summary fold installs behind its summary, stating what the fold cost. */
+export function isFoldNotice(m: ChatMessage): boolean {
+  return messageText(m).trimStart().startsWith(FOLD_NOTICE_PREFIX);
 }
 
 /** The rolled-up summary body (prefix stripped) from a compacted message list, or
@@ -47,7 +68,7 @@ export function isUserPrompt(m: ChatMessage): boolean {
 }
 
 function isLegacy(m: ChatMessage): boolean {
-  return isCompactionSummary(m) || isDroppedWorkNotice(m);
+  return isCompactionSummary(m) || isDroppedWorkNotice(m) || isFoldNotice(m);
 }
 
 function isPlainAssistantFinal(m: ChatMessage): boolean {
@@ -180,7 +201,7 @@ export function buildDroppedWorkNotice(digest: ToolActivityDigest): string {
     ...section("Folded requests", digest.foldedPrompts),
   ];
   if (digest.lastReply) lines.push(`Last reply in dropped span: ${digest.lastReply}`);
-  lines.push("Re-read files or re-run commands if you need full detail.");
+  lines.push(RE_READ_HINT);
   return lines.join("\n");
 }
 
@@ -432,8 +453,9 @@ export function renderDeterministic(plan: CompactionPlan): CompactionResult | nu
   return summarizePlan(plan, out);
 }
 
-/** LLM path: one rolling summary message up front (Gemini state-snapshot
- *  placement), everything folded behind it, no inline notices. */
+/** LLM path: one rolling summary up front (Gemini state-snapshot placement), a
+ *  fold notice behind it, then the kept tail. The notice stands alone so the next
+ *  fold integrates a clean summary and cannot accumulate notices into it. */
 export function renderWithSummary(
   plan: CompactionPlan,
   summaryText: string,
@@ -442,6 +464,7 @@ export function renderWithSummary(
   if (!text) return null;
   const out: ChatMessage[] = [
     { role: "user", synthetic: true, content: `${COMPACTION_SUMMARY_PREFIX}\n${text}` },
+    { role: "user", synthetic: true, content: `${FOLD_NOTICE_PREFIX}\n${FOLD_NOTICE_BODY}` },
   ];
   for (const i of plan.keptIndices) out.push(plan.source[i]!);
   return summarizePlan(plan, out);

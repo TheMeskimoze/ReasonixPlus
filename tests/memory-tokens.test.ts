@@ -20,11 +20,14 @@ import {
 import {
   COMPACTION_SUMMARY_PREFIX,
   DROPPED_WORK_NOTICE_PREFIX,
+  FOLD_NOTICE_PREFIX,
   buildCompactionRequest,
   buildDroppedWorkNotice,
   buildVerificationRequest,
+  compactionSummaryBody,
   isCompactionSummary,
   isDroppedWorkNotice,
+  isFoldNotice,
   planCompaction,
   renderDeterministic,
   renderTranscript,
@@ -1143,6 +1146,39 @@ describe("compaction", () => {
       expect(estimateConversationTokens(result!.messages)).toBeLessThan(
         estimateConversationTokens(messages),
       );
+    });
+
+    it("announces the fold behind the summary without touching the summary body", () => {
+      const messages: ChatMessage[] = [
+        ...bigRoundTrip("a"),
+        ...bigRoundTrip("b"),
+        user("final ask"),
+        assistant("final answer"),
+      ];
+      const plan = planCompaction(messages, { targetTokens: 1_500, preserveRecentTokens: 500 });
+      const result = renderWithSummary(plan!, "The goal was refactoring widgets.");
+      expect(result).not.toBeNull();
+      expect(result!.messages.filter((m) => isFoldNotice(m))).toHaveLength(1);
+      // The notice is its own message, so the rolling summary body stays exactly the
+      // model's text and cannot accumulate notices across folds.
+      expect(compactionSummaryBody(result!.messages)).toBe("The goal was refactoring widgets.");
+    });
+
+    it("drops a previous fold notice instead of folding it forward", () => {
+      const folded: ChatMessage[] = [
+        { role: "user", synthetic: true, content: `${COMPACTION_SUMMARY_PREFIX}\nprior summary` },
+        { role: "user", synthetic: true, content: `${FOLD_NOTICE_PREFIX}\nprior notice` },
+        ...bigRoundTrip("a"),
+        ...bigRoundTrip("b"),
+        user("go on"),
+        assistant("working"),
+      ];
+      const noticeIdx = folded.findIndex((m) => isFoldNotice(m));
+      const plan = planCompaction(folded, { targetTokens: 1_500, preserveRecentTokens: 400 });
+      expect(plan).not.toBeNull();
+      expect(plan!.priorSummary).toBe("prior summary");
+      expect(plan!.keptIndices).not.toContain(noticeIdx);
+      expect(plan!.foldedIndices).not.toContain(noticeIdx);
     });
 
     it("refuses an empty summary and a summary that would not shrink", () => {

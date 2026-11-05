@@ -1,8 +1,11 @@
 import { dirname, join, sep } from "node:path";
 import { type EditMode, loadEditMode } from "../config.js";
+import { CONTEXT_BOUND_RULE } from "../loop/compaction.js";
 import { applyMemoryBlock, readCappedTextFile, truncateWithMarker } from "../memory/read-capped.js";
 import { type MemoryLayer, applyMemoryLayers, memoryStackLayers } from "../memory/user.js";
 import {
+  DELEGATION_TRIGGER,
+  DELEGATION_WAVE_RULE,
   SHARED_WORKSPACE_SAFETY,
   TUI_FORMATTING_RULES,
   escalationContract,
@@ -203,9 +206,9 @@ Bad: \`"look into the auth code"\`. Good: \`"List every caller of validateToken 
 
 **Tools.** \`tools\` narrows the child's toolset: exact names, or \`server_*\` for a whole MCP server. Omit it to hand over everything except delegation and plan tools (a child never spawns grandchildren).
 
-**Default: don't delegate.** Direct tools are cheaper and keep evidence in your context. Spawn only for true parallelism (2+ independent tasks in one batch) or context blow-up (>10 file reads where you need only the conclusion). Skip a single grep, 1-3 file cross-references, anything needing user interaction, or work whose intermediate results you must track.
+**Splitting is not a last resort.** Direct tools are cheaper and keep evidence in your context, but a hard task ground out alone spends the one budget that matters: this conversation. Split before you start, not after the task stalls. ${DELEGATION_TRIGGER}
 
-**Fan-out is one batch.** Issue independent spawns together, with no write, shell or MCP call between them: an interleaved unsafe call splits the burst, so later spawns start only after the earlier ones finish.`;
+**Fan-out is one batch.** ${DELEGATION_WAVE_RULE}`;
 
 /** Rendered only when the session's web_search drives a managed browser. Any other engine
  *  reads pages one at a time, so the driving loop would describe a page it cannot open. */
@@ -299,6 +302,8 @@ Exploration requests do not authorize edits. Modify files only when the user req
 # No limits
 
 This harness enforces no turn, step or tool-call budget. Nothing stops you for working long, and no counter is running that you should conserve against. A belief that you are near a limit, a budget or a maximum is always wrong here: keep working until the task is done.
+
+${CONTEXT_BOUND_RULE}
 
 # Planning tools
 

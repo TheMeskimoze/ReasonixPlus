@@ -13,6 +13,7 @@ import {
 } from "../config.js";
 import type { ResolvedHook } from "../hooks.js";
 import { CacheFirstLoop } from "../loop.js";
+import { CONTEXT_BOUND_RULE } from "../loop/compaction.js";
 import { isQuotaExhaustedError } from "../loop/errors.js";
 import { KEEP_LAST_IMAGES } from "../loop/image-retry.js";
 import type { WarningCause } from "../loop/types.js";
@@ -22,6 +23,8 @@ import { ImmutablePrefix } from "../memory/runtime.js";
 import { timestampSuffix } from "../memory/session.js";
 import { OPENCODE_REQUIRED_TOOL } from "../opencode-identity.js";
 import {
+  DELEGATION_TRIGGER,
+  DELEGATION_WAVE_RULE,
   NEGATIVE_CLAIM_RULE,
   SHARED_WORKSPACE_SAFETY,
   TUI_FORMATTING_RULES,
@@ -219,7 +222,7 @@ export interface SubagentToolOptions {
 }
 
 /** Memory-stable prefix — shared across spawns, cached. The model-dependent escalation contract is appended per spawn so a pro spawn doesn't get told it's running on flash (#582). */
-const SUBAGENT_BASE_SYSTEM = `You are a Reasonix+ subagent. The parent agent spawned you to handle one focused subtask, then return.
+export const SUBAGENT_BASE_SYSTEM = `You are a Reasonix+ subagent. The parent agent spawned you to handle one focused subtask, then return.
 
 Rules:
 - Stay on the task you were given. Do not expand scope.
@@ -228,6 +231,7 @@ Rules:
 - Write that message for the parent agent to act on, and for a person to read: what you actually did (the files you read or changed, the commands you ran), what you found, what you verified and what you only assumed, and why you stopped. Concrete names and results, no narration of intent, and a few lines rather than a transcript of every step.
 - You must return an answer. Ending a run with nothing is a failure, and nobody will ask you again: stop calling tools and return the best answer you have when the task is done, naming what you could not verify.
 - There is no turn, step or tool-call budget. Nothing stops you for working long; if you believe you are near a limit or a maximum, you are not.
+- ${CONTEXT_BOUND_RULE}
 
 ${NEGATIVE_CLAIM_RULE}
 
@@ -818,8 +822,7 @@ export function registerSubagentTool(
   parentRegistry.register({
     name: SUBAGENT_TOOL_NAME,
     parallelSafe: true,
-    description:
-      "Run one subtask in an isolated subagent and get back only its final answer. It shares your sandbox, safety rules and limits, but has none of your conversation: put everything it needs in 'task', including what to check and what the answer must contain. **Prefer direct tools**; spawn for parallel fan-out (2+ independent tasks issued in one batch) or when the work needs more than 10 reads whose trail you do not want to keep. Issue a fan-out as consecutive calls: a write, shell or MCP call between two spawns splits them into separate waves, and the later ones then start only after the earlier ones finish.",
+    description: `Run one subtask in an isolated subagent and get back only its final answer. It shares your sandbox, safety rules and limits, but has none of your conversation: put everything it needs in 'task', including what to check and what the answer must contain. ${DELEGATION_TRIGGER} ${DELEGATION_WAVE_RULE}`,
     parameters: {
       type: "object",
       properties: {

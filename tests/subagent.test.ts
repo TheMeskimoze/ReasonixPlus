@@ -9,13 +9,16 @@ import { planRepository } from "../src/code/plans.js";
 import { modelUsableFor, writeConfig } from "../src/config.js";
 import { PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
+import { CONTEXT_BOUND_RULE } from "../src/loop/compaction.js";
 import { bridgeMcpTools } from "../src/mcp/registry.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { DELEGATION_TRIGGER } from "../src/prompt-fragments.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerPlanTool } from "../src/tools/plan.js";
 import {
   NEVER_INHERITED_TOOLS,
+  SUBAGENT_BASE_SYSTEM,
   type SubagentEvent,
   type SubagentResult,
   type SubagentSink,
@@ -1727,4 +1730,29 @@ describe("subagent fan-out — one batch is one wave", () => {
     expect(spawned.map((ev) => ev.waveSize)).toEqual([3, 3]);
     expect(startsBeforeFirstEnd(events)).toBe(true);
   }, 30_000);
+});
+
+describe("subagent prompt", () => {
+  it("gives the tool spec the same spawn trigger as the prompt section", () => {
+    // The decision rule is one text in src/prompt-fragments.ts; a hard task must not be
+    // a fan-out in the spec and a solo grind in the prompt.
+    const parent = new ToolRegistry();
+    registerSubagentTool(parent, { client: makeClient([{ content: "ok" }]) });
+    const spec = parent.specs().find((s) => s.function.name === "spawn_subagent");
+    expect(spec?.function.description).toContain(DELEGATION_TRIGGER);
+  });
+
+  it("carries the shared context-bound rule instead of its own wording of it", () => {
+    // One rule text lives in src/loop/compaction.ts: a child that gets folded and the
+    // parent that folds it cannot describe the same event differently.
+    expect(SUBAGENT_BASE_SYSTEM).toContain(CONTEXT_BOUND_RULE);
+    expect(SUBAGENT_BASE_SYSTEM).toContain("no turn, step or tool-call budget");
+  });
+
+  it("never tells a child to spawn, because it has no spawn tool", () => {
+    // Depth-1 cap: spawn_subagent stays in NEVER_INHERITED_TOOLS, so delegation guidance
+    // in a child prompt would point at a tool the child cannot call.
+    expect(SUBAGENT_BASE_SYSTEM).not.toContain(DELEGATION_TRIGGER);
+    expect(NEVER_INHERITED_TOOLS.has("spawn_subagent")).toBe(true);
+  });
 });
