@@ -5819,11 +5819,6 @@ const TabRuntime = memo(function TabRuntime({
           <CapabilityDialog
             key={state.mcpSetup ? `setup-${state.mcpSetupRevision}` : "duplicate"}
             title={state.mcpSetup ? "Set up this chat" : t("app.titlebar.duplicateSession")}
-            hint={
-              state.mcpSetup
-                ? "Choose what this chat starts with. Every choice here is locked for the session, even after a restart."
-                : t("app.duplicate.hint")
-            }
             servers={
               state.mcpSetup ? state.mcpSetup.servers : (state.settings?.capabilityPrefill ?? [])
             }

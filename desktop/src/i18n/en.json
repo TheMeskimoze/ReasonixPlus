@@ -598,7 +598,6 @@
       "duplicate": "Duplicate"
     },
     "duplicate": {
-      "hint": "Open a new session seeded from this conversation's most recent context, on the same models. Pick what the copy may use; it starts working from that context right away.",
       "confirm": "Duplicate",
       "back": "Back",
       "noServers": "No MCP servers configured — the copy runs without any."

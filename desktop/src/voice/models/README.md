@@ -81,6 +81,17 @@ one worker alive, so the interpreter, the weights and the model graph are paid
 for once per session. The worker is replaced when another model or device is
 selected, stops after ten idle minutes, and is closed with the app.
 
+A `.bark` archive is entropy coded, and decoding it is the larger half of a
+cold load: 51 s end to end for the 163 MB Bark 3.0 archive on the dev machine,
+21 s of it the decode. The worker keeps that one result beside the checkpoint as
+`<weights>.decoded.pt`, so a restart decodes once and every later load reads the
+cache instead: the same load measured 26 s with the cache, and the gap grows
+with the 1.25 GB Pro archive. The cache belongs to the files that produced it (a
+changed weights file or loader invalidates it by size and mtime), and it is
+written after the model is up, so a first dictation never waits for it. One
+cache per engine is kept, so the footprint is one checkpoint rather than one per
+installed model, and any problem reading it falls back to decoding.
+
 Each command reports rather than retries: a matching manifest is reused instead
 of refetching, a half-provisioned runtime directory is cleared before a retry,
 network requests fail on a stalled socket instead of hanging, and the loader is

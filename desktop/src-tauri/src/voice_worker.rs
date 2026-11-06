@@ -2,6 +2,8 @@
 //!
 //! The worker speaks newline-delimited JSON on stdin/stdout, so a dictation
 //! costs inference instead of a fresh interpreter, torch import and model load.
+//! The weights it decodes are cached beside the checkpoint, so an app restart
+//! decodes once and reads the result on every later load.
 
 use crate::voice_host::{no_window, tail};
 use serde_json::{json, Value};
@@ -26,16 +28,86 @@ static REAPER: AtomicBool = AtomicBool::new(false);
 
 /// Drives one transcription inside the long-lived worker process.
 const WORKER: &str = r#"
+import gc
 import json
+import os
 import sys
+import threading
 
 _model = None
 _format = None
 _processor = None
 
+# A decoded checkpoint is only valid for the exact files that produced it; bump this
+# when the payload's shape changes, and an older file is ignored rather than read.
+CACHE_VERSION = 1
+CACHE_SUFFIX = ".decoded.pt"
+
 
 def _describe(error):
     return f"{type(error).__name__}: {error}"
+
+
+def _signature(*paths):
+    """The files a cache is only valid against: the weights and the loader that decoded them."""
+    parts = []
+    for path in paths:
+        stat = path.stat()
+        parts.append(f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}")
+    return "|".join(parts)
+
+
+def _read_cache(path, signature):
+    import torch
+
+    try:
+        payload = torch.load(path, map_location="cpu", mmap=True)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("version") != CACHE_VERSION or payload.get("signature") != signature:
+        return None
+    state = payload.get("state")
+    config = payload.get("config")
+    if not isinstance(state, dict) or not isinstance(config, dict):
+        return None
+    return state, config
+
+
+def _prune_caches(keep):
+    """One decoded checkpoint per engine: a second model replaces the first cache, so the
+    footprint stays at one checkpoint instead of one per installed model. A half-written
+    file left by a kill is swept with it."""
+    for other in keep.parent.parent.glob("*/*" + CACHE_SUFFIX + "*"):
+        if other == keep:
+            continue
+        try:
+            other.unlink()
+        except OSError:
+            pass
+
+
+def _write_cache(path, signature, state, config):
+    import torch
+
+    part = path.with_name(path.name + ".part")
+    try:
+        torch.save(
+            {"version": CACHE_VERSION, "signature": signature, "state": state, "config": config},
+            part,
+        )
+        os.replace(part, path)
+    except Exception:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        return
+    try:
+        _prune_caches(path)
+    except Exception:
+        pass
 
 
 def _load(request):
@@ -55,7 +127,51 @@ def _load(request):
         )
         loader = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(loader)
-        _model = loader.load_model(str(model_dir / weights), device=device)
+
+        # The loader splits decoding from building, so the decoded checkpoint can stand in
+        # for its own decode and every part of the build stays the loader's business.
+        weights_path = model_dir / weights
+        cache_path = model_dir / (weights + CACHE_SUFFIX)
+        try:
+            signature = _signature(weights_path, model_dir / loader_name)
+        except OSError:
+            signature = ""
+        cached = _read_cache(cache_path, signature) if signature else None
+
+        original = loader.load_state_dict
+        captured = {}
+        try:
+            if cached is None:
+
+                def capture(*args, **kwargs):
+                    state, config = original(*args, **kwargs)
+                    captured["state"] = state
+                    captured["config"] = config
+                    return state, config
+
+                loader.load_state_dict = capture
+            else:
+
+                def serve(*args, _cached=cached, **kwargs):
+                    return _cached
+
+                loader.load_state_dict = serve
+            _model = loader.load_model(str(weights_path), device=device)
+        finally:
+            loader.load_state_dict = original
+
+        if cached is None and signature and "state" in captured:
+            threading.Thread(
+                target=_write_cache,
+                args=(cache_path, signature, captured["state"], captured["config"]),
+                daemon=True,
+            ).start()
+
+        # The cache is a build input, not a second copy: release the mapping so the model
+        # can still be deleted, and the checkpoint file replaced, while this worker is warm.
+        cached = None
+        captured = {}
+        gc.collect()
         _processor = loader
     else:
         import torch
@@ -457,6 +573,28 @@ mod tests {
             "checkpoint path"
         );
         assert!(!WORKER.contains("import librosa"));
+    }
+
+    #[test]
+    fn the_worker_script_caches_the_decoded_checkpoint() {
+        // The decode is the expensive half of a load, so its result is kept beside the
+        // checkpoint and read back instead of decoded again on every later start.
+        assert!(WORKER.contains(r#"CACHE_SUFFIX = ".decoded.pt""#), "cache file");
+        assert!(WORKER.contains("mmap=True"), "cache read is mapped");
+        assert!(WORKER.contains("os.replace(part, path)"), "cache write is atomic");
+        assert!(WORKER.contains("def _prune_caches"), "one cache per engine");
+        assert!(
+            WORKER.contains("if cached is None and signature"),
+            "a decode that was already cached is never written twice"
+        );
+        assert!(
+            WORKER.contains("except Exception:\n        return None"),
+            "a broken cache answers None so the decode still runs"
+        );
+        assert!(
+            WORKER.contains("loader.load_state_dict = original"),
+            "the loader's own decode is restored after the build"
+        );
     }
 
     #[test]

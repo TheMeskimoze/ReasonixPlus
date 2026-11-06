@@ -780,7 +780,6 @@ describe("mcp-setup", () => {
     render(
       <CapabilityDialog
         title="Set up this chat"
-        hint="Choose what this chat starts with. Every choice here is locked for the session, even after a restart."
         servers={list}
         plugins={pluginList}
         skills={skillList}
@@ -846,6 +845,15 @@ describe("mcp-setup", () => {
       expect(answerOf(onConfirm).skills).toEqual(["churn-analysis"]);
     });
 
+    it("shows every capability as its name alone", () => {
+      renderDialog();
+      // A row is its name and its switch: no skill description, no server tag under it.
+      expect(screen.queryByText("Predicts churn.")).toBeNull();
+      expect(screen.queryByText("built-in")).toBeNull();
+      expect(screen.getByRole("switch", { name: "churn-analysis" })).toBeTruthy();
+      expect(screen.getByRole("switch", { name: "playwright" })).toBeTruthy();
+    });
+
     it("adds and drops a skill independently of the plugin set", () => {
       const { onConfirm } = renderDialog();
       fireEvent.click(screen.getByRole("switch", { name: "seo-audit" }));
@@ -856,10 +864,11 @@ describe("mcp-setup", () => {
       expect(answer.plugins).toEqual(["notfair"]);
     });
 
-    it("says so when no standalone skill is installed and points at the plugin rule", () => {
+    it("drops the Skills column when no standalone skill is installed", () => {
       renderDialog({ skillList: [] });
-      expect(screen.getByText(/No standalone skill installed/)).toBeTruthy();
-      expect(screen.getByText(/Skills a plugin ships arrive with that plugin/)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "Skills" })).toBeNull();
+      expect(screen.queryByText(/No standalone skill installed/)).toBeNull();
+      expect(screen.getByRole("region", { name: "Plugins" })).toBeTruthy();
     });
 
     describe("skills one install delivered", () => {
@@ -872,10 +881,12 @@ describe("mcp-setup", () => {
 
       it("offers one switch for the repository, not one per skill", () => {
         renderDialog({ skillList: repositorySkills });
-        expect(screen.getByRole("switch", { name: "LLMQuant/skills" })).toBeTruthy();
+        const group = screen.getByRole("switch", { name: "LLMQuant/skills" });
+        expect(group).toBeTruthy();
         expect(screen.queryByRole("switch", { name: "llmquant-credit" })).toBeNull();
         expect(screen.queryByRole("button", { name: /skills$/ })).toBeNull();
-        expect(screen.getByText("2/3 on")).toBeTruthy();
+        // Two members of three are on: the group reads as off until all of it is on.
+        expect(group.getAttribute("aria-checked")).toBe("false");
       });
 
       it("confirms the members that start switched on", () => {
@@ -886,8 +897,9 @@ describe("mcp-setup", () => {
 
       it("switches the rest on from the group switch", () => {
         const { onConfirm } = renderDialog({ skillList: repositorySkills });
-        fireEvent.click(screen.getByRole("switch", { name: "LLMQuant/skills" }));
-        expect(screen.getByText("3/3 on")).toBeTruthy();
+        const group = screen.getByRole("switch", { name: "LLMQuant/skills" });
+        fireEvent.click(group);
+        expect(group.getAttribute("aria-checked")).toBe("true");
         fireEvent.click(screen.getByText("Confirm and start"));
         expect([...answerOf(onConfirm).skills].sort()).toEqual([
           "llmquant-commodities",
@@ -901,7 +913,7 @@ describe("mcp-setup", () => {
         const group = () => screen.getByRole("switch", { name: "LLMQuant/skills" });
         fireEvent.click(group());
         fireEvent.click(group());
-        expect(screen.getByText("0/3 on")).toBeTruthy();
+        expect(group().getAttribute("aria-checked")).toBe("false");
         fireEvent.click(screen.getByText("Confirm and start"));
         expect(answerOf(onConfirm).skills).toEqual([]);
       });
@@ -914,9 +926,40 @@ describe("mcp-setup", () => {
       });
     });
 
-    it("says so when no plugin is installed", () => {
+    it("drops the Plugins column when none is installed", () => {
       renderDialog({ pluginList: [] });
-      expect(screen.getByText(/No plugin installed/)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "Plugins" })).toBeNull();
+      expect(screen.queryByText(/No plugin installed/)).toBeNull();
+    });
+
+    it("says so once when no kind has a row to offer", () => {
+      renderDialog({ list: [], pluginList: [], skillList: [] });
+      expect(screen.getByText(/No plugin, skill or MCP server installed/)).toBeTruthy();
+      expect(screen.queryByRole("region")).toBeNull();
+      expect(screen.getByRole("switch", { name: "Subagents" })).toBeTruthy();
+    });
+
+    it("sizes each column to a fixed width instead of an equal share", () => {
+      renderDialog();
+      const grid = screen.getByRole("dialog").querySelector(".mcp-setup-caps") as HTMLElement;
+      expect(grid.style.gridTemplateColumns).toBe("repeat(3, minmax(0, 130px))");
+      expect(grid.style.justifyContent).toBe("start");
+    });
+
+    it("counts only the kinds that have rows", () => {
+      renderDialog({ pluginList: [] });
+      const grid = screen.getByRole("dialog").querySelector(".mcp-setup-caps") as HTMLElement;
+      expect(grid.style.gridTemplateColumns).toBe("repeat(2, minmax(0, 130px))");
+    });
+
+    it("pins the name left and the switch right, clipping a name too long for the column", () => {
+      renderDialog();
+      const row = screen.getByRole("switch", { name: "playwright" }).closest("li") as HTMLElement;
+      expect(row.style.justifyContent).toBe("space-between");
+      const name = row.querySelector(".mcp-setup-name") as HTMLElement;
+      expect(name.style.textOverflow).toBe("ellipsis");
+      expect(name.style.whiteSpace).toBe("nowrap");
+      expect(name.getAttribute("title")).toBe("playwright");
     });
 
     it("pre-fills the subagent switch from the session default", () => {
@@ -939,7 +982,7 @@ describe("mcp-setup", () => {
 
     it("still offers the subagent switch when no MCP server is configured", () => {
       const { onConfirm } = renderDialog({ list: [], subagents: false });
-      expect(screen.getByText(/None configured/)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "MCP servers" })).toBeNull();
       fireEvent.click(screen.getByRole("switch", { name: "Subagents" }));
       fireEvent.click(screen.getByText("Confirm and start"));
       const answer = answerOf(onConfirm);
