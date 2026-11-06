@@ -1,5 +1,5 @@
 import { groupSkills, isSkillCollection } from "@reasonix/core-utils";
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import { I } from "../icons";
 import type {
   CapabilityChoice,
@@ -94,38 +94,11 @@ export function CapabilityDialog({
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(0,0,0,0.5)",
-      }}
+      style={OVERLAY_STYLE}
     >
-      <div
-        className="mcp-setup-card"
-        style={{
-          width: 420,
-          maxWidth: "90vw",
-          maxHeight: "80vh",
-          overflow: "auto",
-          padding: 20,
-          borderRadius: 10,
-          background: "var(--card)",
-          color: "var(--fg)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: 8,
-          }}
-        >
-          <h2 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 600 }}>{title}</h2>
+      <div className="mcp-setup-card" style={CARD_STYLE}>
+        <div style={HEADER_STYLE}>
+          <h2 style={TITLE_STYLE}>{title}</h2>
           <button
             type="button"
             className="mini-btn"
@@ -136,37 +109,26 @@ export function CapabilityDialog({
             <I.x size={14} />
           </button>
         </div>
-        <p className="mcp-setup-hint" style={{ margin: "0 0 12px", opacity: 0.75 }}>
+        <p className="mcp-setup-hint" style={HINT_STYLE}>
           {hint}
         </p>
-        <div className="mcp-setup-caps" style={{ maxHeight: "40vh", overflowY: "auto" }}>
-          <CapabilityPicker
-            servers={servers}
-            plugins={plugins}
-            skills={skills}
-            selected={selected}
-            chosenPlugins={chosenPlugins}
-            chosenSkills={chosenSkills}
-            subagents={spawn}
-            onToggleServer={(name) => setSelected((prev) => flipped(prev, name))}
-            onTogglePlugin={(name) => setChosenPlugins((prev) => flipped(prev, name))}
-            onToggleSkills={toggleSkills}
-            onToggleSubagents={() => setSpawn((on) => !on)}
-            emptyHint={emptyHint}
-          />
-        </div>
-        <div
-          className="mcp-setup-actions"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            gap: 8,
-            marginTop: 16,
-            paddingTop: 12,
-            borderTop: "1px solid var(--border)",
-          }}
-        >
+        <CapabilityPicker
+          servers={servers}
+          plugins={plugins}
+          skills={skills}
+          selected={selected}
+          chosenPlugins={chosenPlugins}
+          chosenSkills={chosenSkills}
+          onToggleServer={(name) => setSelected((prev) => flipped(prev, name))}
+          onTogglePlugin={(name) => setChosenPlugins((prev) => flipped(prev, name))}
+          onToggleSkills={toggleSkills}
+          emptyHint={emptyHint}
+        />
+        <div className="mcp-setup-actions" style={ACTIONS_STYLE}>
+          <div style={SUBAGENTS_STYLE}>
+            <span style={SUBAGENTS_TEXT_STYLE}>{SUBAGENTS_LABEL}</span>
+            <Switch on={spawn} label={SUBAGENTS_LABEL} onToggle={() => setSpawn((on) => !on)} />
+          </div>
           <button
             type="button"
             className="btn primary"
@@ -191,8 +153,9 @@ export function CapabilityDialog({
   );
 }
 
-/** The capability rows themselves: the subagent switch, one switch per installed plugin,
- *  one per standalone skill, and one per configured MCP server. */
+/** The captured capability kinds, one column each: a plugin set, a standalone skill set and
+ *  an MCP server set answer different questions, so no kind can push another down the
+ *  dialog and a long list in one column costs nothing to the other two. */
 function CapabilityPicker({
   servers,
   plugins,
@@ -200,11 +163,9 @@ function CapabilityPicker({
   selected,
   chosenPlugins,
   chosenSkills,
-  subagents,
   onToggleServer,
   onTogglePlugin,
   onToggleSkills,
-  onToggleSubagents,
   emptyHint = "None configured. Add servers in Settings, then open a new chat.",
 }: {
   servers: McpSetupServer[];
@@ -216,62 +177,178 @@ function CapabilityPicker({
   chosenPlugins: ReadonlySet<string>;
   /** Ids of the standalone skills currently switched on. */
   chosenSkills: ReadonlySet<string>;
-  subagents: boolean;
   onToggleServer: (name: string) => void;
   onTogglePlugin: (name: string) => void;
   onToggleSkills: (ids: readonly string[], on: boolean) => void;
-  onToggleSubagents: () => void;
   emptyHint?: string;
 }) {
   return (
-    <>
-      <SetupList rows={[{ name: "Subagents", on: subagents, onToggle: onToggleSubagents }]} />
-      <SectionLabel>Plugins</SectionLabel>
-      <SetupList
-        rows={plugins.map((plugin) => ({
-          name: plugin.displayName,
-          on: chosenPlugins.has(plugin.name),
-          onToggle: () => onTogglePlugin(plugin.name),
-        }))}
-        empty="No plugin installed. Install one in Settings, under Plugins, then open a new chat."
-      />
-      <SectionLabel>Skills</SectionLabel>
-      <SkillRows skills={skills} chosen={chosenSkills} onToggle={onToggleSkills} />
-      <SectionLabel>MCP servers</SectionLabel>
-      <SetupList
-        rows={servers.map((server) => ({
-          name: server.name,
-          badge: server.builtin ? "built-in" : undefined,
-          on: selected.has(server.name),
-          onToggle: () => onToggleServer(server.name),
-        }))}
-        empty={emptyHint}
-      />
-    </>
+    <div className="mcp-setup-caps" style={CAPS_GRID}>
+      <CapabilityColumn label="Plugins">
+        <SetupList
+          rows={plugins.map((plugin) => ({
+            name: plugin.displayName,
+            on: chosenPlugins.has(plugin.name),
+            onToggle: () => onTogglePlugin(plugin.name),
+          }))}
+          empty="No plugin installed. Install one in Settings, under Plugins, then open a new chat."
+        />
+      </CapabilityColumn>
+      <CapabilityColumn label="Skills">
+        <SetupList rows={skillRows(skills, chosenSkills, onToggleSkills)} empty={NO_SKILLS_NOTE} />
+      </CapabilityColumn>
+      <CapabilityColumn label="MCP servers">
+        <SetupList
+          rows={servers.map((server) => ({
+            name: server.name,
+            badge: server.builtin ? "built-in" : undefined,
+            on: selected.has(server.name),
+            onToggle: () => onToggleServer(server.name),
+          }))}
+          empty={emptyHint}
+        />
+      </CapabilityColumn>
+    </div>
   );
 }
 
-/** The name column: wide enough for a hyphenated capability name to break inside it, and
- *  capped at a share of the row so a narrow dialog shrinks it rather than squeezing the
- *  description down to one word a line. */
-const NAME_COLUMN = "min(128px, 40%)";
+/** The dialog's frame: a dimmed backdrop with the card centered on it. */
+const OVERLAY_STYLE: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 60,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(0,0,0,0.5)",
+};
 
-/** Name, description and switch. Text wraps inside its own column, so every switch in the
- *  picker shares one vertical line however a row's text breaks. */
-const ROW_COLUMNS = `minmax(0, ${NAME_COLUMN}) minmax(0, 1fr) auto`;
+/** The card: wide enough for three columns of rows beside their switches, and capped so the
+ *  footer never leaves the viewport. */
+const CARD_STYLE: CSSProperties = {
+  width: 880,
+  maxWidth: "94vw",
+  maxHeight: "86vh",
+  display: "flex",
+  flexDirection: "column",
+  padding: 20,
+  borderRadius: 10,
+  background: "var(--card)",
+  color: "var(--fg)",
+};
 
-/** A text column of a capability row: it wraps instead of widening past its share. */
+/** The heading line: the title on the left, the dismiss control on the right. */
+const HEADER_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 8,
+  flexShrink: 0,
+};
+
+const TITLE_STYLE: CSSProperties = { margin: "0 0 6px", fontSize: 13, fontWeight: 600 };
+
+const HINT_STYLE: CSSProperties = { margin: "0 0 12px", opacity: 0.75, flexShrink: 0 };
+
+/** The footer: the subagent flag on the left, the confirm on the right, outside the columns
+ *  so neither the flag nor the confirm can be scrolled away. */
+const ACTIONS_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  marginTop: 16,
+  paddingTop: 12,
+  borderTop: "1px solid var(--border)",
+  flexShrink: 0,
+};
+
+/** The footer's flag: its label beside the switch it names. */
+const SUBAGENTS_STYLE: CSSProperties = { display: "flex", alignItems: "center", gap: 8 };
+
+const SUBAGENTS_TEXT_STYLE: CSSProperties = { opacity: 0.75 };
+
+/** The subagent flag's name, shared by its visible text and its switch's accessible name so
+ *  the two cannot disagree. */
+const SUBAGENTS_LABEL = "Subagents";
+
+/** One switch, wherever it sits: a switch keeps its width when its row's text grows. */
+const SWITCH_STYLE: CSSProperties = { flexShrink: 0 };
+
+/** The three columns. Each one owns its scrolling, so the card's height stays fixed however
+ *  many capabilities are installed. */
+const CAPS_GRID: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 16,
+  flex: 1,
+  minHeight: 0,
+};
+
+/** One column: a heading that stays put and a body that scrolls under it. */
+const COLUMN_STYLE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  minWidth: 0,
+  minHeight: 0,
+};
+
+/** A column's heading: the same for every kind, and never scrolled away. The horizontal
+ *  padding matches a row's, so a heading sits on the same edge as the names under it. */
+const COLUMN_LABEL_STYLE: CSSProperties = {
+  margin: "0 0 6px",
+  padding: "0 8px",
+  flexShrink: 0,
+  fontSize: "0.8em",
+  fontWeight: 600,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  opacity: 0.55,
+};
+
+const COLUMN_BODY_STYLE: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: "auto",
+  scrollbarGutter: "stable",
+  paddingRight: 4,
+};
+
+/** Name and description above the switch, so a row stays readable in a third of the card. */
+const ROW_COLUMNS = "minmax(0, 1fr) auto";
+
+/** The text side of a row: it wraps instead of widening past the column. */
 const ROW_TEXT: CSSProperties = { minWidth: 0, overflowWrap: "anywhere" };
+
+const ROW_TEXT_STACK: CSSProperties = {
+  ...ROW_TEXT,
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+/** A row: its text on the left and its switch in the column that ends at the row's right
+ *  edge, so every switch in a column shares one vertical line. */
+const ROW_STYLE: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: ROW_COLUMNS,
+  alignItems: "center",
+  columnGap: 8,
+  padding: "6px 8px",
+  borderRadius: 6,
+};
+
+/** A row's second line: quieter than its name, whether it reports a description or a
+ *  collection's share of switches. */
+const BADGE_STYLE: CSSProperties = { ...ROW_TEXT, opacity: 0.6, fontSize: "0.85em" };
 
 /** The list of one capability kind. Every kind shares it, so none of them can indent its
  *  rows away from the switch column. */
 const LIST_STYLE: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
 
-/** A kind's heading, the same for every kind the picker lists. */
-const SECTION_LABEL_STYLE: CSSProperties = { margin: "12px 0 6px", opacity: 0.6 };
-
-/** How an empty note reads: the same quiet voice for every kind. */
-const EMPTY_NOTE_STYLE: CSSProperties = { margin: 0, opacity: 0.6 };
+/** How an empty note reads: the same quiet voice for every kind, on the edge its rows would
+ *  have started at. */
+const EMPTY_NOTE_STYLE: CSSProperties = { margin: 0, padding: "0 8px", opacity: 0.6 };
 
 /** The empty note the skills section shows: the only kind whose emptiness has two reasons. */
 const NO_SKILLS_NOTE =
@@ -279,18 +356,25 @@ const NO_SKILLS_NOTE =
 
 /** One capability a row switches, in the shape a kind's list hands it to the row. */
 type SetupEntry = {
+  /** The row's identity when it is not its label, as a repository key is not its display
+   *  name: two kinds of group can share a label but never a key. */
+  identity?: string;
   name: string;
   badge?: string;
   on: boolean;
   onToggle: () => void;
 };
 
-/** A kind's heading: the label every capability section of the picker opens with. */
-function SectionLabel({ children }: { children: string }) {
+/** One kind's column: the heading names the kind, the body holds its rows and scrolls under
+ *  that heading. */
+function CapabilityColumn({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <p className="mcp-setup-hint" style={SECTION_LABEL_STYLE}>
-      {children}
-    </p>
+    <section aria-label={label} style={COLUMN_STYLE}>
+      <p className="mcp-setup-hint" style={COLUMN_LABEL_STYLE}>
+        {label}
+      </p>
+      <div style={COLUMN_BODY_STYLE}>{children}</div>
+    </section>
   );
 }
 
@@ -303,60 +387,63 @@ function EmptyNote({ children }: { children: string }) {
   );
 }
 
-/** One kind's rows: the same list, the same alternating stripe and the same row for every
- *  kind, so a plugin, a skill and an MCP server cannot lay their switches out differently. */
+/** The list of one capability kind. Every kind shares it, so none of them can indent its
+ *  rows away from the switch column, stripe them differently, or forget the note it shows
+ *  when it has no rows. */
 function SetupList({ rows, empty }: { rows: SetupEntry[]; empty?: string }) {
   if (rows.length === 0) return empty ? <EmptyNote>{empty}</EmptyNote> : null;
   return (
     <ul className="mcp-setup-list" style={LIST_STYLE}>
-      {rows.map((row, i) => (
-        <SetupRow key={row.name} {...row} striped={i % 2 === 1} />
+      {rows.map(({ identity, ...row }, i) => (
+        <SetupRow key={identity ?? row.name} {...row} striped={i % 2 === 1} />
       ))}
     </ul>
   );
 }
 
-/** The skills section: one switch per install. A repository switches as one capability, so
- *  its members never appear as switches of their own: the row's badge says how much of the
- *  group is on, and the settings page lists what it holds. */
-function SkillRows({
-  skills,
-  chosen,
-  onToggle,
-}: {
-  skills: SkillSetupEntry[];
-  chosen: ReadonlySet<string>;
-  onToggle: (ids: readonly string[], on: boolean) => void;
-}) {
-  if (skills.length === 0) return <EmptyNote>{NO_SKILLS_NOTE}</EmptyNote>;
+/** The skill column's rows: one switch per install. A repository switches as one capability,
+ *  so its members never appear as switches of their own: the row's badge says how much of
+ *  the group is on, and the settings page lists what it holds. */
+function skillRows(
+  skills: SkillSetupEntry[],
+  chosen: ReadonlySet<string>,
+  onToggle: (ids: readonly string[], on: boolean) => void,
+): SetupEntry[] {
+  return groupSkills(skills).map((group) => {
+    const ids = group.skills.map((skill) => skill.id);
+    const on = ids.filter((id) => chosen.has(id)).length;
+    const sole = group.skills[0] as SkillSetupEntry;
+    return {
+      identity: group.key,
+      name: group.label,
+      // A lone skill keeps its own description; a group reports how much of it is on.
+      badge: isSkillCollection(group) ? `${on}/${ids.length} on` : sole.description || undefined,
+      on: on === ids.length,
+      // One target state for the whole group: off only once every member is on.
+      onToggle: () => onToggle(ids, on !== ids.length),
+    };
+  });
+}
+
+/** One switch, wherever the dialog shows one: a capability row's and the footer's subagent
+ *  flag are the same control, so both toggle the same way and announce the same name. */
+function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle: () => void }) {
   return (
-    <ul className="mcp-setup-list" style={LIST_STYLE}>
-      {groupSkills(skills).map((group, i) => {
-        const ids = group.skills.map((skill) => skill.id);
-        const on = ids.filter((id) => chosen.has(id)).length;
-        const sole = group.skills[0] as SkillSetupEntry;
-        return (
-          <SetupRow
-            key={group.key}
-            name={group.label}
-            // A lone skill keeps its own description; a group reports how much of it is on.
-            badge={
-              isSkillCollection(group) ? `${on}/${ids.length} on` : sole.description || undefined
-            }
-            on={on === ids.length}
-            // One target state for the whole group: off only once every member is on.
-            onToggle={() => onToggle(ids, on !== ids.length)}
-            striped={i % 2 === 1}
-          />
-        );
-      })}
-    </ul>
+    <button
+      type="button"
+      className="toggle"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      data-on={on}
+      onClick={onToggle}
+      style={SWITCH_STYLE}
+    />
   );
 }
 
-/** One switchable capability row. The subagent flag, each plugin, each skill collection and
- *  each MCP server render through the same markup so the picker cannot drift between the
- *  kinds. */
+/** One switchable capability row. Each plugin, each skill collection and each MCP server
+ *  render through the same markup so the picker cannot drift between the kinds. */
 function SetupRow({
   name,
   badge,
@@ -371,33 +458,18 @@ function SetupRow({
   striped?: boolean;
 }) {
   return (
-    <li
-      style={{
-        display: "grid",
-        gridTemplateColumns: ROW_COLUMNS,
-        alignItems: "center",
-        columnGap: 10,
-        padding: "6px 10px",
-        borderRadius: 6,
-        background: striped ? "var(--bg)" : "transparent",
-      }}
-    >
-      <span className="mcp-setup-name" style={ROW_TEXT}>
-        {name}
+    <li style={{ ...ROW_STYLE, background: striped ? "var(--bg)" : "transparent" }}>
+      <span style={ROW_TEXT_STACK}>
+        <span className="mcp-setup-name" style={ROW_TEXT}>
+          {name}
+        </span>
+        {badge ? (
+          <span className="mcp-setup-badge" style={BADGE_STYLE}>
+            {badge}
+          </span>
+        ) : null}
       </span>
-      <span className="mcp-setup-badge" style={{ ...ROW_TEXT, opacity: 0.6, fontSize: "0.85em" }}>
-        {badge}
-      </span>
-      <button
-        type="button"
-        className="toggle"
-        role="switch"
-        aria-checked={on}
-        aria-label={name}
-        data-on={on}
-        onClick={onToggle}
-        style={{ justifySelf: "end" }}
-      />
+      <Switch on={on} label={name} onToggle={onToggle} />
     </li>
   );
 }
