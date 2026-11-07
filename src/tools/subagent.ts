@@ -13,7 +13,7 @@ import {
 } from "../config.js";
 import type { ResolvedHook } from "../hooks.js";
 import { CacheFirstLoop } from "../loop.js";
-import { CONTEXT_BOUND_RULE } from "../loop/compaction.js";
+import { CONTEXT_FOLD_RULE } from "../loop/compaction.js";
 import { isQuotaExhaustedError } from "../loop/errors.js";
 import { KEEP_LAST_IMAGES } from "../loop/image-retry.js";
 import type { WarningCause } from "../loop/types.js";
@@ -26,6 +26,7 @@ import {
   DELEGATION_TRIGGER,
   DELEGATION_WAVE_RULE,
   NEGATIVE_CLAIM_RULE,
+  NO_EFFORT_LIMIT_RULE,
   SHARED_WORKSPACE_SAFETY,
   TIME_STAMP_RULE,
   TUI_FORMATTING_RULES,
@@ -231,8 +232,8 @@ Rules:
 - When you're done, your final assistant message is the only thing the parent will see: make it complete and self-contained. Never end silently. No follow-up offers, no questions, no "let me know if you need more."
 - Write that message for the parent agent to act on, and for a person to read: what you actually did (the files you read or changed, the commands you ran), what you found, what you verified and what you only assumed, and why you stopped. Concrete names and results, no narration of intent, and a few lines rather than a transcript of every step.
 - You must return an answer. Ending a run with nothing is a failure, and nobody will ask you again: stop calling tools and return the best answer you have when the task is done, naming what you could not verify.
-- There is no turn, step or tool-call budget. Nothing stops you for working long; if you believe you are near a limit or a maximum, you are not.
-- ${CONTEXT_BOUND_RULE}
+- ${NO_EFFORT_LIMIT_RULE}
+- ${CONTEXT_FOLD_RULE}
 - ${TIME_STAMP_RULE}
 
 ${NEGATIVE_CLAIM_RULE}
@@ -824,7 +825,7 @@ export function registerSubagentTool(
   parentRegistry.register({
     name: SUBAGENT_TOOL_NAME,
     parallelSafe: true,
-    description: `Run one subtask in an isolated subagent and get back only its final answer. It shares your sandbox, safety rules and limits, but has none of your conversation: put everything it needs in 'task', including what to check and what the answer must contain. ${DELEGATION_TRIGGER} ${DELEGATION_WAVE_RULE}`,
+    description: `Run one subtask in an isolated subagent and get back only its final answer. It shares your sandbox, safety rules and run settings, but has none of your conversation: put everything it needs in 'task', including what to check and what the answer must contain. ${DELEGATION_TRIGGER} ${DELEGATION_WAVE_RULE}`,
     parameters: {
       type: "object",
       properties: {

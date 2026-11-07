@@ -9,10 +9,14 @@ import { planRepository } from "../src/code/plans.js";
 import { modelUsableFor, writeConfig } from "../src/config.js";
 import { PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
-import { CONTEXT_BOUND_RULE } from "../src/loop/compaction.js";
+import { CONTEXT_FOLD_RULE } from "../src/loop/compaction.js";
 import { bridgeMcpTools } from "../src/mcp/registry.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import { DELEGATION_TRIGGER, TIME_STAMP_RULE } from "../src/prompt-fragments.js";
+import {
+  DELEGATION_TRIGGER,
+  NO_EFFORT_LIMIT_RULE,
+  TIME_STAMP_RULE,
+} from "../src/prompt-fragments.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerPlanTool } from "../src/tools/plan.js";
@@ -1742,11 +1746,13 @@ describe("subagent prompt", () => {
     expect(spec?.function.description).toContain(DELEGATION_TRIGGER);
   });
 
-  it("carries the shared context-bound rule instead of its own wording of it", () => {
-    // One rule text lives in src/loop/compaction.ts: a child that gets folded and the
-    // parent that folds it cannot describe the same event differently.
-    expect(SUBAGENT_BASE_SYSTEM).toContain(CONTEXT_BOUND_RULE);
-    expect(SUBAGENT_BASE_SYSTEM).toContain("no turn, step or tool-call budget");
+  it("carries the shared no-effort and context-fold rules", () => {
+    // One rule text lives in src/prompt-fragments.ts and one in src/loop/compaction.ts:
+    // a child and the parent that spawned it cannot describe effort or a fold differently.
+    expect(SUBAGENT_BASE_SYSTEM).toContain(NO_EFFORT_LIMIT_RULE);
+    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step or tool-call budget");
+    expect(SUBAGENT_BASE_SYSTEM).toContain(CONTEXT_FOLD_RULE);
+    expect(CONTEXT_FOLD_RULE).toContain("Never base any decision on a context limit");
   });
 
   it("tells the child how to read its prompt's clock stamp", () => {

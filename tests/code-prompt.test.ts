@@ -11,11 +11,15 @@ import {
 } from "../src/code/prompt.js";
 import {
   COMPACTION_SUMMARY_PREFIX,
-  CONTEXT_BOUND_RULE,
+  CONTEXT_FOLD_RULE,
   DROPPED_WORK_NOTICE_PREFIX,
   FOLD_NOTICE_PREFIX,
 } from "../src/loop/compaction.js";
-import { DELEGATION_TRIGGER, TIME_STAMP_RULE } from "../src/prompt-fragments.js";
+import {
+  DELEGATION_TRIGGER,
+  NO_EFFORT_LIMIT_RULE,
+  TIME_STAMP_RULE,
+} from "../src/prompt-fragments.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
@@ -316,6 +320,13 @@ describe("codeSystemPrompt", () => {
       expect(out).toContain("Splitting is not a last resort.");
     });
 
+    it("chooses delegation by task shape, not by context capacity", () => {
+      const out = codeSystemPrompt(root, { configPath: cfgPath, subagentsEnabled: true });
+      expect(out).toContain("Choose delegation by the shape of the task");
+      expect(out).not.toContain("one budget that matters");
+      expect(out).not.toContain("trail you do not need to keep");
+    });
+
     it("keeps the disabled prompt free of the section's scar", () => {
       const off = codeSystemPrompt(root, { configPath: cfgPath });
       const on = codeSystemPrompt(root, { configPath: cfgPath, subagentsEnabled: true });
@@ -575,12 +586,17 @@ describe("prompt hardening", () => {
     expect(codeSystemPrompt(root)).toContain("Edit gate mode: **Never Ask**");
   });
 
-  it("states the one real bound instead of claiming unbounded memory", () => {
-    // "No limit" is true of effort and false of memory, so the prefix carries the one
-    // shared rule instead of a second spelling of it.
+  it("forbids decisions based on a context limit", () => {
+    // Window sizes and usage meters can change mid-session, so the prefix carries one
+    // prohibition instead of a budget the agent is told to manage.
     expect(CODE_SYSTEM_PROMPT).toContain("# No limits");
-    expect(CODE_SYSTEM_PROMPT).toContain("no turn, step or tool-call budget");
-    expect(CODE_SYSTEM_PROMPT).toContain(CONTEXT_BOUND_RULE);
+    expect(CODE_SYSTEM_PROMPT).toContain(NO_EFFORT_LIMIT_RULE);
+    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step or tool-call budget");
+    expect(CODE_SYSTEM_PROMPT).toContain(CONTEXT_FOLD_RULE);
+    expect(CONTEXT_FOLD_RULE).toContain("Never base any decision on a context limit");
+    expect(CONTEXT_FOLD_RULE).toContain("buy new limits");
+    expect(CONTEXT_FOLD_RULE).toContain("switch provider or model");
+    expect(CODE_SYSTEM_PROMPT).not.toContain("The one bound that is real");
   });
 
   it("gives the agent the only clock it has, and says how to read it", () => {
@@ -598,7 +614,7 @@ describe("prompt hardening", () => {
       FOLD_NOTICE_PREFIX,
       DROPPED_WORK_NOTICE_PREFIX,
     ]) {
-      expect(CONTEXT_BOUND_RULE).toContain(marker);
+      expect(CONTEXT_FOLD_RULE).toContain(marker);
     }
   });
 });

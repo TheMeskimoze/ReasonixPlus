@@ -1062,6 +1062,7 @@ describe("compaction", () => {
       const notice = buildDroppedWorkNotice(digest);
       expect(notice.startsWith(DROPPED_WORK_NOTICE_PREFIX)).toBe(true);
       expect(notice).toContain("Commands ran:");
+      expect(notice).not.toContain("context window");
       expect(notice).not.toMatch(/[\u2013\u2014]/);
     });
   });
@@ -1083,6 +1084,8 @@ describe("compaction", () => {
       expect(text).toContain("Conversation to summarize:");
       expect(text).toContain("read_file");
       expect(text).toMatch(/Generate a new state summary/);
+      expect(text).toContain("Do not omit detail to save space");
+      expect(text).not.toContain("free context window space");
     });
 
     it("anchors against a previous summary when one exists", () => {

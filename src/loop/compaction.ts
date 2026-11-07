@@ -29,9 +29,9 @@ const FOLD_DETAIL_LOSS =
 /** The action a reader of a folded span must take before trusting a detail from it. */
 const RE_READ_HINT = "Re-read a file or re-run a command before relying on a specific value.";
 
-/** The one rule about memory bounds. Every agent prompt interpolates this text, so a
- *  parent and a child cannot describe the fold differently. */
-export const CONTEXT_BOUND_RULE = `The one bound that is real is the context window, and it bounds memory rather than effort. As the request approaches that window the harness folds the log: the older span becomes a summary marked ${COMPACTION_SUMMARY_PREFIX} with a notice marked ${FOLD_NOTICE_PREFIX}, the recent tail survives verbatim, and a fold that cannot produce a summary lists the files and commands it dropped under ${DROPPED_WORK_NOTICE_PREFIX} instead. ${FOLD_DETAIL_LOSS} Put the plan, the exact values you measured and every partial finding in a file the moment you have them. ${RE_READ_HINT}`;
+/** The one rule about context limits and the fold. Every agent prompt interpolates this
+ *  text, so a parent and a child cannot describe the fold differently. */
+export const CONTEXT_FOLD_RULE = `Never base any decision on a context limit. Window sizes, token counts and usage meters are arbitrary, unreliable and transient: the user may buy new limits, switch provider or model, and the same request may run against a different window at any moment. Never reason from a usage meter or a perceived remaining window, and never let either narrow, shorten, defer or refuse what the user asked for: do not compress a brief, an answer, a read, a search, a plan or a scope to save room, and do not skip work because the conversation seems full. The harness, not you, decides when to fold older turns into a summary marked ${COMPACTION_SUMMARY_PREFIX} with a notice marked ${FOLD_NOTICE_PREFIX}; a fold that cannot produce a summary lists the files and commands it dropped under ${DROPPED_WORK_NOTICE_PREFIX} instead. ${FOLD_DETAIL_LOSS} Keep the plan, exact values and partial findings in a file as you produce them, so the work remains reviewable and durable. ${RE_READ_HINT}`;
 
 /** Body of the notice that follows a summary fold, composed from the sentences the
  *  standing rule already states. */
@@ -193,7 +193,7 @@ function section(title: string, entries: string[]): string[] {
 export function buildDroppedWorkNotice(digest: ToolActivityDigest): string {
   const lines = [
     DROPPED_WORK_NOTICE_PREFIX,
-    "Earlier context was compacted to stay under the context window. Work that happened in the dropped span:",
+    "Earlier turns were folded away. Work that happened in the dropped span:",
     ...section("Files read", digest.filesRead),
     ...section("Files edited", digest.filesEdited),
     ...section("Commands ran", digest.commands),
@@ -509,11 +509,12 @@ export function renderTranscript(messages: readonly ChatMessage[]): string {
   return lines.join("\n");
 }
 
-const SUMMARIZATION_INSTRUCTION = `You are compacting an agent conversation to free context window space.
-Write a dense continuation summary the agent can work from without the original history.
+const SUMMARIZATION_INSTRUCTION = `You are compacting an agent conversation into a continuation summary.
+Write the summary the agent can work from without the original history.
 Keep every technical detail that matters for continuing the work: file paths, function names, decisions and their rationale, constraints the user stated, error messages, test results, and the current state of any task in progress.
 Keep user requests and intent verbatim where possible.
 Do not invent anything that is not in the conversation.
+Do not omit detail to save space: the harness chose this span, and your summary is the only record of it.
 Structure the summary with short sections (Goal, Key decisions, Files and changes, Current state, Next steps).
 Write the summary only, with no preamble.`;
 

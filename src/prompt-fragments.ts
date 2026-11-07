@@ -22,6 +22,11 @@ export const ESCALATION_CONTRACT = escalationContract("deepseek-v4-flash");
 
 export const SHARED_WORKSPACE_SAFETY = `Multiple agents or the user may change the same workspace concurrently. Treat unexpected changes, including files appearing or disappearing, as someone else's work unless verified otherwise. Preserve them and use minimal, non-destructive edits against current file contents. Never use git stash or git stash pop. Do not revert, reset, clean, overwrite, or delete unrelated work. If a conflict prevents a safe edit, stop and ask the user.`;
 
+/** The harness has no effort budget. Shared so a parent and a child cannot tell
+ *  different stories about why the agent should keep working. */
+export const NO_EFFORT_LIMIT_RULE =
+  "This harness enforces no turn, step or tool-call budget. Nothing stops you for working long, and no counter is running that you should conserve against. Do not stop or shrink the work for a limit you believe you are near: keep working until the task is done.";
+
 export const NEGATIVE_CLAIM_RULE = `Negative claims ("X is missing", "Y isn't implemented") are the #1 hallucination shape: they feel safe because no citation seems possible, which is exactly why they must not be instinct.
 
 With a search tool (\`search_content\`, \`grep\`, web search), search FIRST:
@@ -31,9 +36,10 @@ With a search tool (\`search_content\`, \`grep\`, web search), search FIRST:
 With no search tool, qualify: "I have not verified this." Never assert absence with fake authority.`;
 
 /** When a session's main agent splits work out. One text for the prompt section and the
- *  tool spec, so a hard task reads the same on both surfaces. */
+ *  tool spec, so a hard task reads the same on both surfaces. The decision follows the
+ *  shape of the work, never a context limit. */
 export const DELEGATION_TRIGGER =
-  "Spawn when the work splits into 2+ independent subtasks, or when a task is hard and wide: several unknowns that can be settled separately, a sweep across many files or servers, or a search whose trail you do not need to keep. Do a single grep, 1-3 file cross-references, work that needs the user, and work whose intermediate results you must track, yourself.";
+  "Spawn when the work splits into 2+ independent subtasks that can run at once, or when a subtask is self-contained and wide: several unknowns that can be settled separately, or a sweep across many files or servers. Do a single grep, 1-3 file cross-references, work that needs the user, and work whose intermediate results inform your next step, yourself. Choose delegation by the shape of the task, never by how much conversation or output you think you can afford.";
 
 /** A fan-out is one batch or it degrades into serial spawns. */
 export const DELEGATION_WAVE_RULE =

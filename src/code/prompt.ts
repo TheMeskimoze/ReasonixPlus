@@ -1,11 +1,12 @@
 import { dirname, join, sep } from "node:path";
 import { type EditMode, loadEditMode } from "../config.js";
-import { CONTEXT_BOUND_RULE } from "../loop/compaction.js";
+import { CONTEXT_FOLD_RULE } from "../loop/compaction.js";
 import { applyMemoryBlock, readCappedTextFile, truncateWithMarker } from "../memory/read-capped.js";
 import { type MemoryLayer, applyMemoryLayers, memoryStackLayers } from "../memory/user.js";
 import {
   DELEGATION_TRIGGER,
   DELEGATION_WAVE_RULE,
+  NO_EFFORT_LIMIT_RULE,
   SHARED_WORKSPACE_SAFETY,
   TIME_STAMP_RULE,
   TUI_FORMATTING_RULES,
@@ -194,7 +195,7 @@ export function promptSections(
  *  worse than silence, and the section is dead weight in the cached prefix. */
 const SUBAGENT_SECTION = `# Subagents
 
-One tool, \`spawn_subagent({ task, tools })\`. It runs one subtask in an isolated child loop and returns only its final answer; its tool calls never enter your context. The child inherits your limits, hooks and sandbox. It runs on this session's subagent model, else your model, screened through the same backup list the main chat falls back to; it sees none of this conversation.
+One tool, \`spawn_subagent({ task, tools })\`. It runs one subtask in an isolated child loop and returns only its final answer; its tool calls never enter your context. The child inherits your hooks, sandbox and run settings. It runs on this session's subagent model, else your model, screened through the same backup list the main chat falls back to; it sees none of this conversation.
 
 **The task is the whole brief.** Nobody reads your context, so write it like a handoff to a capable stranger who cannot ask questions:
 
@@ -207,7 +208,7 @@ Bad: \`"look into the auth code"\`. Good: \`"List every caller of validateToken 
 
 **Tools.** \`tools\` narrows the child's toolset: exact names, or \`server_*\` for a whole MCP server. Omit it to hand over everything except delegation and plan tools (a child never spawns grandchildren).
 
-**Splitting is not a last resort.** Direct tools are cheaper and keep evidence in your context, but a hard task ground out alone spends the one budget that matters: this conversation. Split before you start, not after the task stalls. ${DELEGATION_TRIGGER}
+**Splitting is not a last resort.** Direct tools are cheaper and keep the evidence in front of you, but a hard task ground out alone is slower and harder to keep straight. Split before you start, not after the task stalls. ${DELEGATION_TRIGGER}
 
 **Fan-out is one batch.** ${DELEGATION_WAVE_RULE}`;
 
@@ -302,9 +303,9 @@ Exploration requests do not authorize edits. Modify files only when the user req
 
 # No limits
 
-This harness enforces no turn, step or tool-call budget. Nothing stops you for working long, and no counter is running that you should conserve against. A belief that you are near a limit, a budget or a maximum is always wrong here: keep working until the task is done.
+${NO_EFFORT_LIMIT_RULE}
 
-${CONTEXT_BOUND_RULE}
+${CONTEXT_FOLD_RULE}
 
 # Time
 
