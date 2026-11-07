@@ -33,7 +33,6 @@ import {
   modelProviderHints,
 } from "../model-catalog";
 import { type ModelCost, modelCost } from "../model-cost";
-import { useRateClock } from "../rate-clock";
 import {
   BUILTIN_QUICK_SENDS,
   type EditMode,
@@ -41,9 +40,13 @@ import {
   type ReasoningEffort,
   type UserImageAttachment,
 } from "../protocol";
-import { AudioRecorder } from "../voice/audio-recorder";
+import { useRateClock } from "../rate-clock";
+import { AudioRecorder, type AudioRecordingProgress } from "../voice/audio-recorder";
 import { getSelectedAudioInputDeviceId } from "../voice/device";
+import { getVoiceModelOption } from "../voice/model-registry";
+import { type VoiceRunOutcome, VoiceTrace, type VoiceTraceRecord } from "../voice/trace";
 import { speechTranscriber } from "../voice/transcriber";
+import { TRANSCRIBE_WINDOW_SECONDS, windowSecondsLabel } from "../voice/windows";
 import { toWorkspaceRelative } from "../workspace-path";
 import type { ComposerDraft } from "./composer-draft";
 import { DEFAULT_COMPOSER_ROWS } from "./composer-sizing";
@@ -72,8 +75,34 @@ function clampVideoFps(raw: string): number {
   return Math.min(10, Math.max(0.1, n));
 }
 
-/** Abort a transcription that has not settled within this window. */
-const TRANSCRIBE_TIMEOUT_MS = 60_000;
+/** A window that produces no completion within this budget is treated as wedged. */
+const TRANSCRIBE_WINDOW_TIMEOUT_MS = 120_000;
+
+/** The host allows 300 s to load a model, and the first window's call carries that
+ *  load plus its own generation, so the start budget is both deadlines together. */
+const TRANSCRIBE_INIT_TIMEOUT_MS = TRANSCRIBE_WINDOW_TIMEOUT_MS + 300_000;
+
+/** Distinguishes two runs started in the same millisecond. */
+let voiceRunSeq = 0;
+
+/** Voice progress as the composer renders it: the live recording position while the
+ *  microphone is open, the window a transcription is decoding afterwards. */
+interface VoiceProgressView {
+  /** 1-based window. */
+  window: number;
+  /** Windows in the recording; null while recording, since it is still open. */
+  windows: number | null;
+  /** Seconds inside the current window. */
+  windowSeconds: number;
+  /** Length of the current window. */
+  windowLengthSeconds: number;
+  /** Recording length in seconds. */
+  totalSeconds: number;
+  /** Seconds of the recording transcribed so far; null while recording. */
+  processedSeconds: number | null;
+  /** Measured decode time of the current window; null while recording. */
+  decodeMs: number | null;
+}
 
 const MODE_INFO: ModeEntry[] = [
   {
@@ -246,6 +275,7 @@ export function Composer({
   onPickMedia,
   onUpdateMedia,
   onVoiceError,
+  onVoiceEvent,
   voiceAvailable = true,
 }: {
   draft: string;
@@ -354,6 +384,8 @@ export function Composer({
   ) => void;
   /** Surfaces every voice-input failure as a durable in-chat error notice. */
   onVoiceError: (message: string) => void;
+  /** Records one voice run in the Events tab: its steps, timings and outcome. */
+  onVoiceEvent: (event: VoiceTraceRecord) => void;
   /** True when at least one voice model is downloaded — the voice button is
    *  disabled (grayed out) when none are installed. */
   voiceAvailable?: boolean;
@@ -559,16 +591,50 @@ export function Composer({
 
   const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceProgress, setVoiceProgress] = useState<VoiceProgressView | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const transcribeAbortRef = useRef<AbortController | null>(null);
   const transcribeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelReasonRef = useRef<"user" | "timeout" | null>(null);
+  /** Latest report, so a stalled run names the window it stalled in. */
+  const voiceProgressRef = useRef<VoiceProgressView | null>(null);
+  /** Window whose budget is running, so the watchdog re-arms only on a new window. */
+  const armedWindowRef = useRef(0);
+  /** The run being recorded, null when no voice run is in flight. */
+  const voiceTraceRef = useRef<VoiceTrace | null>(null);
+  /** Which budget the watchdog is counting, so a stall names the right phase. */
+  const watchdogBudgetRef = useRef<"init" | "window">("init");
+
+  const reportVoiceProgress = (view: VoiceProgressView | null) => {
+    voiceProgressRef.current = view;
+    setVoiceProgress(view);
+  };
 
   const clearTranscribeWatchdog = () => {
     if (transcribeTimerRef.current) {
       clearTimeout(transcribeTimerRef.current);
       transcribeTimerRef.current = null;
     }
+    armedWindowRef.current = 0;
+  };
+
+  /** Starts (or restarts) the budget for the phase that is running. Re-armed when
+   *  a window begins, never by a progress report, so a wedged window still ends. */
+  const armTranscribeWatchdog = (budgetMs: number, phase: "init" | "window") => {
+    if (transcribeTimerRef.current) clearTimeout(transcribeTimerRef.current);
+    watchdogBudgetRef.current = phase;
+    transcribeTimerRef.current = setTimeout(() => {
+      cancelReasonRef.current = "timeout";
+      transcribeAbortRef.current?.abort();
+    }, budgetMs);
+  };
+
+  /** Writes the settled Events row and forgets the run; a no-op without one. */
+  const settleVoiceRun = (outcome: VoiceRunOutcome) => {
+    const trace = voiceTraceRef.current;
+    if (!trace) return;
+    voiceTraceRef.current = null;
+    onVoiceEvent(trace.record(outcome));
   };
 
   useEffect(() => {
@@ -611,6 +677,7 @@ export function Composer({
           "recording stop",
           new Error("The active microphone recorder was unavailable."),
         );
+        settleVoiceRun("failed");
         setVoiceState("idle");
         return;
       }
@@ -618,56 +685,147 @@ export function Composer({
       const controller = new AbortController();
       transcribeAbortRef.current = controller;
       cancelReasonRef.current = null;
-      transcribeTimerRef.current = setTimeout(() => {
-        cancelReasonRef.current = "timeout";
-        transcribeAbortRef.current?.abort();
-      }, TRANSCRIBE_TIMEOUT_MS);
+      armTranscribeWatchdog(TRANSCRIBE_INIT_TIMEOUT_MS, "init");
+      const trace = voiceTraceRef.current;
+      let outcome: VoiceRunOutcome = "done";
       try {
-        const { audioData } = await recorder.stop();
-        recorderRef.current = null;
+        let audioData: Float32Array;
+        let durationSeconds: number;
+        try {
+          const stopped = trace
+            ? await trace.step("recording stop", () => recorder.stop())
+            : await recorder.stop();
+          audioData = stopped.audioData;
+          durationSeconds = stopped.durationSeconds;
+          recorderRef.current = null;
+        } catch (err) {
+          outcome = "failed";
+          reportVoiceError("recording stop", err);
+          return;
+        }
+
+        // The recording length is known before the first window report, so the
+        // window count is shown from the start instead of after the first window.
+        reportVoiceProgress({
+          window: 1,
+          windows: Math.max(1, Math.ceil(durationSeconds / TRANSCRIBE_WINDOW_SECONDS)),
+          windowSeconds: 0,
+          windowLengthSeconds: Math.min(TRANSCRIBE_WINDOW_SECONDS, durationSeconds),
+          totalSeconds: durationSeconds,
+          processedSeconds: 0,
+          decodeMs: null,
+        });
+
         const { text } = await speechTranscriber.transcribe(audioData, {
           signal: controller.signal,
+          ...(trace ? { trace } : {}),
+          onProgress: (progress) => {
+            const window = progress.window;
+            if (!window) return;
+            reportVoiceProgress(window);
+            if (window.window !== armedWindowRef.current) {
+              armedWindowRef.current = window.window;
+              armTranscribeWatchdog(TRANSCRIBE_WINDOW_TIMEOUT_MS, "window");
+            }
+          },
         });
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          outcome = "cancel";
+          return;
+        }
         if (!text.trim()) {
           throw new Error("The speech recognizer returned no transcript.");
         }
+        trace?.result(text.length);
         setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
         textareaRef.current?.focus();
       } catch (err) {
         if (cancelReasonRef.current === "timeout") {
+          outcome = "failed";
           speechTranscriber.reset();
-          reportVoiceError(
-            "transcription",
-            new Error("Transcription timed out. The speech model may be stuck; it will reload."),
-          );
+          const stalled = voiceProgressRef.current;
+          const where = stalled
+            ? ` in window ${stalled.window}${stalled.windows ? ` of ${stalled.windows}` : ""}`
+            : "";
+          const stalledError =
+            watchdogBudgetRef.current === "init"
+              ? new Error(
+                  `The speech model did not finish loading within ${TRANSCRIBE_INIT_TIMEOUT_MS / 1000} seconds. It will reload.`,
+                )
+              : new Error(
+                  `No window finished within ${TRANSCRIBE_WINDOW_TIMEOUT_MS / 1000} seconds${where}. The speech model may be stuck; it will reload.`,
+                );
+          trace?.failed(stalledError);
+          reportVoiceError("transcription", stalledError);
         } else if (cancelReasonRef.current === null) {
-          reportVoiceError("recording or transcription", err);
+          outcome = "failed";
+          trace?.failed(err);
+          reportVoiceError("transcription", err);
+        } else {
+          // A user-initiated cancel is silent in the chat but still settled here.
+          outcome = "cancel";
         }
-        // A user-initiated cancel is silent.
       } finally {
         clearTranscribeWatchdog();
         transcribeAbortRef.current = null;
         cancelReasonRef.current = null;
         recorder.cancel();
         recorderRef.current = null;
+        reportVoiceProgress(null);
+        settleVoiceRun(outcome);
         setVoiceState("idle");
       }
       return;
     }
 
     if (voiceState === "idle") {
+      const option = getVoiceModelOption(speechTranscriber.activeModel);
+      voiceRunSeq += 1;
+      const trace = new VoiceTrace({
+        id: `voice-${Date.now().toString(36)}-${voiceRunSeq}`,
+        model: option.name,
+        modelId: option.modelId,
+        engine: option.engine,
+      });
+      voiceTraceRef.current = trace;
+      onVoiceEvent(trace.record("started"));
+
       const recorder = new AudioRecorder({
         onError: (err) => reportVoiceError("audio cleanup", err),
+        onProgress: (progress: AudioRecordingProgress) => {
+          // A transcription owns the strip once it starts, so a late capture
+          // report cannot pull it back to the recording phase.
+          if (transcribeAbortRef.current) return;
+          reportVoiceProgress({
+            ...progress,
+            windows: null,
+            totalSeconds: progress.seconds,
+            processedSeconds: null,
+            decodeMs: null,
+          });
+        },
         deviceId: getSelectedAudioInputDeviceId(),
+        trace,
       });
       recorderRef.current = recorder;
+      reportVoiceProgress({
+        window: 1,
+        windows: null,
+        windowSeconds: 0,
+        windowLengthSeconds: TRANSCRIBE_WINDOW_SECONDS,
+        totalSeconds: 0,
+        processedSeconds: null,
+        decodeMs: null,
+      });
       try {
-        await recorder.start();
+        await trace.step("microphone open", () => recorder.start());
         setVoiceState("recording");
       } catch (err) {
         recorder.cancel();
         recorderRef.current = null;
+        reportVoiceProgress(null);
+        trace.failed(err);
+        settleVoiceRun("failed");
         reportVoiceError("microphone startup", err);
         setVoiceState("idle");
       }
@@ -721,6 +879,48 @@ export function Composer({
   // queue/interrupt hints must never disagree about it.
   const turnActive = busy ?? false;
   const statusText = turnActive && busyLabel ? busyLabel : null;
+
+  // One line for the voice run: the window in flight, the exact audio position
+  // inside it, and (while transcribing) how long its decode has run.
+  const voiceParams = voiceProgress
+    ? {
+        window: voiceProgress.window,
+        windows: voiceProgress.windows ?? voiceProgress.window,
+        seconds: windowSecondsLabel(voiceProgress.windowSeconds),
+        windowLength: windowSecondsLabel(voiceProgress.windowLengthSeconds),
+      }
+    : null;
+  const voiceStateText = voiceParams
+    ? t(
+        voiceState === "recording"
+          ? "composer.voiceRecordingState"
+          : "composer.voiceTranscribingState",
+        voiceParams,
+      )
+    : null;
+  // The button keeps the cancel affordance while the strip carries the plain state.
+  const voiceButtonText = voiceParams
+    ? t(
+        voiceState === "recording"
+          ? "composer.voiceRecordingState"
+          : "composer.voiceTranscribingStateCancel",
+        voiceParams,
+      )
+    : null;
+  const voiceElapsedText =
+    voiceState === "transcribing" && voiceProgress?.decodeMs != null
+      ? t("composer.voiceDecodeElapsed", {
+          elapsed: windowSecondsLabel(voiceProgress.decodeMs / 1000),
+        })
+      : null;
+  // While recording nothing is transcribed yet, so the bar shows the fill of the
+  // window being captured; while transcribing it shows the recording's progress.
+  const voiceFraction = voiceProgress
+    ? voiceState === "recording"
+      ? voiceProgress.windowSeconds / Math.max(voiceProgress.windowLengthSeconds, 0.001)
+      : (voiceProgress.processedSeconds ?? 0) / Math.max(voiceProgress.totalSeconds, 0.001)
+    : 0;
+  const voiceFill = Math.max(0, Math.min(1, voiceFraction)) * 100;
 
   // A pill names its provider, so the model a tab runs on is readable without
   // opening the menu: the live catalogs cover ids discovery added.
@@ -927,6 +1127,20 @@ export function Composer({
             </div>
           ) : null}
 
+          {voiceState !== "idle" && voiceStateText ? (
+            <div className="voice-state" data-phase={voiceState}>
+              <output className="voice-state-text">
+                <span>{voiceStateText}</span>
+                {voiceElapsedText ? (
+                  <span className="voice-state-elapsed">{voiceElapsedText}</span>
+                ) : null}
+              </output>
+              <div className="voice-state-bar" aria-hidden="true">
+                <div className="voice-state-fill" style={{ width: `${voiceFill}%` }} />
+              </div>
+            </div>
+          ) : null}
+
           <div className="composer-foot">
             <button
               type="button"
@@ -1058,9 +1272,9 @@ export function Composer({
                   : voiceError
                     ? t("composer.voiceError", { error: voiceError })
                     : voiceState === "recording"
-                      ? t("composer.voiceRecording")
+                      ? (voiceButtonText ?? t("composer.voiceRecording"))
                       : voiceState === "transcribing"
-                        ? t("composer.voiceTranscribingCancel")
+                        ? (voiceButtonText ?? t("composer.voiceTranscribingCancel"))
                         : t("composer.voiceInput")
               }
             >

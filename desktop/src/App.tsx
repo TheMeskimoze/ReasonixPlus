@@ -109,6 +109,7 @@ import {
   resolveActiveQuickSend,
   rpcSend,
 } from "./protocol";
+import type { VoiceTraceRecord } from "./voice/trace";
 import {
   type SessionIntentRequest,
   type SessionMutationAsk,
@@ -774,6 +775,7 @@ type Action =
   | { t: "plan_usage_refreshing" }
   | { t: "release_stale_send" }
   | { t: "push_notice"; text: string; severity?: NoticeSeverity }
+  | { t: "voice_event"; event: VoiceTraceRecord }
   | { t: "dismiss_toast"; id: number };
 
 export function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -1658,6 +1660,10 @@ export function reduceAction(state: State, action: Action): State {
         ...state,
         messages: insertNotice(state.messages, action.text, action.severity ?? "info"),
       };
+    }
+    case "voice_event": {
+      // A voice run is proof for the Events tab only: nothing joins the transcript.
+      return { ...state, sessionEvents: recordEvent(state, action.event) };
     }
   }
 }
@@ -5719,6 +5725,7 @@ const TabRuntime = memo(function TabRuntime({
                 onPickMedia={attachPickedMedia}
                 onUpdateMedia={updatePendingMedia}
                 onVoiceError={(message) => appendNotice(message, "error")}
+                onVoiceEvent={(event) => dispatch({ t: "voice_event", event })}
                 voiceAvailable={voiceAvailable}
               />
             </>

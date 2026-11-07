@@ -26,7 +26,10 @@ vi.mock("../voice/transcriber", () => {
   return {
     speechTranscriber: {
       transcribe: vi.fn(
-        (_audio: Float32Array, options?: { signal?: AbortSignal }) =>
+        (
+          _audio: Float32Array,
+          options?: { signal?: AbortSignal; onProgress?: (p: TranscribeProgress) => void },
+        ) =>
           new Promise<{ text: string }>((resolve, reject) => {
             resolveTranscribe = resolve;
             const signal = options?.signal;
@@ -50,8 +53,12 @@ vi.mock("../voice/transcriber", () => {
 
 afterEach(cleanup);
 
-import { AudioRecorder } from "../voice/audio-recorder";
-import { speechTranscriber } from "../voice/transcriber";
+import {
+  AudioRecorder,
+  type AudioRecorderOptions,
+  type AudioRecordingProgress,
+} from "../voice/audio-recorder";
+import { type TranscribeProgress, speechTranscriber } from "../voice/transcriber";
 import { Composer } from "./composer";
 import { makeComposerBaseProps } from "./composer-test-fixtures";
 
@@ -119,7 +126,7 @@ describe("Composer Voice Input Button", () => {
     });
 
     expect(onVoiceError).toHaveBeenCalledWith(
-      "Voice input failed during recording or transcription: The speech recognizer returned no transcript.",
+      "Voice input failed during transcription: The speech recognizer returned no transcript.",
     );
   });
 
@@ -160,7 +167,9 @@ describe("Composer Voice Input Button", () => {
     expect(voiceBtn.classList.contains("transcribing")).toBe(true);
     expect(voiceBtn.disabled).toBe(false);
     expect(voiceBtn.getAttribute("aria-busy")).toBe("true");
-    expect(screen.getByTitle("Transcribing audio... Click to cancel")).toBeTruthy();
+    expect(
+      screen.getByTitle("Transcribing, window 1 of 1, 0.0s / 1.0s. Click to cancel"),
+    ).toBeTruthy();
 
     const throbber = voiceBtn.querySelector(".voice-throbber");
     expect(throbber).toBeTruthy();
@@ -206,7 +215,7 @@ describe("Composer Voice Input Button", () => {
     expect(onVoiceError).not.toHaveBeenCalled();
   });
 
-  it("times out a stuck transcription, recovers, and reports a durable error", async () => {
+  it("times out a stuck model load, recovers, and reports a durable error", async () => {
     vi.mocked(speechTranscriber.reset).mockClear();
     vi.useFakeTimers();
     const onVoiceError = vi.fn();
@@ -222,16 +231,224 @@ describe("Composer Voice Input Button", () => {
       });
       expect(voiceBtn.classList.contains("transcribing")).toBe(true);
 
+      // A load gets the init budget: the host's 300 s load plus one generation.
       await act(async () => {
-        vi.advanceTimersByTime(60_000);
+        vi.advanceTimersByTime(420_000);
       });
       await act(async () => {});
 
       expect(voiceBtn.classList.contains("transcribing")).toBe(false);
       expect(speechTranscriber.reset).toHaveBeenCalledTimes(1);
-      expect(onVoiceError).toHaveBeenCalledWith(expect.stringContaining("timed out"));
+      expect(onVoiceError).toHaveBeenCalledWith(
+        expect.stringContaining("speech model did not finish loading within 420 seconds"),
+      );
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("times out a window that never finishes, naming it", async () => {
+    vi.mocked(speechTranscriber.reset).mockClear();
+    vi.useFakeTimers();
+    const onVoiceError = vi.fn();
+    try {
+      vi.mocked(speechTranscriber.transcribe).mockImplementationOnce(
+        (_audio, options) =>
+          new Promise((_resolve, reject) => {
+            // Reports a window, then never settles: the per-window budget runs out.
+            options?.onProgress?.({
+              status: "transcribing",
+              window: {
+                window: 2,
+                windows: 3,
+                windowSeconds: 0,
+                windowLengthSeconds: 30,
+                processedSeconds: 30,
+                totalSeconds: 61,
+                decodeMs: 0,
+              },
+            });
+            options?.signal?.addEventListener("abort", () => {
+              const err = new Error("Transcription cancelled.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      render(<Composer {...baseProps} onVoiceError={onVoiceError} />);
+      const voiceBtn = screen.getByTitle("Voice input") as HTMLButtonElement;
+
+      await act(async () => {
+        fireEvent.click(voiceBtn);
+      });
+      await act(async () => {
+        fireEvent.click(voiceBtn);
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+      });
+      await act(async () => {});
+
+      expect(voiceBtn.classList.contains("transcribing")).toBe(false);
+      expect(onVoiceError).toHaveBeenCalledWith(
+        expect.stringContaining("No window finished within 120 seconds in window 2 of 3"),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the live window and its position while recording", async () => {
+    let emit: ((progress: AudioRecordingProgress) => void) | null = null;
+    vi.mocked(AudioRecorder).mockImplementationOnce(function (options?: AudioRecorderOptions) {
+      emit = options?.onProgress ?? null;
+      return {
+        recording: true,
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn(),
+        cancel: vi.fn(),
+      } as unknown as AudioRecorder;
+    });
+    render(<Composer {...baseProps} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("Voice input"));
+    });
+    expect(screen.getByText("Recording, window 1, 0.0s / 30.0s")).toBeTruthy();
+
+    await act(async () => {
+      emit?.({ seconds: 64.2, window: 3, windowSeconds: 4.2, windowLengthSeconds: 30 });
+    });
+    expect(screen.getByText("Recording, window 3, 4.2s / 30.0s")).toBeTruthy();
+  });
+
+  it("shows which window is decoding and the time inside it", async () => {
+    vi.mocked(speechTranscriber.transcribe).mockImplementationOnce(() => new Promise(() => {}));
+    render(<Composer {...baseProps} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    // The recording is one second long, so it is one window, seeded before the
+    // first engine call reports.
+    expect(screen.getByText("Transcribing, window 1 of 1, 0.0s / 1.0s")).toBeTruthy();
+  });
+
+  it("reports the window the transcriber advanced to", async () => {
+    let report: ((progress: TranscribeProgress) => void) | null = null;
+    let finish: (() => void) | null = null;
+    vi.mocked(speechTranscriber.transcribe).mockImplementationOnce(
+      (_audio, options) =>
+        new Promise((resolve) => {
+          report = options?.onProgress ?? null;
+          finish = () => resolve({ text: "hello" });
+        }),
+    );
+    render(<Composer {...baseProps} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    await act(async () => {
+      report?.({
+        status: "transcribing",
+        window: {
+          window: 2,
+          windows: 3,
+          windowSeconds: 0,
+          windowLengthSeconds: 30,
+          processedSeconds: 30,
+          totalSeconds: 61,
+          decodeMs: 1200,
+        },
+      });
+    });
+
+    expect(screen.getByText("Transcribing, window 2 of 3, 0.0s / 30.0s")).toBeTruthy();
+    expect(screen.getByText("1.2s elapsed")).toBeTruthy();
+
+    await act(async () => {
+      finish?.();
+    });
+    expect(voiceBtn.classList.contains("transcribing")).toBe(false);
+  });
+
+  it("reports a failed window through the durable chat callback", async () => {
+    const onVoiceError = vi.fn();
+    const onVoiceEvent = vi.fn();
+    vi.mocked(speechTranscriber.transcribe).mockRejectedValueOnce(
+      new Error("Transcription failed in window 2 of 3 (name=Error, message=decoder crashed)."),
+    );
+    render(<Composer {...baseProps} onVoiceError={onVoiceError} onVoiceEvent={onVoiceEvent} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    expect(onVoiceError).toHaveBeenCalledWith(
+      "Voice input failed during transcription: Transcription failed in window 2 of 3 (name=Error, message=decoder crashed).",
+    );
+    const settled = onVoiceEvent.mock.calls.map(([event]) => event).at(-1);
+    expect(settled?.outcome).toBe("failed");
+    expect(settled?.result).toContain("decoder crashed");
+  });
+
+  it("records a whole run in Events without touching the transcript", async () => {
+    const onVoiceEvent = vi.fn();
+    vi.mocked(speechTranscriber.transcribe).mockResolvedValueOnce({ text: "hello" });
+    render(<Composer {...baseProps} onVoiceEvent={onVoiceEvent} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    const records = onVoiceEvent.mock.calls.map(([event]) => event);
+    expect(records[0]?.type).toBe("voice");
+    expect(records[0]?.outcome).toBe("started");
+    const settled = records.at(-1);
+    expect(settled?.id).toBe(records[0]?.id);
+    expect(settled?.outcome).toBe("done");
+    expect(settled?.steps?.join(" ")).toContain("microphone open");
+    expect(settled?.result).toContain("5 characters");
+  });
+
+  it("settles a cancelled run as cancelled and keeps the chat silent", async () => {
+    const onVoiceError = vi.fn();
+    const onVoiceEvent = vi.fn();
+    render(<Composer {...baseProps} onVoiceError={onVoiceError} onVoiceEvent={onVoiceEvent} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    expect(onVoiceError).not.toHaveBeenCalled();
+    const settled = onVoiceEvent.mock.calls.map(([event]) => event).at(-1);
+    expect(settled?.outcome).toBe("cancel");
   });
 });

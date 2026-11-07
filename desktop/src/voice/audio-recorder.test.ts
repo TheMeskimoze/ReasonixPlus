@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AudioRecorder, resampleAudio } from "./audio-recorder";
+import { AudioRecorder, type AudioRecordingProgress, resampleAudio } from "./audio-recorder";
 
 describe("resampleAudio", () => {
   it("returns original buffer when source and target sample rates match", () => {
@@ -291,10 +291,12 @@ describe("AudioRecorder", () => {
       };
 
       let lastVolume = 0;
+      const progress: AudioRecordingProgress[] = [];
       const recorder = new AudioRecorder({
         onVolumeChange: (vol) => {
           lastVolume = vol;
         },
+        onProgress: (report) => progress.push(report),
       });
 
       await recorder.start();
@@ -304,6 +306,10 @@ describe("AudioRecorder", () => {
       // @ts-expect-error accessing private workletNode for test simulation
       recorder.workletNode.port.onmessage({ data: new Float32Array([0.1, -0.1, 0.2, -0.2]) });
       expect(lastVolume).toBeGreaterThan(0);
+      // 4 samples at 16 kHz is the start of the first 30 s window.
+      expect(progress).toEqual([
+        { seconds: 0.00025, window: 1, windowSeconds: 0.00025, windowLengthSeconds: 30 },
+      ]);
 
       const result = await recorder.stop();
       expect(recorder.recording).toBe(false);

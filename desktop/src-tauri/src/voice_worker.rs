@@ -6,6 +6,7 @@
 //! decodes once and reads the result on every later load.
 
 use crate::voice_host::{no_window, tail};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -115,6 +116,7 @@ def _load(request):
     import importlib.util
     from pathlib import Path
 
+    used_cache = False
     model_dir = Path(request["modelDir"])
     image_format = request["format"]
     weights = request["weights"]
@@ -137,6 +139,7 @@ def _load(request):
         except OSError:
             signature = ""
         cached = _read_cache(cache_path, signature) if signature else None
+        used_cache = cached is not None
 
         original = loader.load_state_dict
         captured = {}
@@ -185,6 +188,7 @@ def _load(request):
         _processor = AutoProcessor.from_pretrained(str(model_dir))
 
     _format = image_format
+    return used_cache
 
 
 def _transcribe(request):
@@ -235,8 +239,10 @@ def main():
             return
         if kind == "load":
             try:
-                _load(request)
-                print(json.dumps({"ok": True}), flush=True)
+                used_cache = _load(request)
+                print(
+                    json.dumps({"ok": True, "cached": bool(used_cache)}), flush=True
+                )
             except Exception as error:
                 print(json.dumps({"ok": False, "error": _describe(error)}), flush=True)
             continue
@@ -265,6 +271,10 @@ pub(crate) struct BarkWorker {
     stderr: Arc<Mutex<Vec<u8>>>,
     key: String,
     last_used: Instant,
+    /// Last request id handed out, so a reply can be matched to its request.
+    next_id: u64,
+    /// True until this worker answers its first generation.
+    first_generation: bool,
 }
 
 impl BarkWorker {
@@ -278,7 +288,14 @@ impl BarkWorker {
             .map_err(|e| format!("write to the Bark worker: {e}"))
     }
 
-    fn read_json(&mut self, deadline: Duration) -> Result<Value, String> {
+    /// Waits for the reply that belongs to this request, skipping any other JSON
+    /// object on stdout: on a cold start the loader is chatty, and a stray object
+    /// must never be read as the answer to a generation.
+    fn read_reply(
+        &mut self,
+        deadline: Duration,
+        matches: impl Fn(&Value) -> bool,
+    ) -> Result<Value, String> {
         let started = Instant::now();
         loop {
             let remaining = deadline.saturating_sub(started.elapsed());
@@ -294,7 +311,9 @@ impl BarkWorker {
             match self.lines.recv_timeout(remaining) {
                 Ok(line) => {
                     if let Some(reply) = accept_line(&line) {
-                        return Ok(reply);
+                        if matches(&reply) {
+                            return Ok(reply);
+                        }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => return Err(timeout()),
@@ -303,14 +322,24 @@ impl BarkWorker {
         }
     }
 
-    fn crash(&self) -> String {
+    /// The id for the next request on this worker.
+    fn reserve_id(&mut self) -> u64 {
+        self.next_id += 1;
+        self.next_id
+    }
+
+    /// Everything the worker wrote to stderr, trimmed for a report.
+    fn stderr_tail(&self) -> String {
         let captured = self
             .stderr
             .lock()
             .map(|buffer| String::from_utf8_lossy(&buffer).into_owned())
             .unwrap_or_default();
-        let detail = tail(captured.as_bytes(), 600);
-        let detail = detail.trim();
+        tail(captured.as_bytes(), 600).trim().to_string()
+    }
+
+    fn crash(&self) -> String {
+        let detail = self.stderr_tail();
         if detail.is_empty() {
             "the Bark worker exited without a message".to_string()
         } else {
@@ -400,6 +429,8 @@ fn spawn(python: &Path, runtime_dir: &Path, key: String) -> Result<BarkWorker, S
         stderr,
         key,
         last_used: Instant::now(),
+        next_id: 0,
+        first_generation: true,
     })
 }
 
@@ -413,20 +444,60 @@ fn accept_line(line: &str) -> Option<Value> {
 }
 
 /// A worker reported failure: the process is healthy, the request was not.
+/// Silence is an empty transcript, not a failure: a window of a longer recording
+/// may legitimately hold no speech, and only the caller can judge the whole run.
 fn interpret(reply: &Value) -> Result<String, String> {
     if let Some(error) = reply.get("error").and_then(Value::as_str) {
         return Err(error.to_string());
     }
-    let text = reply
+    Ok(reply
         .get("text")
         .and_then(Value::as_str)
         .unwrap_or_default()
         .trim()
-        .to_string();
-    if text.is_empty() {
-        return Err("No speech was recognized in the recording.".to_string());
-    }
-    Ok(text)
+        .to_string())
+}
+
+/// True when this line is the reply to request `id`.
+fn replies_to(reply: &Value, id: u64) -> bool {
+    reply.get("id").and_then(Value::as_u64) == Some(id)
+}
+
+/// True when this line answers a load request.
+fn is_load_reply(reply: &Value) -> bool {
+    reply.get("ok").is_some()
+}
+
+/// True when a cold worker's very first generation came back with no text and is
+/// worth one more attempt. A warm empty result is a silent recording, which only
+/// the caller can judge, so it is never retried here.
+fn should_retry_cold(cold: bool, first_generation: bool, text: &str) -> bool {
+    cold && first_generation && text.trim().is_empty()
+}
+
+fn millis(elapsed: Duration) -> u64 {
+    elapsed.as_millis() as u64
+}
+
+/// What one worker call did, returned even when the generation failed so the UI
+/// can prove where a cold start spent its time instead of guessing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BarkRun {
+    pub text: String,
+    /// The worker was spawned for this call: nothing was warm.
+    pub cold: bool,
+    /// "hit" (a decoded checkpoint was read), "decode" (weights decoded), "warm".
+    pub cache: String,
+    pub spawn_ms: u64,
+    pub load_ms: u64,
+    pub transcribe_ms: u64,
+    /// 2 when a cold first generation came back empty and was retried.
+    pub attempts: u32,
+    /// Worker stderr tail, present only when the run failed.
+    pub stderr_tail: String,
+    /// Why the generation failed, when it did.
+    pub error: Option<String>,
 }
 
 /// Everything one transcription needs, with the model identity that keys the worker.
@@ -442,10 +513,31 @@ pub(crate) struct Transcription<'a> {
 #[derive(Clone, Default)]
 pub struct BarkWorkers(pub Arc<Mutex<Option<BarkWorker>>>);
 
+/// One generation on one worker, matched to its own request id. A transcription
+/// request is cloned per attempt so the retry cannot reuse an answered id.
+fn generate(worker: &mut BarkWorker, request: &Value) -> Result<String, String> {
+    let id = worker.reserve_id();
+    let mut payload = request.clone();
+    payload["id"] = json!(id);
+    worker.send(&payload)?;
+    let reply = worker.read_reply(TRANSCRIBE_DEADLINE, |reply| replies_to(reply, id))?;
+    interpret(&reply)
+}
+
 impl BarkWorkers {
     /// Run one transcription, replacing the worker when the model or device changes.
-    pub fn run(&self, job: Transcription<'_>) -> Result<String, String> {
+    ///
+    /// A freshly spawned worker's first generation is retried once if it comes back
+    /// empty: a cold model has been seen to answer nothing on its first call, and an
+    /// empty first window must never reach the user as silence. Every step is timed
+    /// and returned, so the UI can prove a cold boot, a cache read and the cost of
+    /// each generation.
+    pub fn run(&self, job: Transcription<'_>) -> Result<BarkRun, String> {
         let mut guard = self.registry();
+        let mut cold = false;
+        let mut cache = "warm".to_string();
+        let mut spawn_ms = 0;
+        let mut load_ms = 0;
 
         let stale = match guard.as_ref() {
             Some(worker) => worker.key != job.key,
@@ -455,9 +547,20 @@ impl BarkWorkers {
             if let Some(mut previous) = guard.take() {
                 previous.kill();
             }
+            let spawned_at = Instant::now();
             let mut fresh = spawn(job.python, job.runtime_dir, job.key.clone())?;
+            spawn_ms = millis(spawned_at.elapsed());
+
+            let loaded_at = Instant::now();
             fresh.send(&job.load)?;
-            let reply = fresh.read_json(LOAD_DEADLINE)?;
+            let reply = fresh.read_reply(LOAD_DEADLINE, is_load_reply)?;
+            load_ms = millis(loaded_at.elapsed());
+            cold = true;
+            cache = match reply.get("cached").and_then(Value::as_bool) {
+                Some(true) => "hit".to_string(),
+                Some(false) => "decode".to_string(),
+                None => "unknown".to_string(),
+            };
             if reply.get("ok").and_then(Value::as_bool) != Some(true) {
                 return Err(reply
                     .get("error")
@@ -469,22 +572,49 @@ impl BarkWorkers {
             start_reaper(&self.0);
         }
 
-        let outcome = {
-            let Some(worker) = guard.as_mut() else {
-                return Err("the Bark worker vanished".to_string());
-            };
-            worker.last_used = Instant::now();
-            match worker.send(&job.request) {
-                Ok(()) => worker.read_json(TRANSCRIBE_DEADLINE).map(|reply| interpret(&reply)),
-                Err(error) => Err(error),
-            }
+        let Some(worker) = guard.as_mut() else {
+            return Err("the Bark worker vanished".to_string());
         };
+        worker.last_used = Instant::now();
+        let first_generation = worker.first_generation;
+        let generated_at = Instant::now();
+
+        let first = generate(worker, &job.request);
+        let retry = matches!(&first, Ok(text) if should_retry_cold(cold, first_generation, text));
+        let (outcome, attempts) = if retry {
+            (generate(worker, &job.request), 2)
+        } else {
+            (first, 1)
+        };
+        worker.first_generation = false;
+        let transcribe_ms = millis(generated_at.elapsed());
 
         match outcome {
-            Ok(reply) => reply,
-            Err(transport) => {
+            Ok(text) => Ok(BarkRun {
+                text,
+                cold,
+                cache,
+                spawn_ms,
+                load_ms,
+                transcribe_ms,
+                attempts,
+                stderr_tail: String::new(),
+                error: None,
+            }),
+            Err(error) => {
+                let stderr_tail = worker.stderr_tail();
                 guard.take();
-                Err(transport)
+                Ok(BarkRun {
+                    text: String::new(),
+                    cold,
+                    cache,
+                    spawn_ms,
+                    load_ms,
+                    transcribe_ms,
+                    attempts,
+                    stderr_tail,
+                    error: Some(error),
+                })
             }
         }
     }
@@ -541,11 +671,11 @@ pub(crate) fn load_request(
     })
 }
 
-/// Request that transcribes one WAV file.
+/// Request that transcribes one WAV file. The request id is assigned per attempt
+/// by `run`, so a reply can only answer the request that asked for it.
 pub(crate) fn transcribe_request(audio: &Path, padding_seconds: f64) -> Value {
     json!({
         "type": "transcribe",
-        "id": 1,
         "wav": audio.to_string_lossy(),
         "pad": padding_seconds,
     })
@@ -558,7 +688,8 @@ mod tests {
     #[test]
     fn a_healthy_worker_error_keeps_its_text_out_of_the_way() {
         assert_eq!(interpret(&json!({ "text": " hello " })).unwrap(), "hello");
-        assert!(interpret(&json!({ "text": "   " })).is_err());
+        // Silence returns empty text: the whole-run decision belongs to the caller.
+        assert_eq!(interpret(&json!({ "text": "   " })).unwrap(), "");
         assert_eq!(
             interpret(&json!({ "error": "RuntimeError: boom" })).unwrap_err(),
             "RuntimeError: boom"
@@ -595,6 +726,14 @@ mod tests {
             WORKER.contains("loader.load_state_dict = original"),
             "the loader's own decode is restored after the build"
         );
+        assert!(
+            WORKER.contains("return used_cache"),
+            "the load reports whether it read the decoded checkpoint"
+        );
+        assert!(
+            WORKER.contains(r#""cached": bool(used_cache)"#),
+            "the load reply carries the cache verdict"
+        );
     }
 
     #[test]
@@ -604,6 +743,56 @@ mod tests {
         assert!(accept_line("42").is_none());
         assert!(accept_line("{ not json }").is_none());
         assert_eq!(accept_line(r#"{"ok": true}"#).unwrap()["ok"], true);
+    }
+
+    #[test]
+    fn only_the_reply_to_the_request_that_asked_counts() {
+        // A cold loader can print JSON of its own; that object must never be read as
+        // the answer to the generation that follows it.
+        assert!(!replies_to(&json!({ "model": "bark", "layers": 12 }), 1));
+        assert!(!replies_to(&json!({ "id": 2, "text": "another request" }), 1));
+        assert!(replies_to(&json!({ "id": 1, "text": "" }), 1));
+        assert!(!replies_to(&json!({ "id": "1", "text": "" }), 1));
+    }
+
+    #[test]
+    fn a_load_reply_is_the_one_carrying_ok() {
+        assert!(is_load_reply(&json!({ "ok": true, "cached": true })));
+        assert!(is_load_reply(&json!({ "ok": false, "error": "boom" })));
+        assert!(!is_load_reply(&json!({ "id": 1, "text": "hello" })));
+        assert!(!is_load_reply(&json!({ "model": "bark" })));
+    }
+
+    #[test]
+    fn only_a_cold_first_empty_generation_is_retried() {
+        assert!(should_retry_cold(true, true, ""));
+        assert!(should_retry_cold(true, true, "   \n"));
+        assert!(!should_retry_cold(false, true, ""), "a warm empty result is silence");
+        assert!(!should_retry_cold(true, false, ""), "only the first generation");
+        assert!(!should_retry_cold(true, true, "hello"));
+    }
+
+    #[test]
+    fn a_run_carries_its_boot_and_timings() {
+        let run = BarkRun {
+            text: "hello".to_string(),
+            cold: true,
+            cache: "hit".to_string(),
+            spawn_ms: 412,
+            load_ms: 41_200,
+            transcribe_ms: 3_100,
+            attempts: 2,
+            stderr_tail: String::new(),
+            error: None,
+        };
+        let value = serde_json::to_value(&run).expect("a run serializes");
+        assert_eq!(value["cold"], true);
+        assert_eq!(value["cache"], "hit");
+        assert_eq!(value["spawnMs"], 412);
+        assert_eq!(value["loadMs"], 41_200);
+        assert_eq!(value["transcribeMs"], 3_100);
+        assert_eq!(value["attempts"], 2);
+        assert!(value.get("error").is_some(), "the error field is always present");
     }
 
     #[test]

@@ -218,6 +218,23 @@ describe("per-session Events sidecar", () => {
     expect(loadSessionEvents("bad-alias")).toEqual([planVerdict]);
   });
 
+  it("keeps a voice run with its steps, boot kind and result", () => {
+    const run: SessionEventRecord = {
+      id: "voice-1",
+      type: "voice",
+      ts: 1_700_000_180_000,
+      turn: 2,
+      outcome: "done",
+      label: "Bark 3.0 (English), cold boot",
+      detail: "model=underdog/bark-3.0 engine=bark cache=hit",
+      steps: ["worker spawn: 412 ms", "model load: 41.2s, decoded cache hit", "window 1/1: 3.1s"],
+      result: "1 window, 64.2s audio, transcribed in 3.1s, 1842 characters",
+    };
+    ensureSessionDir("events-voice");
+    writeSessionEvents("events-voice", [run]);
+    expect(loadSessionEvents("events-voice")).toEqual([run]);
+  });
+
   it("writes JSON the next load can parse", () => {
     ensureSessionDir("events-demo");
     writeSessionEvents("events-demo", [planVerdict]);

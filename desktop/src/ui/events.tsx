@@ -39,6 +39,7 @@ const KIND_LABEL: Record<EventKind, TKey> = {
   choice: "contextPanel.eventsKindChoice",
   compaction: "contextPanel.eventsKindCompaction",
   subagent: "contextPanel.eventsKindSubagent",
+  voice: "contextPanel.eventsKindVoice",
 };
 
 /** Wording for each verdict/trigger the recorder can produce. */

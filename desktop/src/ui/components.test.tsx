@@ -1161,6 +1161,47 @@ describe("events", () => {
       );
     });
 
+    it("shows a voice run with its steps, timings and result", () => {
+      render(
+        <EventsPanel
+          messages={[]}
+          events={[
+            {
+              id: "voice-1",
+              type: "voice",
+              ts: 1_000,
+              turn: 1,
+              outcome: "done",
+              label: "Bark 3.0 (English), cold boot",
+              detail: "model=underdog/bark-3.0 engine=bark cache=hit",
+              steps: [
+                "worker spawn: 412 ms",
+                "model load: 41.2s, decoded cache hit",
+                "window 1/2: 3.1s, 30.0s audio",
+              ],
+              result: "2 windows, 34.2s audio, transcribed in 4.3s, 1842 characters",
+            },
+          ]}
+        />,
+      );
+
+      expect(document.querySelector(".ctx-evt-kind")?.textContent).toBe("Voice");
+      fireEvent.click(screen.getByRole("button", { name: "Show event details" }));
+      const steps = Array.from(document.querySelectorAll(".ctx-evt-steps li")).map(
+        (el) => el.textContent,
+      );
+      expect(steps).toEqual([
+        "worker spawn: 412 ms",
+        "model load: 41.2s, decoded cache hit",
+        "window 1/2: 3.1s, 30.0s audio",
+      ]);
+      const details = Array.from(document.querySelectorAll(".ctx-evt-detail")).map(
+        (el) => el.textContent,
+      );
+      expect(details).toContain("model=underdog/bark-3.0 engine=bark cache=hit");
+      expect(details).toContain("2 windows, 34.2s audio, transcribed in 4.3s, 1842 characters");
+    });
+
     it("shows a subagent spawn as its own row, tagged and jumpable", () => {
       const onJump = vi.fn();
       render(

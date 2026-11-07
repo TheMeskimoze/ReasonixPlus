@@ -3,11 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invoke, listen, handlers } = vi.hoisted(() => {
   const handlers = new Map<string, (message: { payload: unknown }) => void>();
+  // The host answers every generation with its boot, cache and timing envelope.
+  const BARK_RUN = {
+    text: "transcribed",
+    cold: true,
+    cache: "hit",
+    spawnMs: 4,
+    loadMs: 400,
+    transcribeMs: 30,
+    attempts: 2,
+    stderrTail: "",
+    error: null,
+  };
   const invoke = vi.fn(async (command: string, _args?: Record<string, unknown>) => {
     if (command === "voice_model_fetch") {
       return { engine: "bark", repoId: "repo", revision: "rev", files: [], bytes: 1 };
     }
-    if (command === "voice_bark_transcribe") return "transcribed";
+    if (command === "voice_bark_transcribe") return BARK_RUN;
     return { installed: true, dir: "/runtimes/bark", bytes: 1 };
   });
   const listen = vi.fn(
@@ -60,7 +72,13 @@ describe("Bark packaging", () => {
   });
 
   it("sends the declared format with a transcription", async () => {
-    await expect(transcribeWithBark(CHECKPOINT, new Float32Array(4))).resolves.toBe("transcribed");
+    await expect(transcribeWithBark(CHECKPOINT, new Float32Array(4))).resolves.toMatchObject({
+      text: "transcribed",
+      cold: true,
+      cache: "hit",
+      loadMs: 400,
+      attempts: 2,
+    });
 
     const args = argsOf("voice_bark_transcribe");
     expect(args.format).toBe("safetensors");

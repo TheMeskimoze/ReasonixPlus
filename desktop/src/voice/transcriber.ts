@@ -21,8 +21,11 @@ import {
   getVoiceModelOption,
   isVoiceModelAvailable,
 } from "./model-registry";
-import { CACTUS_MAX_SECONDS, CACTUS_SAMPLE_RATE, cactusSpeechEngine } from "./whistle-engine";
+import type { VoiceTrace } from "./trace";
+import { cactusSpeechEngine } from "./whistle-engine";
 import { downloadWhistleWeights, getCachedWhistleWeights } from "./whistle-weights";
+import { TRANSCRIBE_SAMPLE_RATE, transcribeWindows } from "./windows";
+
 export type TranscriberStatus =
   | "idle"
   | "loading-model"
@@ -31,10 +34,31 @@ export type TranscriberStatus =
   | "ready"
   | "error";
 
+/** How far the run is through the fixed windows a recording is cut into. */
+export interface TranscribeWindowState {
+  /** 1-based window whose audio is being transcribed. */
+  window: number;
+  /** Windows the recording was cut into. */
+  windows: number;
+  /** Audio seconds inside the current window transcribed so far. */
+  windowSeconds: number;
+  /** Audio length of the current window, never above one full window. */
+  windowLengthSeconds: number;
+  /** Audio seconds of the whole recording transcribed so far. */
+  processedSeconds: number;
+  /** Whole-recording length in seconds. */
+  totalSeconds: number;
+  /** Milliseconds spent decoding the current window so far. */
+  decodeMs: number;
+}
+
 export interface TranscribeProgress {
   status: TranscriberStatus;
   detail?: string;
+  /** Whole-recording completion in percent, derived from transcribed audio. */
   progress?: number;
+  /** Window state, present on every `transcribing` report. */
+  window?: TranscribeWindowState;
 }
 
 export interface DownloadProgress {
@@ -55,6 +79,8 @@ export interface TranscribeOptions {
   onProgress?: (status: TranscribeProgress) => void;
   /** Cancels the transcription; the call rejects with an AbortError. */
   signal?: AbortSignal;
+  /** Where every step of this run is recorded, for the Events row. */
+  trace?: VoiceTrace;
 }
 
 function errorDetails(err: unknown): string {
@@ -111,6 +137,21 @@ type ASRPipeline = (
   audio: Float32Array,
   options?: Record<string, unknown>,
 ) => Promise<{ text: string } | string>;
+
+/** How often the window being decoded re-reports its measured decode time. */
+const TRANSCRIBE_PROGRESS_INTERVAL_MS = 250;
+
+/** One wording for a recording no engine heard speech in. */
+const NO_SPEECH_ERROR = "No speech was recognized in the recording.";
+
+/** Text of an ASR pipeline result; throws for a shape the pipeline never returns. */
+function outputText(output: { text: string } | string): string {
+  if (typeof output === "string") return output;
+  if (output && typeof output.text === "string") return output.text;
+  throw new Error(
+    `Speech recognizer returned an unsupported result (${Object.prototype.toString.call(output)}).`,
+  );
+}
 
 type TransformersEnv = typeof import("@huggingface/transformers").env;
 
@@ -246,6 +287,10 @@ class LocalSpeechTranscriber {
   private initPromise: Promise<ASRPipeline> | null = null;
   private currentStatus: TranscriberStatus = "idle";
   private onStatusChange?: (progress: TranscribeProgress) => void;
+  /** Reports of the transcription in flight, so the caller can render them live. */
+  private progressSink?: (progress: TranscribeProgress) => void;
+  /** Device the loaded Transformers.js pipeline runs on, for the run record. */
+  private pipelineDevice: "webgpu" | "wasm" | null = null;
 
   public get status(): TranscriberStatus {
     return this.currentStatus;
@@ -253,6 +298,11 @@ class LocalSpeechTranscriber {
 
   public get activeModel(): VoiceModelId {
     return this.activeModelId;
+  }
+
+  /** Device the loaded pipeline runs on, or null when none is loaded. */
+  public get device(): "webgpu" | "wasm" | null {
+    return this.pipelineDevice;
   }
 
   public setModel(modelId: VoiceModelId): void {
@@ -264,6 +314,7 @@ class LocalSpeechTranscriber {
     if (this.loadedModelId !== modelId) {
       this.pipelineInstance = null;
       this.loadedModelId = null;
+      this.pipelineDevice = null;
       this.currentStatus = "idle";
     }
   }
@@ -272,11 +323,16 @@ class LocalSpeechTranscriber {
     this.onStatusChange = listener;
   }
 
-  private updateStatus(status: TranscriberStatus, detail?: string, progress?: number): void {
+  private updateStatus(
+    status: TranscriberStatus,
+    detail?: string,
+    progress?: number,
+    window?: TranscribeWindowState,
+  ): void {
     this.currentStatus = status;
-    if (this.onStatusChange) {
-      this.onStatusChange({ status, detail, progress });
-    }
+    const report: TranscribeProgress = { status, detail, progress, window };
+    this.onStatusChange?.(report);
+    this.progressSink?.(report);
   }
 
   /**
@@ -322,6 +378,7 @@ class LocalSpeechTranscriber {
       if (this.activeModelId === modelId) {
         this.pipelineInstance = pipe;
         this.loadedModelId = modelId;
+        this.pipelineDevice = hasGpu ? "webgpu" : "wasm";
         this.updateStatus("ready");
       } else {
         this.updateStatus("idle");
@@ -411,17 +468,32 @@ class LocalSpeechTranscriber {
   }
 
   /** Ensures the active Cactus speech model is loaded into the engine. */
-  private async ensureCactusModel(opt: VoiceModelOption): Promise<void> {
-    if (cactusSpeechEngine.isModelLoaded) return;
+  private async ensureCactusModel(opt: VoiceModelOption, trace?: VoiceTrace): Promise<void> {
+    if (cactusSpeechEngine.isModelLoaded) {
+      trace?.boot("warm");
+      return;
+    }
+    trace?.boot("cold");
+
+    const readingAt = Date.now();
     const bytes = await getCachedWhistleWeights(opt);
+    trace?.mark(
+      "weights read",
+      Date.now() - readingAt,
+      bytes ? "cached archive" : "not downloaded",
+    );
     if (!bytes) {
       throw new Error(
         `${opt.name} is not downloaded. Download it in Settings before transcribing.`,
       );
     }
+
     this.updateStatus("loading-model", `Loading ${opt.name}...`);
     try {
+      const loadingAt = Date.now();
       await cactusSpeechEngine.loadModel(bytes);
+      trace?.mark("engine load", Date.now() - loadingAt, "module and archive");
+      trace?.fact("device", "wasm");
     } catch (err) {
       const details = errorDetails(err);
       this.updateStatus("error", details);
@@ -429,18 +501,42 @@ class LocalSpeechTranscriber {
     }
   }
 
-  /** Transcribes through the host Bark runtime. */
+  /** Transcribes through the host Bark runtime, one host call per window. */
   private async transcribeBark(
     opt: VoiceModelOption,
     audioData: Float32Array,
     options?: TranscribeOptions,
   ): Promise<TranscribeResult> {
     if (options?.signal?.aborted) throw abortError();
-    this.updateStatus("transcribing", `Transcribing with ${opt.name}...`);
-    options?.onProgress?.({ status: "transcribing", detail: "Transcribing speech..." });
+    const trace = options?.trace;
     try {
-      const text = await transcribeWithBarkHost(opt, audioData);
-      if (!text) throw new Error("No speech was recognized in the recording.");
+      const text = await this.transcribeInWindows(
+        audioData,
+        async (window) => {
+          const run = await transcribeWithBarkHost(opt, window);
+          // The host reports the cold boot, the cache verdict and both timings,
+          // so the row proves what happened instead of inferring it.
+          trace?.boot(run.cold ? "cold" : "warm");
+          if (run.cache !== "warm") trace?.fact("cache", run.cache);
+          if (run.spawnMs > 0) trace?.mark("worker spawn", run.spawnMs);
+          if (run.loadMs > 0) {
+            trace?.mark(
+              "model load",
+              run.loadMs,
+              run.cache === "hit" ? "decoded cache hit" : "weights decoded",
+            );
+          }
+          if (run.attempts > 1) trace?.retried(run.attempts - 1);
+          if (run.error) {
+            throw new Error(
+              run.stderrTail ? `${run.error} (worker stderr: ${run.stderrTail})` : run.error,
+            );
+          }
+          return run.text;
+        },
+        options,
+      );
+      if (!text) throw new Error(NO_SPEECH_ERROR);
       this.updateStatus("ready");
       return { text };
     } catch (err) {
@@ -448,32 +544,32 @@ class LocalSpeechTranscriber {
         this.updateStatus("idle");
         throw err;
       }
-      const details = errorDetails(err);
-      this.updateStatus("error", details);
+      this.updateStatus("error", errorDetails(err));
       throw err;
     }
   }
 
-  /** Transcribes via the Cactus engine (Whistle). */
+  /** Transcribes via the Cactus engine (Whistle), one engine call per window. */
   private async transcribeWithCactus(
     opt: VoiceModelOption,
     audioData: Float32Array,
     options?: TranscribeOptions,
   ): Promise<TranscribeResult> {
     try {
-      await raceAbort(this.ensureCactusModel(opt), options?.signal);
+      await raceAbort(this.ensureCactusModel(opt, options?.trace), options?.signal);
     } catch (err) {
       if (isAbortError(err)) this.updateStatus("idle");
       throw err;
     }
 
-    this.updateStatus("transcribing", "Transcribing speech...");
-    options?.onProgress?.({ status: "transcribing", detail: "Transcribing speech..." });
-
     try {
-      const text = await this.transcribeCactusChunks(audioData, options?.signal);
+      const text = await this.transcribeInWindows(
+        audioData,
+        async (window) => (await cactusSpeechEngine.transcribe(window)).text,
+        options,
+      );
       if (!text) {
-        throw new Error("No speech was recognized in the recording.");
+        throw new Error(NO_SPEECH_ERROR);
       }
       this.updateStatus("ready");
       return { text };
@@ -482,43 +578,86 @@ class LocalSpeechTranscriber {
         this.updateStatus("idle");
         throw err;
       }
-      const details = errorDetails(err);
-      this.updateStatus("error", details);
-      throw new Error(`Speech transcription failed (${details}).`);
+      this.updateStatus("error", errorDetails(err));
+      throw err;
     }
   }
 
   /**
-   * The Whistle engine transcribes at most 30 s of audio in a single call, so a
-   * recording longer than 30 s is cut into consecutive 30 s windows and
-   * transcribed in order, joining the partial transcripts into one result.
+   * Transcribes `audioData` one window at a time, in order, joining the window
+   * transcripts into one result.
    *
-   * A recording that fits in one window — anything shorter than, or exactly,
-   * 30 s, i.e. the common case — is transcribed in a single engine call. The
-   * final window of a longer recording is the remainder and may be any length
-   * up to 30 s; the engine returns empty text for silence, so a short tail can
-   * never inject an invented fragment.
+   * Every engine clips a longer buffer, so the windows are the only thing that
+   * keeps a minute of speech from being cut to its first 30 s. A window the
+   * engine transcribes to nothing is silence, not a failure; the caller reports
+   * a recording that produced no text at all.
    */
-  private async transcribeCactusChunks(
+  private async transcribeInWindows(
     audioData: Float32Array,
-    signal?: AbortSignal,
+    run: (window: Float32Array) => Promise<string>,
+    options?: TranscribeOptions,
   ): Promise<string> {
-    const chunkSamples = CACTUS_SAMPLE_RATE * CACTUS_MAX_SECONDS;
-
-    // Fast path: a single window (including every recording under 30 s).
-    if (audioData.length <= chunkSamples) {
-      const { text } = await raceAbort(cactusSpeechEngine.transcribe(audioData), signal);
-      return text.trim();
-    }
-
+    const windows = transcribeWindows(audioData.length);
+    const totalSeconds = audioData.length / TRANSCRIBE_SAMPLE_RATE;
     const parts: string[] = [];
-    for (let start = 0; start < audioData.length; start += chunkSamples) {
-      const end = Math.min(start + chunkSamples, audioData.length);
-      const window = audioData.subarray(start, end);
-      const { text } = await raceAbort(cactusSpeechEngine.transcribe(window), signal);
+    const trace = options?.trace;
+    const decodingAt = Date.now();
+    trace?.windows(windows.length);
+    trace?.audio(totalSeconds);
+
+    for (let index = 0; index < windows.length; index += 1) {
+      const { start, end } = windows[index]!;
+      const offsetSeconds = start / TRANSCRIBE_SAMPLE_RATE;
+      const windowLengthSeconds = (end - start) / TRANSCRIBE_SAMPLE_RATE;
+      const startedAt = Date.now();
+      // An engine decodes a window in one call, so the audio position inside the
+      // window is 0 until that call returns and the whole window afterwards.
+      // Only the decode time is measured between the two, never extrapolated.
+      let windowSeconds = 0;
+      const report = (): void => {
+        const processedSeconds = offsetSeconds + windowSeconds;
+        this.updateStatus(
+          "transcribing",
+          `Transcribing window ${index + 1} of ${windows.length}...`,
+          totalSeconds > 0 ? Math.round((processedSeconds / totalSeconds) * 100) : 0,
+          {
+            window: index + 1,
+            windows: windows.length,
+            windowSeconds,
+            windowLengthSeconds,
+            processedSeconds,
+            totalSeconds,
+            decodeMs: Date.now() - startedAt,
+          },
+        );
+      };
+
+      report();
+      const ticker = setInterval(report, TRANSCRIBE_PROGRESS_INTERVAL_MS);
+      let text: string;
+      try {
+        text = await raceAbort(run(audioData.subarray(start, end)), options?.signal);
+      } catch (err) {
+        if (isAbortError(err)) throw err;
+        throw new Error(
+          `Transcription failed in window ${index + 1} of ${windows.length} (${errorDetails(err)}).`,
+        );
+      } finally {
+        clearInterval(ticker);
+      }
+
+      windowSeconds = windowLengthSeconds;
+      report();
+      trace?.mark(
+        `window ${index + 1}/${windows.length}`,
+        Date.now() - startedAt,
+        `${windowLengthSeconds.toFixed(1)}s audio`,
+      );
       const trimmed = text.trim();
       if (trimmed) parts.push(trimmed);
     }
+
+    trace?.decoded(Date.now() - decodingAt);
     return parts.join(" ").trim();
   }
 
@@ -557,6 +696,7 @@ class LocalSpeechTranscriber {
 
         this.pipelineInstance = pipe;
         this.loadedModelId = modelId;
+        this.pipelineDevice = hasGpu ? "webgpu" : "wasm";
         markVoiceModelDownloaded(modelId, true);
         this.updateStatus("ready");
         return pipe;
@@ -574,7 +714,8 @@ class LocalSpeechTranscriber {
   }
 
   /**
-   * Transcribes a 16 kHz Float32Array audio buffer into text.
+   * Transcribes a 16 kHz Float32Array audio buffer into text, one window at a
+   * time whichever engine runs it.
    */
   public async transcribe(
     audioData: Float32Array,
@@ -584,9 +725,9 @@ class LocalSpeechTranscriber {
       throw new Error("No microphone audio was captured.");
     }
 
-    const minSamples = 16000 * 0.2; // 200 ms minimum audio
+    const minSamples = TRANSCRIBE_SAMPLE_RATE * 0.2; // 200 ms minimum audio
     if (audioData.length < minSamples) {
-      const durationMs = Math.round((audioData.length / 16000) * 1000);
+      const durationMs = Math.round((audioData.length / TRANSCRIBE_SAMPLE_RATE) * 1000);
       throw new Error(
         `Recording was too short to transcribe (${durationMs} ms captured; minimum is 200 ms).`,
       );
@@ -594,13 +735,33 @@ class LocalSpeechTranscriber {
 
     const opt = getVoiceModelOption(this.activeModelId);
     assertRunnable(opt);
-    if (opt.engine === "bark") {
-      return this.transcribeBark(opt, audioData, options);
+    this.progressSink = options?.onProgress;
+    try {
+      if (opt.engine === "bark") {
+        return await this.transcribeBark(opt, audioData, options);
+      }
+      if (opt.engine === "cactus") {
+        return await this.transcribeWithCactus(opt, audioData, options);
+      }
+      return await this.transcribeWithPipeline(audioData, options);
+    } finally {
+      this.progressSink = undefined;
     }
-    if (opt.engine === "cactus") {
-      return this.transcribeWithCactus(opt, audioData, options);
-    }
+  }
 
+  /** Transcribes through the Transformers.js pipeline, one call per window. */
+  private async transcribeWithPipeline(
+    audioData: Float32Array,
+    options?: TranscribeOptions,
+  ): Promise<TranscribeResult> {
+    const trace = options?.trace;
+    const opt = getVoiceModelOption(this.activeModelId);
+    trace?.fact("repo", opt.repoId);
+    // A pipeline already in memory is a warm start; loading one is the cold path.
+    const alreadyLoaded =
+      this.pipelineInstance !== null && this.loadedModelId === this.activeModelId;
+    trace?.boot(alreadyLoaded ? "warm" : "cold");
+    const loadingAt = Date.now();
     let pipe: ASRPipeline;
     try {
       pipe = await raceAbort(this.getPipeline(), options?.signal);
@@ -608,35 +769,27 @@ class LocalSpeechTranscriber {
       if (isAbortError(err)) this.updateStatus("idle");
       throw err;
     }
-
-    this.updateStatus("transcribing", "Transcribing speech...");
-    if (options?.onProgress) {
-      options.onProgress({ status: "transcribing", detail: "Transcribing speech..." });
+    if (!alreadyLoaded) {
+      trace?.mark("pipeline load", Date.now() - loadingAt, "ONNX session built");
     }
+    if (this.pipelineDevice) trace?.fact("device", this.pipelineDevice);
 
     try {
+      // Whisper truncates any buffer past its 30 s clip, so each window is a
+      // separate pipeline call and none is longer than the model's input.
       const isEnglishOnly = this.activeModelId.endsWith(".en");
       const generateOptions: Record<string, unknown> = {
         return_timestamps: false,
         ...(isEnglishOnly ? {} : { language: "english", task: "transcribe" }),
       };
 
-      const output = await raceAbort(pipe(audioData, generateOptions), options?.signal);
-
-      let rawText: string;
-      if (typeof output === "string") {
-        rawText = output;
-      } else if (output && typeof output.text === "string") {
-        rawText = output.text;
-      } else {
-        throw new Error(
-          `Speech recognizer returned an unsupported result (${Object.prototype.toString.call(output)}).`,
-        );
-      }
-
-      const text = rawText.trim();
+      const text = await this.transcribeInWindows(
+        audioData,
+        async (window) => outputText(await pipe(window, generateOptions)),
+        options,
+      );
       if (!text) {
-        throw new Error("No speech was recognized in the recording.");
+        throw new Error(NO_SPEECH_ERROR);
       }
       this.updateStatus("ready");
       return { text };
@@ -645,9 +798,8 @@ class LocalSpeechTranscriber {
         this.updateStatus("idle");
         throw err;
       }
-      const details = errorDetails(err);
-      this.updateStatus("error", details);
-      throw new Error(`Speech transcription failed (${details}).`);
+      this.updateStatus("error", errorDetails(err));
+      throw err;
     }
   }
 
@@ -660,6 +812,7 @@ class LocalSpeechTranscriber {
   public reset(): void {
     this.pipelineInstance = null;
     this.loadedModelId = null;
+    this.pipelineDevice = null;
     this.initPromise = null;
     this.isInitializing = false;
     this.updateStatus("idle");

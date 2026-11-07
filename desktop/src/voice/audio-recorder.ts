@@ -3,17 +3,39 @@
  * to 16 kHz mono Float32Array PCM suitable for Whisper transcription.
  */
 
+import type { VoiceTrace } from "./trace";
+import { TRANSCRIBE_SAMPLE_RATE, windowPosition } from "./windows";
+
 export interface AudioRecordingResult {
   audioData: Float32Array<ArrayBuffer>;
   durationSeconds: number;
 }
 
+/** Live position of a recording inside the windows it will be transcribed in. */
+export interface AudioRecordingProgress {
+  /** Seconds captured so far. */
+  seconds: number;
+  /** 1-based window being filled. */
+  window: number;
+  /** Seconds captured into the current window. */
+  windowSeconds: number;
+  /** Length of one window in seconds; the last window is only measured at stop. */
+  windowLengthSeconds: number;
+}
+
 export interface AudioRecorderOptions {
   onVolumeChange?: (level: number) => void;
+  /** Reports how far the recording has filled its current window. */
+  onProgress?: (progress: AudioRecordingProgress) => void;
   onError?: (error: Error) => void;
   /** Preferred audio input device id (from `enumerateDevices`). Empty → OS/browser default. */
   deviceId?: string;
+  /** Where the capture facts of this run are recorded, for the Events row. */
+  trace?: VoiceTrace;
 }
+
+/** Progress cadence: fast enough to read as live, slow enough to keep renders cheap. */
+const PROGRESS_INTERVAL_MS = 200;
 
 type DetailedError = Error & { constraint?: string };
 
@@ -110,14 +132,20 @@ export class AudioRecorder {
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private chunks: Float32Array[] = [];
   private isRecording = false;
+  private samplesCaptured = 0;
+  private lastProgressAt = 0;
   private onVolumeChange?: (level: number) => void;
+  private onProgress?: (progress: AudioRecordingProgress) => void;
   private onError?: (error: Error) => void;
   private deviceId?: string;
+  private trace?: VoiceTrace;
 
   constructor(options?: AudioRecorderOptions) {
     this.onVolumeChange = options?.onVolumeChange;
+    this.onProgress = options?.onProgress;
     this.onError = options?.onError;
     this.deviceId = options?.deviceId;
+    this.trace = options?.trace;
   }
 
   public get recording(): boolean {
@@ -153,6 +181,7 @@ export class AudioRecorder {
       const requestedConstraints: MediaTrackConstraints = this.deviceId
         ? { ...audioConstraints, deviceId: { exact: this.deviceId } }
         : audioConstraints;
+      this.trace?.fact("input", this.deviceId ? "selected device" : "system default");
       try {
         this.mediaStream = await navigator.mediaDevices.getUserMedia({
           audio: requestedConstraints,
@@ -169,6 +198,7 @@ export class AudioRecorder {
           (!constraintErr.constraint || constraintErr.constraint === "deviceId");
         if (!deviceUnavailable) throw deviceErr;
         this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        this.trace?.fact("input", "system default (selected device unavailable)");
       }
     } catch (err) {
       const error = err as Error;
@@ -209,8 +239,11 @@ export class AudioRecorder {
       if (this.audioContext.state === "suspended") {
         await this.audioContext.resume();
       }
+      this.trace?.fact("inputRate", `${this.audioContext.sampleRate} Hz`);
 
       this.chunks = [];
+      this.samplesCaptured = 0;
+      this.lastProgressAt = 0;
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
       if (!this.audioContext.audioWorklet) {
@@ -259,6 +292,15 @@ export class AudioRecorder {
         if (!(data instanceof Float32Array)) return;
 
         this.chunks.push(data);
+        this.samplesCaptured += data.length;
+
+        const now = Date.now();
+        if (this.onProgress && now - this.lastProgressAt >= PROGRESS_INTERVAL_MS) {
+          this.lastProgressAt = now;
+          const rate = this.audioContext?.sampleRate || TRANSCRIBE_SAMPLE_RATE;
+          const seconds = this.samplesCaptured / rate;
+          this.onProgress({ seconds, ...windowPosition(seconds) });
+        }
 
         if (this.onVolumeChange) {
           let sumSquares = 0;
@@ -348,9 +390,16 @@ export class AudioRecorder {
       offset += chunk.length;
     }
     this.chunks = [];
+    this.samplesCaptured = 0;
+    this.lastProgressAt = 0;
 
     const resampled = resampleAudio(merged, sourceSampleRate, 16000);
     const durationSeconds = resampled.length / 16000;
+    this.trace?.fact(
+      "captured",
+      `${(totalLength / sourceSampleRate).toFixed(1)}s at ${sourceSampleRate} Hz`,
+    );
+    this.trace?.fact("delivered", `${durationSeconds.toFixed(1)}s at ${TRANSCRIBE_SAMPLE_RATE} Hz`);
 
     return {
       audioData: resampled,
@@ -364,6 +413,8 @@ export class AudioRecorder {
   public cancel(): void {
     this.isRecording = false;
     this.chunks = [];
+    this.samplesCaptured = 0;
+    this.lastProgressAt = 0;
     this.cleanup();
   }
 

@@ -5506,6 +5506,38 @@ describe("Desktop App reducer — plan usage", () => {
   });
 });
 
+describe("voice events — proof in Events, never in the transcript", () => {
+  const started = {
+    id: "voice-1",
+    type: "voice" as const,
+    outcome: "started",
+    label: "Bark 3.0 (English), cold boot",
+    detail: "model=underdog/bark-3.0 engine=bark",
+  };
+
+  it("records a voice run without adding a transcript row", () => {
+    const before = initialState();
+    const next = reduce(before, { t: "voice_event", event: started });
+
+    expect(next.messages).toEqual(before.messages);
+    expect(next.sessionEvents).toHaveLength(1);
+    expect(next.sessionEvents[0]?.type).toBe("voice");
+    expect(next.sessionEvents[0]?.ts).toBeGreaterThan(0);
+  });
+
+  it("settles the row it started instead of adding a second one", () => {
+    const running = reduce(initialState(), { t: "voice_event", event: started });
+    const next = reduce(running, {
+      t: "voice_event",
+      event: { ...started, outcome: "done", result: "1 window, 4.0s audio" },
+    });
+
+    expect(next.sessionEvents).toHaveLength(1);
+    expect(next.sessionEvents[0]?.outcome).toBe("done");
+    expect(next.sessionEvents[0]?.result).toBe("1 window, 4.0s audio");
+  });
+});
+
 describe("sanitizeSettingsPatch — secrets never enter the settings view state", () => {
   it("drops the provider settings map and engine keys but keeps non-secret fields", () => {
     // Map keys come from declarations, so this typechecks with none declared as

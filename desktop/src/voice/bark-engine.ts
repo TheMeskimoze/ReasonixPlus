@@ -144,12 +144,30 @@ export async function removeBarkModel(option: VoiceModelOption): Promise<void> {
   await invoke("voice_model_remove", { engine: option.engine, repoId: option.repoId });
 }
 
+/** What one host-side generation did, timed end to end. */
+export interface BarkTranscribeResult {
+  text: string;
+  /** The worker was spawned for this call: nothing was warm. */
+  cold: boolean;
+  /** "hit" read a decoded checkpoint, "decode" decoded the weights, "warm" reused a model. */
+  cache: "hit" | "decode" | "warm" | "unknown";
+  spawnMs: number;
+  loadMs: number;
+  transcribeMs: number;
+  /** 2 when a cold first generation came back empty and the host retried it. */
+  attempts: number;
+  /** Worker stderr tail, present only when the run failed. */
+  stderrTail: string;
+  /** Why the generation failed, when it did. */
+  error: string | null;
+}
+
 export async function transcribeWithBark(
   option: VoiceModelOption,
   audioData: Float32Array,
-): Promise<string> {
+): Promise<BarkTranscribeResult> {
   const { format, weightsFile, loaderFile } = packaging(option);
-  const text = await invoke<string | null>("voice_bark_transcribe", {
+  const run = await invoke<BarkTranscribeResult | null>("voice_bark_transcribe", {
     runtimeDirName: RUNTIME_DIR,
     engine: option.engine,
     repoId: option.repoId,
@@ -161,5 +179,5 @@ export async function transcribeWithBark(
     sampleRate: BARK_SAMPLE_RATE,
     device: BARK_RUNTIME.device,
   });
-  return requireHost(text, "Bark");
+  return requireHost(run, "Bark");
 }

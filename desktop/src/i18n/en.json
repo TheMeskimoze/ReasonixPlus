@@ -86,6 +86,10 @@
     "voiceRecording": "Listening... Click to stop and transcribe",
     "voiceTranscribing": "Transcribing audio...",
     "voiceTranscribingCancel": "Transcribing audio... Click to cancel",
+    "voiceRecordingState": "Recording, window {window}, {seconds} / {windowLength}",
+    "voiceTranscribingState": "Transcribing, window {window} of {windows}, {seconds} / {windowLength}",
+    "voiceTranscribingStateCancel": "Transcribing, window {window} of {windows}, {seconds} / {windowLength}. Click to cancel",
+    "voiceDecodeElapsed": "{elapsed} elapsed",
     "voiceError": "Voice input failed: {error}"
   },
   "dragDrop": {
@@ -824,6 +828,7 @@
     "eventsKindChoice": "Choice",
     "eventsKindCompaction": "Compaction",
     "eventsKindSubagent": "Subagent",
+    "eventsKindVoice": "Voice",
     "eventsKindColumn": "Type",
     "eventsOptions": "Options offered",
     "eventsSteps": "Plan steps",

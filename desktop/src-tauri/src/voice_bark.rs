@@ -8,7 +8,7 @@ use crate::voice_host::blocking;
 use crate::voice_models::{installed_dirs, read_manifest};
 use crate::voice_paths::{app_voice_root, runtime_dir};
 use crate::voice_runtime::python_exe;
-use crate::voice_worker::{BarkWorkers, Transcription, load_request, transcribe_request};
+use crate::voice_worker::{BarkRun, BarkWorkers, Transcription, load_request, transcribe_request};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
@@ -72,7 +72,7 @@ fn transcribe_blocking(
     samples: &[f32],
     sample_rate: u32,
     device: &str,
-) -> Result<String, String> {
+) -> Result<BarkRun, String> {
     if samples.is_empty() {
         return Err("the recording contained no samples".to_string());
     }
@@ -118,7 +118,7 @@ pub async fn voice_bark_transcribe(
     samples: Vec<f32>,
     sample_rate: u32,
     device: String,
-) -> Result<String, String> {
+) -> Result<BarkRun, String> {
     let registry = workers.inner().clone();
     blocking(move || {
         transcribe_blocking(

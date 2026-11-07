@@ -72,6 +72,95 @@ describe("LocalSpeechTranscriber", () => {
     });
   });
 
+  it("transcribes a recording longer than 30 s as consecutive 30 s windows", async () => {
+    // Whisper's feature extractor slices anything past its 30 s clip, so the
+    // pipeline must never see more than one window at a time.
+    const fakePipe = vi.fn().mockImplementation(async () => ({ text: "window text" }));
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+    speechTranscriber.setModel("whisper-tiny.en");
+
+    const result = await speechTranscriber.transcribe(new Float32Array(16000 * 61));
+
+    expect(fakePipe).toHaveBeenCalledTimes(3);
+    expect(fakePipe.mock.calls.map(([window]) => window.length)).toEqual([
+      16000 * 30,
+      16000 * 30,
+      16000 * 1,
+    ]);
+    expect(result.text).toBe("window text window text window text");
+  });
+
+  it("reports the window counter and the position inside the recording", async () => {
+    const fakePipe = vi.fn().mockResolvedValue({ text: "ok" });
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+    speechTranscriber.setModel("whisper-tiny.en");
+
+    const windows: Array<Record<string, number>> = [];
+    await speechTranscriber.transcribe(new Float32Array(16000 * 45), {
+      onProgress: (progress) => {
+        if (progress.window) windows.push(progress.window as unknown as Record<string, number>);
+      },
+    });
+
+    expect(windows.length).toBeGreaterThan(0);
+    for (const report of windows) {
+      expect(report.windows).toBe(2);
+      expect(report.totalSeconds).toBeCloseTo(45, 5);
+      expect(report.windowLengthSeconds).toBeLessThanOrEqual(30);
+      expect(report.windowSeconds).toBeGreaterThanOrEqual(0);
+      expect(report.processedSeconds).toBeLessThanOrEqual(45);
+    }
+    // Window 1 completes with its whole 30 s, window 2 holds the remaining 15 s.
+    expect(windows.some((report) => report.window === 1 && report.windowSeconds === 30)).toBe(true);
+    expect(
+      windows.some(
+        (report) =>
+          report.window === 2 &&
+          report.windowLengthSeconds === 15 &&
+          report.windowSeconds === 15 &&
+          report.processedSeconds === 45,
+      ),
+    ).toBe(true);
+  });
+
+  it("names the window that failed", async () => {
+    const fakePipe = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "first" })
+      .mockRejectedValueOnce(new Error("decoder crashed"));
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+    speechTranscriber.setModel("whisper-tiny.en");
+
+    await expect(speechTranscriber.transcribe(new Float32Array(16000 * 45))).rejects.toThrow(
+      /Transcription failed in window 2 of 2 .*decoder crashed/,
+    );
+    expect(speechTranscriber.status).toBe("error");
+  });
+
+  it("treats a silent window as silence and keeps the spoken ones", async () => {
+    const fakePipe = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "  " })
+      .mockResolvedValueOnce({ text: " later words " });
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+    speechTranscriber.setModel("whisper-tiny.en");
+
+    const result = await speechTranscriber.transcribe(new Float32Array(16000 * 45));
+
+    expect(result.text).toBe("later words");
+    expect(fakePipe).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails only when every window is silent", async () => {
+    const fakePipe = vi.fn().mockResolvedValue({ text: "" });
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+    speechTranscriber.setModel("whisper-tiny.en");
+
+    await expect(speechTranscriber.transcribe(new Float32Array(16000 * 45))).rejects.toThrow(
+      /No speech was recognized/,
+    );
+  });
+
   it("configures transformers env with proxy=false and loads using repoId", async () => {
     const fakePipe = vi.fn().mockResolvedValue({ text: "Hello world" });
     mockPipeline.mockResolvedValueOnce(fakePipe);

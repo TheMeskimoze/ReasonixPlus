@@ -19,6 +19,7 @@ export function makeComposerBaseProps(
     editMode: "follow",
     onEditModeChange: vi.fn(),
     onVoiceError: vi.fn(),
+    onVoiceEvent: vi.fn(),
     textareaRef: { current: null },
     ...overrides,
   };
