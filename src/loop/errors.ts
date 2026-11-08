@@ -111,6 +111,7 @@ export function formatLoopError(
   if (status === "404") return providerMessage(provider, "notFound", { inner });
   if (status === "408") return providerMessage(provider, "timeout", { inner });
   if (status === "429") {
+    if (isFreeTierLimit(inner)) return formatFreeTierLimit(provider, inner);
     return providerMessage(provider, isOutOfCredits429(inner) ? "credits" : "rate", { inner });
   }
   if (is5xxStatus(status)) {
@@ -388,6 +389,29 @@ const OUT_OF_CREDITS_429 =
 
 function isOutOfCredits429(inner: string): boolean {
   return OUT_OF_CREDITS_429.test(inner);
+}
+
+/** The gateway's own free-tier cap, which is accounted per identity: the same
+ *  machine can be refused while the signed-in client is served. */
+function isFreeTierLimit(inner: string): boolean {
+  return /freeusagelimit|free usage limit/i.test(inner);
+}
+
+/** Reports the window the gateway named and the identity the turn used, instead
+ *  of suggesting a key that cannot lift a free-tier cap. */
+function formatFreeTierLimit(provider: string, inner: string): string {
+  const wait = /\[retry-after:\s*(\d+)s\]/.exec(inner)?.[1];
+  const key = `errors.${errorI18nPrefix(provider)}FreeTier` as Parameters<typeof t>[0];
+  const body = inner.replace(/\s*\[retry-after:\s*\d+s\]/, "");
+  return t(key, {
+    inner: body,
+    window:
+      wait === undefined
+        ? ""
+        : t("errors.freeTierWindow", {
+            minutes: String(Math.max(1, Math.round(Number(wait) / 60))),
+          }),
+  });
 }
 
 function formatBalanceProbe5xx(

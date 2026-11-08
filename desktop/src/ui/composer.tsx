@@ -337,6 +337,8 @@ export function Composer({
   opencodeModels?: string[];
   opencodeModelsError?: string;
   opencodeVisionModels?: ReadonlySet<string>;
+  /** False when free OpenCode ids cannot be served here, so the picker omits them. */
+  freeTierReady?: boolean;
   /** Re-query the models.dev catalog when the picker opens (see `onRefreshOllamaModels`). */
   onRefreshOpencodeModels?: () => void;
   /** Re-query every provider's discovery catalog (models-endpoint providers). */
@@ -1335,6 +1337,7 @@ export function ModelList({
   opencodeModels,
   opencodeModelsError,
   opencodeVisionModels,
+  freeTierReady,
   enabledModels,
   providerCatalogs,
   providerHints,
@@ -1351,6 +1354,8 @@ export function ModelList({
   opencodeModels?: string[];
   opencodeModelsError?: string;
   opencodeVisionModels?: ReadonlySet<string>;
+  /** False when free OpenCode ids cannot be served here, so the picker omits them. */
+  freeTierReady?: boolean;
   providerCatalogs?: Partial<Record<ProviderCatalogKey, ProviderCatalogView>>;
   /** Live-catalog ids per provider, so every row's tag names the provider that
    *  actually serves it (a resold id keeps its own qualifier). */
@@ -1370,6 +1375,7 @@ export function ModelList({
     includeAntigravity: Boolean(antigravityModels),
     ollamaVisionModels,
     opencodeVisionModels,
+    freeTierReady,
   });
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
 

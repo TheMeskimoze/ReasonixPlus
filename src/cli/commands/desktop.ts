@@ -482,6 +482,7 @@ import {
   signOutOpencode,
 } from "../../opencode-oauth.js";
 import { fetchOpencodeQuota } from "../../opencode-quota.js";
+import { bunCommand, opencodeRelay, opencodeRelayEnabled } from "../../opencode-relay.js";
 import { opencodeOAuthSession, rememberOpencodeOAuth } from "../../opencode-session.js";
 import {
   type CatalogProvider,
@@ -2434,6 +2435,7 @@ function emitOpencodeCatalog(snap: {
   visionModels?: string[];
   credentialed?: boolean;
   error?: string;
+  freeTier?: FreeTierStatus;
 }): void {
   emit({
     type: "$opencode_models",
@@ -2441,6 +2443,7 @@ function emitOpencodeCatalog(snap: {
     ...(snap.visionModels !== undefined ? { visionModels: snap.visionModels } : {}),
     ...(snap.credentialed !== undefined ? { credentialed: snap.credentialed } : {}),
     ...(snap.error !== undefined ? { error: snap.error } : {}),
+    ...(snap.freeTier !== undefined ? { freeTier: snap.freeTier } : {}),
   });
 }
 
@@ -2510,17 +2513,39 @@ export async function refreshChangelog(force = false, tab?: Tab): Promise<void> 
   }
 }
 
+/** What the desktop needs to know before it offers a free OpenCode model: whether
+ *  the relay can start, which Bun it would spawn, and whether turns are keyed to a
+ *  sign-in rather than the anonymous bucket. */
+export interface FreeTierStatus {
+  ready: boolean;
+  relayEnabled: boolean;
+  bun: { command: string; source: string };
+  signedIn: boolean;
+}
+
+async function freeTierStatus(): Promise<FreeTierStatus> {
+  const relayEnabled = opencodeRelayEnabled();
+  const relay = relayEnabled ? await opencodeRelay() : null;
+  return {
+    ready: Boolean(relay),
+    relayEnabled,
+    bun: bunCommand(),
+    signedIn: Boolean(opencodeOAuthSession()),
+  };
+}
+
 export async function refreshOpencodeModels(force = false, tab?: Tab): Promise<void> {
   const credentialed = hasOpencodeCredential();
+  const freeTier = await freeTierStatus();
   try {
     const snap = await fetchOpencodeModels({ force, credentialed });
-    emitOpencodeCatalog({ ...snap, credentialed });
+    emitOpencodeCatalog({ ...snap, credentialed, freeTier });
     if (tab && snap.error) {
       emit({ type: "$error", message: `OpenCode model sync warning: ${snap.error}` }, tab.id);
     }
   } catch (err) {
     const message = `OpenCode model sync failed: ${(err as Error).message}`;
-    emitOpencodeCatalog({ models: [...OPENCODE_MODELS], credentialed, error: message });
+    emitOpencodeCatalog({ models: [...OPENCODE_MODELS], credentialed, error: message, freeTier });
     if (tab) emit({ type: "$error", message }, tab.id);
   }
 }

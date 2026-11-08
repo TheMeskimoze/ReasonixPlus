@@ -61,6 +61,9 @@ export interface ModelCatalogOptions {
   discoveredAntigravityModels?: readonly string[];
   opencodeModels?: readonly string[];
   includeAntigravity?: boolean;
+  /** False when the host cannot serve free OpenCode ids (no relay runtime), which
+   *  removes them from the picker instead of letting a turn fail after sending. */
+  freeTierReady?: boolean;
   ollamaVisionModels?: ReadonlySet<string>;
   opencodeVisionModels?: ReadonlySet<string>;
 }
@@ -143,10 +146,14 @@ export function deriveModelCatalog(options: ModelCatalogOptions): ModelCatalogVi
       ...ANTIGRAVITY_MODELS,
     ]),
   );
-  const opencodeModels =
+  const declaredOpencodeModels =
     options.opencodeModels && options.opencodeModels.length > 0
       ? options.opencodeModels
       : OPENCODE_MODELS;
+  const opencodeModels =
+    options.freeTierReady === false
+      ? declaredOpencodeModels.filter((id) => !id.endsWith("-free"))
+      : declaredOpencodeModels;
   const includeAntigravity = options.includeAntigravity === true;
   const catalogFor = (key: ProviderCatalogKey, fallback: readonly string[]): readonly string[] =>
     options.providerCatalogs?.[key]

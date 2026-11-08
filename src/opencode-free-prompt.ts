@@ -6,6 +6,11 @@ export interface FreePromptFields {
   modelId: string;
 }
 
+/** Opening line of the client's prompt. A request that carries it is prefixed for
+ *  the free tier; a failure record reads this off the wire rather than trusting a
+ *  flag, so a routing bug cannot hide behind a boolean. */
+export const OPENCODE_FREE_PROMPT_MARKER = "You are an AI agent running in OpenCode";
+
 export const OPENCODE_FREE_PROMPT_TEMPLATE = [
   "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.",
   "",

@@ -23,6 +23,20 @@ import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js
 // Loop error decorator — context-overflow gets a user hint; everything else passes through.
 describe("loop-error", () => {
   describe("formatLoopError", () => {
+    it("reports the free-tier window instead of suggesting a key", () => {
+      const raw = new Error(
+        'OpenCode 429: {"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached. Free models work in OpenCode."}} [retry-after: 26407s]',
+      );
+      const out = formatLoopError(raw);
+      expect(out).toMatch(/free tier refused this turn/i);
+      expect(out).toMatch(/accounted per identity/i);
+      expect(out).toMatch(/about 440 minutes/);
+      // A free-tier cap cannot be lifted by a key, so that remedy is gone.
+      expect(out).not.toMatch(/configure an OpenCode API key/i);
+      // The transport marker itself never reaches the user.
+      expect(out).not.toMatch(/retry-after:/);
+    });
+
     it("annotates a DeepSeek 400 'maximum context length' error", () => {
       const raw = new Error(
         'DeepSeek 400: {"error":{"message":"This model\'s maximum context length is 131072 tokens. ' +

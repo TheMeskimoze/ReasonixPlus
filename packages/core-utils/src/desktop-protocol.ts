@@ -1735,6 +1735,16 @@ export interface OllamaModelsEvent {
   error?: string;
 }
 
+/** Whether the free tier can actually be served right now: the relay is the only
+ *  admitted path, so a free id is not offered when it cannot start. `signedIn`
+ *  says whether turns are keyed to an account rather than the anonymous bucket. */
+export interface FreeTierStatus {
+  ready: boolean;
+  relayEnabled: boolean;
+  bun: { command: string; source: string };
+  signedIn: boolean;
+}
+
 /** Dynamically fetched model list for the OpenCode provider from models.dev.
  *  Free Zen models are always included; the paid Zen + Go subscription catalog
  *  is included when the daemon holds an OpenCode credential. */
@@ -1745,6 +1755,7 @@ export interface OpencodeModelsEvent {
   /** Whether a credential (API key / Console OAuth) gated the paid catalog. */
   credentialed?: boolean;
   error?: string;
+  freeTier?: FreeTierStatus;
 }
 
 /** Commit history from the public repo, grouped per release. Broadcast

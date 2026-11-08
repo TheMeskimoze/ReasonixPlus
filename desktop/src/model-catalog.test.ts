@@ -1,3 +1,10 @@
+import {
+  modelDisplayLabel,
+  modelOwnerProvider,
+  providerDeclared,
+  providerSpecsInOrder,
+  stripProviderQualifier,
+} from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import {
   MODEL_CATALOG_GROUP_KEYS,
@@ -8,15 +15,26 @@ import {
   modelProviderHints,
   providerForModelGroup,
 } from "./model-catalog";
-import {
-  modelDisplayLabel,
-  modelOwnerProvider,
-  providerDeclared,
-  providerSpecsInOrder,
-  stripProviderQualifier,
-} from "@reasonix/core-utils";
 
 describe("deriveModelCatalog", () => {
+  it("omits free OpenCode ids when the host cannot serve them", () => {
+    const models = ["deepseek-v4.1-flash-free", "glm-5.3", "mimo-v2.6-pro"];
+    const rows = (catalog: ReturnType<typeof deriveModelCatalog>) =>
+      catalog.groups.find((group) => group.key === "opencode")?.models ?? [];
+
+    const free = (rows: readonly string[]) =>
+      rows.some((row) => row.endsWith("deepseek-v4.1-flash-free"));
+    const paid = (rows: readonly string[]) => rows.some((row) => row.endsWith("glm-5.3"));
+
+    expect(free(rows(deriveModelCatalog({ opencodeModels: models, freeTierReady: true })))).toBe(
+      true,
+    );
+    expect(free(rows(deriveModelCatalog({ opencodeModels: models })))).toBe(true);
+    const gated = rows(deriveModelCatalog({ opencodeModels: models, freeTierReady: false }));
+    expect(free(gated)).toBe(false);
+    expect(paid(gated)).toBe(true);
+  });
+
   it("labels exactly the groups a declared provider fills", () => {
     // Derived, not pinned: deleting a provider file drops its group instead of failing.
     const declared = providerSpecsInOrder()
@@ -161,24 +179,25 @@ describe("deriveModelCatalog", () => {
   it.skipIf(!providerDeclared("experiential"))(
     "qualifies a later group's row when a later group also serves the id",
     () => {
-    const catalog = deriveModelCatalog({
-      opencodeModels: ["deepseek-v4.1-flash", "space-bunny-free"],
-      providerCatalogs: {
-        experiential: { models: ["deepseek-v4.1-flash"], source: "live" },
-      },
-    });
+      const catalog = deriveModelCatalog({
+        opencodeModels: ["deepseek-v4.1-flash", "space-bunny-free"],
+        providerCatalogs: {
+          experiential: { models: ["deepseek-v4.1-flash"], source: "live" },
+        },
+      });
 
-    // OpenCode is reached before the Experiential gateway, so its row keeps the
-    // bare id...
-    expect(catalog.groups.find((group) => group.key === "opencode")!.models).toContain(
-      "deepseek-v4.1-flash",
-    );
-    // ...and the Experimental Labs row must not reuse that value: the value is
-    // also the `enabledModels` key, so a shared one toggled both providers.
-    const experiential = catalog.groups.find((group) => group.key === "experiential")!.models;
-    expect(experiential).toContain("experiential/deepseek-v4.1-flash");
-    expect(experiential).not.toContain("deepseek-v4.1-flash");
-  });
+      // OpenCode is reached before the Experiential gateway, so its row keeps the
+      // bare id...
+      expect(catalog.groups.find((group) => group.key === "opencode")!.models).toContain(
+        "deepseek-v4.1-flash",
+      );
+      // ...and the Experimental Labs row must not reuse that value: the value is
+      // also the `enabledModels` key, so a shared one toggled both providers.
+      const experiential = catalog.groups.find((group) => group.key === "experiential")!.models;
+      expect(experiential).toContain("experiential/deepseek-v4.1-flash");
+      expect(experiential).not.toContain("deepseek-v4.1-flash");
+    },
+  );
 
   it("never repeats a picker value across groups", () => {
     const catalog = deriveModelCatalog({
@@ -227,50 +246,51 @@ describe("deriveModelCatalog", () => {
   it.skipIf(!providerDeclared("experiential"))(
     "keeps every value unique when resellers and native catalogs overlap",
     () => {
-    const catalog = deriveModelCatalog({
-      opencodeModels: [
-        "gpt-5.6-luna",
-        "glm-5.3",
-        "mimo-v2.6-pro",
-        "deepseek-v4-flash",
-        "deepseek-v4.1-flash",
-        "claude-sonnet-4-6",
-        "big-pickle",
-      ],
-      discoveredAntigravityModels: ["claude-sonnet-4-6"],
-      includeAntigravity: true,
-      providerCatalogs: {
-        // OpenCode and the Experiential gateway both resell ids the native
-        // providers own, plus one id no native catalog lists.
-        experiential: {
-          models: ["gpt-5.6-luna", "glm-5.3", "mimo-v2.6-pro", "deepseek-v4.1-flash"],
-          source: "live",
+      const catalog = deriveModelCatalog({
+        opencodeModels: [
+          "gpt-5.6-luna",
+          "glm-5.3",
+          "mimo-v2.6-pro",
+          "deepseek-v4-flash",
+          "deepseek-v4.1-flash",
+          "claude-sonnet-4-6",
+          "big-pickle",
+        ],
+        discoveredAntigravityModels: ["claude-sonnet-4-6"],
+        includeAntigravity: true,
+        providerCatalogs: {
+          // OpenCode and the Experiential gateway both resell ids the native
+          // providers own, plus one id no native catalog lists.
+          experiential: {
+            models: ["gpt-5.6-luna", "glm-5.3", "mimo-v2.6-pro", "deepseek-v4.1-flash"],
+            source: "live",
+          },
         },
-      },
-    });
+      });
 
-    const values = catalog.groups.flatMap((group) => group.models);
-    expect(values).toHaveLength(new Set(values).size);
-    const models = (key: string) => catalog.groups.find((group) => group.key === key)!.models;
-    // The native catalog keeps the bare id...
-    expect(models("openai")).toContain("gpt-5.6-luna");
-    expect(models("zai")).toContain("glm-5.3");
-    expect(models("mimo")).toContain("mimo-v2.6-pro");
-    expect(models("deepseek")).toContain("deepseek-v4-flash");
-    expect(models("antigravity")).toContain("claude-sonnet-4-6");
-    // ...and each reseller carries its own qualified row.
-    expect(models("opencode")).toContain("opencode/gpt-5.6-luna");
-    expect(models("opencode")).toContain("opencode/glm-5.3");
-    expect(models("opencode")).toContain("opencode/mimo-v2.6-pro");
-    expect(models("opencode")).toContain("opencode/deepseek-v4-flash");
-    expect(models("opencode")).toContain("opencode/claude-sonnet-4-6");
-    expect(models("experiential")).toContain("experiential/gpt-5.6-luna");
-    // An id no native catalog owns falls to OpenCode, the first reseller checked.
-    expect(models("opencode")).toContain("deepseek-v4.1-flash");
-    expect(models("experiential")).toContain("experiential/deepseek-v4.1-flash");
-    // OpenCode-exclusive ids are untouched.
-    expect(models("opencode")).toContain("big-pickle");
-  });
+      const values = catalog.groups.flatMap((group) => group.models);
+      expect(values).toHaveLength(new Set(values).size);
+      const models = (key: string) => catalog.groups.find((group) => group.key === key)!.models;
+      // The native catalog keeps the bare id...
+      expect(models("openai")).toContain("gpt-5.6-luna");
+      expect(models("zai")).toContain("glm-5.3");
+      expect(models("mimo")).toContain("mimo-v2.6-pro");
+      expect(models("deepseek")).toContain("deepseek-v4-flash");
+      expect(models("antigravity")).toContain("claude-sonnet-4-6");
+      // ...and each reseller carries its own qualified row.
+      expect(models("opencode")).toContain("opencode/gpt-5.6-luna");
+      expect(models("opencode")).toContain("opencode/glm-5.3");
+      expect(models("opencode")).toContain("opencode/mimo-v2.6-pro");
+      expect(models("opencode")).toContain("opencode/deepseek-v4-flash");
+      expect(models("opencode")).toContain("opencode/claude-sonnet-4-6");
+      expect(models("experiential")).toContain("experiential/gpt-5.6-luna");
+      // An id no native catalog owns falls to OpenCode, the first reseller checked.
+      expect(models("opencode")).toContain("deepseek-v4.1-flash");
+      expect(models("experiential")).toContain("experiential/deepseek-v4.1-flash");
+      // OpenCode-exclusive ids are untouched.
+      expect(models("opencode")).toContain("big-pickle");
+    },
+  );
 
   it("keys live catalogs by the provider id the tag resolver reads", () => {
     // The antigravity picker group belongs to the `gemini` provider: a discovered

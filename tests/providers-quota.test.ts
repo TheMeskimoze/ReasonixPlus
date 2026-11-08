@@ -298,6 +298,16 @@ describe("opencode-models", () => {
       expect(isOpencodeFreeModel("glm-5.3", TEST_DIR)).toBe(false);
     });
 
+    it("treats an unseen -free id as free, and Go-only ids as Go regardless", () => {
+      // The catalog lags the gateway: an id it has not seen must not fall to the
+      // Node path, which answers every free request with a quota error.
+      expect(isOpencodeFreeModel("brand-new-model-free", TEST_DIR)).toBe(true);
+      expect(isOpencodeFreeModel("opencode/brand-new-model-free", TEST_DIR)).toBe(true);
+      expect(isOpencodeFreeModel("brand-new-model", TEST_DIR)).toBe(false);
+      // A Go id whose name happens to end in -free stays Go.
+      expect(isOpencodeFreeModel("step-5-preview-free", TEST_DIR)).toBe(false);
+      expect(opencodeUsagePlan("step-5-preview-free", TEST_DIR)).toBe("go");
+    });
     it("resolves the usage plan on the wire id so a provider qualifier can't hide it", () => {
       // A shared id resold through OpenCode is the SAME Go model as the bare id,
       // so the qualifier must not demote it to a non-Go tier (the Xiaomi native id

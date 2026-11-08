@@ -4,6 +4,7 @@ import {
   type MemoryWriteOptions,
   type PickerWindow,
   type RuleRecord,
+  SOUND_PACK_AUDIO_EXTENSIONS,
   clipText,
   compactionCardText,
   extractPathsFromArgs,
@@ -15,7 +16,6 @@ import {
   modelAcceptsImages,
   modelDisplayLabel,
   sanitizeFilename,
-  SOUND_PACK_AUDIO_EXTENSIONS,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -71,6 +71,7 @@ import {
   type CtxMemoryTokens,
   type FeedbackCueAudioSettings,
   type FeedbackCueId,
+  type FreeTierStatus,
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
@@ -109,7 +110,6 @@ import {
   resolveActiveQuickSend,
   rpcSend,
 } from "./protocol";
-import type { VoiceTraceRecord } from "./voice/trace";
 import {
   type SessionIntentRequest,
   type SessionMutationAsk,
@@ -130,8 +130,8 @@ import {
   sessionsEntry,
   visibleSessions,
 } from "./sessions-store";
-import { keepStable, sameStringSet } from "./stable-identity";
 import { BUILTIN_SOUND_PACKS, resolveSoundPackId, setSoundPackCatalog } from "./sound-packs";
+import { keepStable, sameStringSet } from "./stable-identity";
 import { StartupTimingTracker } from "./startup-timing";
 import { StreamRateTracker, SubagentRateFolder } from "./stream-rate";
 import {
@@ -181,6 +181,7 @@ import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { activationHandler } from "./ui/keyboard";
 import { CapabilityDialog } from "./ui/mcp-setup";
+import type { SoundPackDraft } from "./ui/pack-wizard";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { localizeShortcutText } from "./ui/shortcut";
 import { Sidebar } from "./ui/sidebar";
@@ -219,12 +220,12 @@ import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useIsScrollable } from "./ui/useIsScrollable";
 import { useResizable } from "./ui/useResizable";
 import { useTurnWatchdog } from "./ui/useTurnWatchdog";
-import type { SoundPackDraft } from "./ui/pack-wizard";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { WorkspaceRowView } from "./ui/workspace-row";
 import { mergeSoundPacks } from "./user-sound-packs";
-import { resetWindowState, watchWindowFrame } from "./window-frame";
 import { anyVoiceModelDownloaded } from "./voice/model-cache";
+import type { VoiceTraceRecord } from "./voice/trace";
+import { resetWindowState, watchWindowFrame } from "./window-frame";
 import { areWorkspacesLoaded, isWorkspaceRevealReady } from "./workspace-loading";
 import { normalizeWorkspacePath, toWorkspaceRelative, workspaceBasename } from "./workspace-path";
 import { workspacePickerRows } from "./workspace-rows";
@@ -3701,6 +3702,8 @@ interface TabRuntimeProps {
   opencodeModels: string[];
   opencodeModelsError: string | null;
   opencodeVisionModels: ReadonlySet<string>;
+  /** Whether the free tier can be served right now, reported with the catalog. */
+  freeTierStatus: FreeTierStatus | null;
   onRefreshOpencodeModels: () => void;
   /** Re-query every provider's discovery catalog (models-endpoint providers). */
   onRefreshProviderCatalogs: () => void;
@@ -3780,6 +3783,7 @@ const TabRuntime = memo(function TabRuntime({
   opencodeModels,
   opencodeModelsError,
   opencodeVisionModels,
+  freeTierStatus,
   onRefreshOpencodeModels,
   onRefreshProviderCatalogs,
   changelog,
@@ -5437,8 +5441,13 @@ const TabRuntime = memo(function TabRuntime({
               <span>{sessionMutationLabel(sessionsMutation, pendingDeleteCount)}</span>
             </div>
           ) : null}
-          {active && sessionsMutation === null && (!sessionsConfirmed || !backendConnected) && sessions.length > 0 ? (
-            <div className="main-progress" role="status">{t("app.sessionsUnconfirmed")}</div>
+          {active &&
+          sessionsMutation === null &&
+          (!sessionsConfirmed || !backendConnected) &&
+          sessions.length > 0 ? (
+            <div className="main-progress" role="status">
+              {t("app.sessionsUnconfirmed")}
+            </div>
           ) : null}
           {state.settings != null && !state.settings.workspaceDir ? (
             <PendingWorkspaceView
@@ -5681,6 +5690,7 @@ const TabRuntime = memo(function TabRuntime({
                 opencodeModels={opencodeModels}
                 opencodeModelsError={opencodeModelsError ?? undefined}
                 opencodeVisionModels={opencodeVisionModels}
+                freeTierReady={freeTierStatus ? freeTierStatus.ready : undefined}
                 enabledModels={state.settings?.enabledModels}
                 providerCatalogs={state.settings?.providerCatalogs}
                 onRefreshOllamaModels={onRefreshOllamaModels}
@@ -5912,6 +5922,7 @@ const TabRuntime = memo(function TabRuntime({
             opencodeModels={opencodeModels}
             opencodeModelsError={opencodeModelsError ?? undefined}
             opencodeVisionModels={opencodeVisionModels}
+            freeTierStatus={freeTierStatus}
             onRefreshOpencodeModels={onRefreshOpencodeModels}
             onRefreshProviderCatalogs={onRefreshProviderCatalogs}
             changelog={changelog}
@@ -6826,7 +6837,8 @@ export function App() {
     models: string[];
     visionModels: Set<string>;
     error: string | null;
-  }>({ models: [], visionModels: new Set(), error: null });
+    freeTier: FreeTierStatus | null;
+  }>({ models: [], visionModels: new Set(), error: null, freeTier: null });
   // Changelog from the repo's commit history, grouped per release by the
   // backend. `loaded` distinguishes "not fetched yet" from "fetched, empty".
   const [changelog, setChangelog] = useState<{
@@ -7606,6 +7618,7 @@ export function App() {
                 models: ev.models,
                 visionModels: new Set(ev.visionModels ?? []),
                 error: ev.error ?? null,
+                freeTier: ev.freeTier ?? null,
               });
               return;
             }
@@ -7790,7 +7803,8 @@ export function App() {
           !tab.workspaceDir ||
           seen.has(key) ||
           mutationFor(sessionsStoreRef.current, tab.workspaceDir)
-        ) continue;
+        )
+          continue;
         seen.add(key);
         requestSessionList(tab.id);
       }
@@ -8021,6 +8035,7 @@ export function App() {
           opencodeModels={opencodeCatalog.models}
           opencodeModelsError={opencodeCatalog.error}
           opencodeVisionModels={opencodeCatalog.visionModels}
+          freeTierStatus={opencodeCatalog.freeTier}
           onRefreshOpencodeModels={requestOpencodeModels}
           onRefreshProviderCatalogs={requestProviderCatalogs}
           changelog={changelog}

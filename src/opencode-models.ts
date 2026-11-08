@@ -338,13 +338,14 @@ export function isOpencodeGoModel(modelId: string, homeDirOverride?: string): bo
   return staticGo;
 }
 
-/** True when a model id is a free (anonymous, no-plan) OpenCode Zen model: no
- *  usage API, capped per-IP. Go wins, so a Go-served id is never free. Judged
- *  on the wire id like the Go predicate. */
+/** Free (anonymous, no-plan) OpenCode Zen model: no usage API, capped per identity.
+ *  Go wins, so a Go-served id is never free. The `-free` suffix is the gateway's
+ *  own naming, so an unseen id still avoids the Node path that refuses it. */
 export function isOpencodeFreeModel(modelId: string, homeDirOverride?: string): boolean {
   const id = stripProviderQualifier(modelId);
   if (OPENCODE_GO_MODELS.includes(id) && !OPENCODE_MODELS.includes(id)) return false;
   if (OPENCODE_MODELS.includes(id)) return true;
+  if (id.endsWith("-free")) return true;
   const cached = loadOpencodeModelsCache(homeDirOverride);
   return Boolean(cached?.freeModels.includes(id));
 }

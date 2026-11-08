@@ -33,6 +33,8 @@ import {
   freePromptFields,
   withFreePreamble,
 } from "./opencode-free-preamble.js";
+import { OPENCODE_FREE_PROMPT_MARKER } from "./opencode-free-prompt.js";
+import { recordFreeTierFailure } from "./opencode-free-triage.js";
 import {
   opencodeIdentity,
   opencodeIdentityHeaders,
@@ -1205,6 +1207,7 @@ export class DeepSeekClient {
           .catch(() => "");
         let payloadKeys = "";
         let toolNames = "";
+        let preambleApplied = false;
         try {
           const p = JSON.parse(String(init.body)) as Record<string, unknown>;
           payloadKeys = Object.keys(p).join(",");
@@ -1213,6 +1216,11 @@ export class DeepSeekClient {
             .map((tool) => tool?.function?.name ?? "?")
             .join(",")
             .slice(0, 800);
+          const sent = p.messages as Array<{ role?: string; content?: unknown }> | undefined;
+          preambleApplied =
+            Array.isArray(sent) &&
+            sent[0]?.role === "system" &&
+            String(sent[0]?.content ?? "").includes(OPENCODE_FREE_PROMPT_MARKER);
         } catch {
           payloadKeys = "unparsable";
         }
@@ -1229,6 +1237,24 @@ export class DeepSeekClient {
             endpoint,
           },
         });
+        const wireId = stripProviderQualifier(opts.model);
+        const freeTier = freeTierModel({
+          provider,
+          wireModel: wireId,
+          freeModel: isOpencodeFreeModel(wireId),
+        });
+        if (freeTier) {
+          recordFreeTierFailure({
+            model: opts.model,
+            provider,
+            wireModel: wireId,
+            status: resp.status,
+            endpoint,
+            viaTransport: transport?.endpoint ?? null,
+            body: errBody,
+            preambleApplied,
+          });
+        }
       }
       recordDiagnostic("model.response.headers", {
         durationMs: performance.now() - startedAt,
@@ -1489,6 +1515,14 @@ export class DeepSeekClient {
     return providerSpec(providerForModel(model))?.errors.brands[0] ?? "Upstream";
   }
 
+  /** One HTTP failure message. A 429's `retry-after` rides along because the
+   *  formatter reports the window instead of telling the user to retry. */
+  private _httpError(model: string, resp: Response, body: string): Error {
+    const wait = Number(resp.headers.get("retry-after"));
+    const window = Number.isFinite(wait) && wait > 0 ? ` [retry-after: ${Math.round(wait)}s]` : "";
+    return new Error(`${this._errorPrefix(model)} ${resp.status}: ${body}${window}`);
+  }
+
   /** Returns null on failure so callers can degrade — session must keep working without balance UI. */
   async getBalance(
     opts: { signal?: AbortSignal; url?: string; shape?: ProviderBalanceShape } = {},
@@ -1556,7 +1590,7 @@ export class DeepSeekClient {
     try {
       const { resp } = await drainStatusChunks(this.prepareRequest(opts, false, signal));
       if (!resp.ok) {
-        throw new Error(`${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text()}`);
+        throw this._httpError(opts.model, resp, await resp.text());
       }
       const data: any = await resp.json();
       const choice = data.choices?.[0]?.message ?? {};
@@ -1593,7 +1627,7 @@ export class DeepSeekClient {
     try {
       const { resp } = await drainStatusChunks(this.prepareRequest(opts, false, signal));
       if (!resp.ok) {
-        throw new Error(`${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text()}`);
+        throw this._httpError(opts.model, resp, await resp.text());
       }
       const data: any = await resp.json();
       const message = data.message ?? {};
@@ -2413,9 +2447,7 @@ export class DeepSeekClient {
     }
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
-      throw new Error(
-        `${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text().catch(() => "")}`,
-      );
+      throw this._httpError(opts.model, resp, await resp.text().catch(() => ""));
     }
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -2623,9 +2655,7 @@ export class DeepSeekClient {
     }
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
-      throw new Error(
-        `${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text().catch(() => "")}`,
-      );
+      throw this._httpError(opts.model, resp, await resp.text().catch(() => ""));
     }
 
     const queue: StreamChunk[] = [];

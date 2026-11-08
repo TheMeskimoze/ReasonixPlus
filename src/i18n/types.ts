@@ -365,6 +365,8 @@ export interface TranslationSchema {
     zaiServer: string;
     opencodeAuth: string;
     opencodeCredits: string;
+    opencodeFreeTier: string;
+    freeTierWindow: string;
     opencodePermission: string;
     opencodeNotFound: string;
     opencodeRequest: string;

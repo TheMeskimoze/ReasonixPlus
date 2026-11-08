@@ -1,6 +1,8 @@
 /** Free-tier requests ride a Bun process: only its TLS handshake is admitted. */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { envFlag } from "./env-flag.js";
 import { createLogger } from "./logging.js";
 
@@ -75,11 +77,39 @@ export function freeTierRelayError(reason: "disabled" | "missing"): Error {
 let child: ChildProcess | undefined;
 let starting: Promise<OpencodeRelay | null> | undefined;
 
-function relaySpawn(env: NodeJS.ProcessEnv): { command: string; args: string[] } {
+/** The Bun a relay spawn would use, and where that choice came from. */
+export interface BunCommand {
+  command: string;
+  source: "env" | "install" | "path";
+}
+
+/** Where the installers put Bun. Each entry reads its root out of the environment
+ *  so a test can point the search at a scratch tree. */
+const BUN_INSTALLS: ReadonlyArray<(env: NodeJS.ProcessEnv, name: string) => string | undefined> = [
+  (env, name) => (env.USERPROFILE ? join(env.USERPROFILE, ".bun", "bin", name) : undefined),
+  (env, name) => (env.LOCALAPPDATA ? join(env.LOCALAPPDATA, "Programs", "bun", name) : undefined),
+  (env, name) => (env.USERPROFILE ? join(env.USERPROFILE, "scoop", "shims", name) : undefined),
+  (env, name) => (env.ProgramData ? join(env.ProgramData, "chocolatey", "bin", name) : undefined),
+  (env, name) => (env.HOME ? join(env.HOME, ".bun", "bin", name) : undefined),
+  (env, name) => (env.HOME ? join(env.HOME, ".local", "bin", name) : undefined),
+];
+
+/** Resolves the runtime without spawning it, so a failure report can name the
+ *  exact command it tried. The official installer's directory is the common case
+ *  and is not on PATH in every shell, which is why it is searched directly. */
+export function bunCommand(env: NodeJS.ProcessEnv = process.env): BunCommand {
   const configured = env.OPENCODE_RELAY_BUN?.trim();
-  if (configured) return { command: configured, args: ["-e", RELAY_PROGRAM] };
-  // `bun` resolves through PATH; Windows ships the launcher as `bun.exe`.
-  return { command: process.platform === "win32" ? "bun.exe" : "bun", args: ["-e", RELAY_PROGRAM] };
+  if (configured) return { command: configured, source: "env" };
+  const name = process.platform === "win32" ? "bun.exe" : "bun";
+  for (const install of BUN_INSTALLS) {
+    const path = install(env, name);
+    if (path && existsSync(path)) return { command: path, source: "install" };
+  }
+  // Nothing installed: let the spawn resolve the name through PATH.
+  return { command: name, source: "path" };
+}
+function relaySpawn(env: NodeJS.ProcessEnv): { command: string; args: string[] } {
+  return { command: bunCommand(env).command, args: ["-e", RELAY_PROGRAM] };
 }
 
 function firstPort(stream: NodeJS.ReadableStream, timeoutMs: number): Promise<number | undefined> {

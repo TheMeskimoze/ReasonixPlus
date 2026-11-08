@@ -61,6 +61,7 @@ import type {
   SkillInfo,
 } from "../protocol";
 import {
+  type FreeTierStatus,
   MailProvider,
   PLAYWRIGHT_MANAGED_BROWSERS,
   QUICK_SEND_SHORTHAND_MAX_LENGTH,
@@ -198,6 +199,7 @@ export function SettingsModal({
   onSave,
   /** Forgets the persisted window state and restores the configured geometry. */
   onResetWindowState,
+  freeTierStatus,
   oauthWaiting,
   onOAuthBegin,
   onOAuthCancel,
@@ -275,6 +277,8 @@ export function SettingsModal({
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onResetWindowState: () => void;
+  /** Whether the free OpenCode tier can be served right now. */
+  freeTierStatus?: FreeTierStatus | null;
   /** Ollama chat endpoint (OpenAI-compatible) shown on the Models page. */
   /** Dynamically fetched Ollama models (raw ids) — rendered as a scrollable grid. */
   ollamaModels?: string[];
@@ -442,6 +446,7 @@ export function SettingsModal({
                 customFontFamily={customFontFamily}
                 onSetCustomFontFamily={onSetCustomFontFamily}
                 onResetWindowState={onResetWindowState}
+                freeTierStatus={freeTierStatus}
               />
             )}
             {page === "quickSend" && <PageQuickSend settings={settings} onSave={onSave} />}
@@ -855,6 +860,7 @@ function PageGeneral({
   customFontFamily,
   onSetCustomFontFamily,
   onResetWindowState,
+  freeTierStatus,
 }: {
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
@@ -863,6 +869,7 @@ function PageGeneral({
   customFontFamily: string;
   onSetCustomFontFamily: (family: string) => void;
   onResetWindowState: () => void;
+  freeTierStatus?: FreeTierStatus | null;
 }) {
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
@@ -981,6 +988,28 @@ function PageGeneral({
         </div>
       </section>
 
+      {freeTierStatus ? (
+        <section className="section">
+          <div className="stitle">{t("settings.freeTierSection")}</div>
+          <div className="setting-row">
+            <div className="l">
+              <div className="n">{t("settings.freeTierRuntime")}</div>
+              <div className="h">
+                {freeTierStatus.ready
+                  ? t("settings.freeTierReady", { command: freeTierStatus.bun.command })
+                  : freeTierStatus.relayEnabled
+                    ? t("settings.freeTierMissing")
+                    : t("settings.freeTierDisabled")}
+              </div>
+            </div>
+            <span className="h">
+              {freeTierStatus.signedIn
+                ? t("settings.freeTierSignedIn")
+                : t("settings.freeTierAnonymous")}
+            </span>
+          </div>
+        </section>
+      ) : null}
       <VoiceInputSettings />
     </div>
   );

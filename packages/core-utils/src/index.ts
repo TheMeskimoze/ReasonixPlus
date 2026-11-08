@@ -418,6 +418,7 @@ export type {
   OpencodeQuota,
   OpencodeQuotaWindow,
   OpencodeModelsEvent,
+  FreeTierStatus,
   SettingsPatch,
   ProviderSettingsMap,
   SearchSettingsMap,

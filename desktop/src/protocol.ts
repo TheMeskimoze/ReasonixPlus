@@ -25,9 +25,9 @@ import type {
   DirectKernelWireEvent,
   EditMode,
   EditRequiredEvent,
-  FeedbackCueId,
   FeedbackCueAudioSetting,
   FeedbackCueAudioSettings,
+  FeedbackCueId,
   JobInfo,
   JobsEvent,
   KernelModelDeltaEvent,
@@ -354,3 +354,5 @@ export type IncomingEvent = { tabId?: string } & (
 export function rpcSend(cmd: OutgoingCommand): Promise<void> {
   return invoke("rpc_send", { line: JSON.stringify(cmd) });
 }
+
+export type { FreeTierStatus } from "@reasonix/core-utils";

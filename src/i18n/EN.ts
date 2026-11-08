@@ -685,7 +685,10 @@ export const EN: TranslationSchema = {
     opencodeAuth:
       "OpenCode authentication failed (401): {inner}. Check OPENCODE_API_KEY in environment or opencodeApiKey in settings.",
     opencodeCredits:
-      "OpenCode reports exhausted quota or rate limits: {inner}. Wait and retry, or configure an OpenCode API key.",
+      "OpenCode reports exhausted quota or rate limits: {inner}. This is the account's own limit, so a different plan or window is needed, not another key.",
+    opencodeFreeTier:
+      "OpenCode's free tier refused this turn: {inner}{window}. Free models are accounted per identity: the signed-in OpenCode client uses its own allowance, while an unsigned harness shares the anonymous one for this network.",
+    freeTierWindow: " The same identity accepts free turns again in about {minutes} minutes.",
     opencodePermission:
       "OpenCode denied this request (403): {inner}. Check permissions and model availability.",
     opencodeNotFound:
