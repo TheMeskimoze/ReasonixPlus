@@ -74,6 +74,14 @@ export function freeTierRelayError(reason: "disabled" | "missing"): Error {
   );
 }
 
+/** The gateway serves free models only to a signed-in account, so an absent
+ *  credential is a failure, never a keyless attempt. */
+export function freeTierCredentialError(): Error {
+  return new Error(
+    "OpenCode free models are served only to a signed-in OpenCode account. Sign in from Settings > OpenCode, or use the OpenCode desktop app on this machine so its account can be reused.",
+  );
+}
+
 let child: ChildProcess | undefined;
 let starting: Promise<OpencodeRelay | null> | undefined;
 

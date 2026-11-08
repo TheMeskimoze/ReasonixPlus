@@ -1743,6 +1743,7 @@ export interface FreeTierStatus {
   relayEnabled: boolean;
   bun: { command: string; source: string };
   signedIn: boolean;
+  credential: "harness" | "app" | "none";
 }
 
 /** Dynamically fetched model list for the OpenCode provider from models.dev.

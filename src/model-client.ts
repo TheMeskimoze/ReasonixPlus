@@ -18,10 +18,12 @@ import {
   providerForModel,
 } from "./config.js";
 import { resolveOpenAIToken } from "./oauth.js";
+import { opencodeAppCredential } from "./opencode-app-credential.js";
 import { opencodeSessionId } from "./opencode-free-session.js";
 import { isOpencodeFreeModel } from "./opencode-models.js";
 import { resolveOpencodeToken } from "./opencode-oauth.js";
 import {
+  freeTierCredentialError,
   freeTierModel,
   freeTierRelayError,
   opencodeRelay,
@@ -37,14 +39,14 @@ export interface ResolvedModelClientOptions {
 
 interface AuthContext {
   configPath?: string;
+  /** Model id as the endpoint sees it (routing qualifier stripped). */
+  wireModel: string;
   /** The model resolves to the provider's own default endpoint, not a proxy. */
   standardEndpoint: boolean;
 }
 
 interface TransportContext extends AuthContext {
   endpoint: { baseUrl?: string; apiKey?: string };
-  /** Model id as the endpoint sees it (routing qualifier stripped). */
-  wireModel: string;
 }
 
 type AuthResolver = DeepSeekClientOptions["apiKeyResolver"];
@@ -60,11 +62,16 @@ const AUTH_RESOLVERS: Readonly<
   // keeps its static key and no resolver is installed.
   "openai-oauth": (ctx) =>
     ctx.standardEndpoint ? () => resolveOpenAIToken(ctx.configPath) : undefined,
-  opencode: (ctx) => async () =>
+  opencode: (ctx) => async () => {
     // Go / Go+ inference authenticates with the workspace service key (`oc_sk…`).
     // A Console OAuth session token is a different credential and the Go/Zen
     // gateways 401 it, so it is only a fallback when no service key is configured.
-    loadOpencodeApiKey(ctx.configPath) ?? resolveOpencodeToken(),
+    const serviceKey = loadOpencodeApiKey(ctx.configPath);
+    if (serviceKey) return serviceKey;
+    const session = await resolveOpencodeToken();
+    if (session) return session;
+    return freeModelAccount(ctx.wireModel);
+  },
   // Gemini authenticates through `geminiAuthResolver`, never a bearer key.
   "gemini-oauth": () => undefined,
 };
@@ -140,6 +147,15 @@ export function modelClientOptions(opts: ResolvedModelClientOptions): DeepSeekCl
     geminiAuthResolver:
       spec?.client.auth === "gemini-oauth" ? () => resolveGeminiAuth(opts.configPath) : undefined,
   };
+}
+
+/** Free models refuse keyless traffic, so their only credential sources are the
+ *  harness's own sign-in, the OpenCode app's account, then an explicit failure. */
+function freeModelAccount(wireModel: string): string | undefined {
+  if (!isOpencodeFreeModel(wireModel)) return undefined;
+  const app = opencodeAppCredential();
+  if (app) return app.access;
+  throw freeTierCredentialError();
 }
 
 /** Free calls must name a session in the gateway's own id shape, or they 429. */

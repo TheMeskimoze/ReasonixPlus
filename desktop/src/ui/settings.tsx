@@ -1003,9 +1003,11 @@ function PageGeneral({
               </div>
             </div>
             <span className="h">
-              {freeTierStatus.signedIn
+              {freeTierStatus.credential === "harness"
                 ? t("settings.freeTierSignedIn")
-                : t("settings.freeTierAnonymous")}
+                : freeTierStatus.credential === "app"
+                  ? t("settings.freeTierAppAccount")
+                  : t("settings.freeTierAnonymous")}
             </span>
           </div>
         </section>

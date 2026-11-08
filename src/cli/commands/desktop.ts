@@ -474,6 +474,7 @@ import {
 } from "../../ollama-model-map.js";
 import { loadOllamaModelsCache, saveOllamaModelsCache } from "../../ollama-models-cache.js";
 import { recordOllamaThinking } from "../../ollama-thinking.js";
+import { opencodeAppCredential } from "../../opencode-app-credential.js";
 import { fetchOpencodeModels, opencodeUsagePlan } from "../../opencode-models.js";
 import {
   type OpencodeDeviceFlow,
@@ -2513,24 +2514,30 @@ export async function refreshChangelog(force = false, tab?: Tab): Promise<void> 
   }
 }
 
+/** Which credential a free OpenCode turn authenticates with. */
+export type FreeTierCredential = "harness" | "app" | "none";
+
 /** What the desktop needs to know before it offers a free OpenCode model: whether
- *  the relay can start, which Bun it would spawn, and whether turns are keyed to a
- *  sign-in rather than the anonymous bucket. */
+ *  the relay can start, which Bun it would spawn, and which account serves turns. */
 export interface FreeTierStatus {
   ready: boolean;
   relayEnabled: boolean;
   bun: { command: string; source: string };
   signedIn: boolean;
+  /** Where a free-model turn gets its credential, so Settings can name it. */
+  credential: FreeTierCredential;
 }
 
 async function freeTierStatus(): Promise<FreeTierStatus> {
   const relayEnabled = opencodeRelayEnabled();
   const relay = relayEnabled ? await opencodeRelay() : null;
+  const signedIn = Boolean(opencodeOAuthSession());
   return {
     ready: Boolean(relay),
     relayEnabled,
     bun: bunCommand(),
-    signedIn: Boolean(opencodeOAuthSession()),
+    signedIn,
+    credential: signedIn ? "harness" : opencodeAppCredential() ? "app" : "none",
   };
 }
 
