@@ -196,6 +196,8 @@ export function SettingsModal({
   onRequestPlugins,
   onClose,
   onSave,
+  /** Forgets the persisted window state and restores the configured geometry. */
+  onResetWindowState,
   oauthWaiting,
   onOAuthBegin,
   onOAuthCancel,
@@ -272,6 +274,7 @@ export function SettingsModal({
   skills: SkillInfo[];
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
+  onResetWindowState: () => void;
   /** Ollama chat endpoint (OpenAI-compatible) shown on the Models page. */
   /** Dynamically fetched Ollama models (raw ids) — rendered as a scrollable grid. */
   ollamaModels?: string[];
@@ -438,6 +441,7 @@ export function SettingsModal({
                 onSetFontFamily={onSetFontFamily}
                 customFontFamily={customFontFamily}
                 onSetCustomFontFamily={onSetCustomFontFamily}
+                onResetWindowState={onResetWindowState}
               />
             )}
             {page === "quickSend" && <PageQuickSend settings={settings} onSave={onSave} />}
@@ -850,6 +854,7 @@ function PageGeneral({
   onSetFontFamily,
   customFontFamily,
   onSetCustomFontFamily,
+  onResetWindowState,
 }: {
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
@@ -857,6 +862,7 @@ function PageGeneral({
   onSetFontFamily: (family: FontFamily) => void;
   customFontFamily: string;
   onSetCustomFontFamily: (family: string) => void;
+  onResetWindowState: () => void;
 }) {
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
@@ -959,6 +965,20 @@ function PageGeneral({
             />
           </div>
         )}
+      </section>
+
+      <section className="section">
+        <div className="stitle">{t("settings.windowSection")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.windowState")}</div>
+            <div className="h">{t("settings.windowStateHint")}</div>
+          </div>
+          <button type="button" className="btn small" onClick={onResetWindowState}>
+            <I.refresh size={13} />
+            <span>{t("settings.windowStateReset")}</span>
+          </button>
+        </div>
       </section>
 
       <VoiceInputSettings />

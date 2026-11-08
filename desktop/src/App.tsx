@@ -223,6 +223,7 @@ import type { SoundPackDraft } from "./ui/pack-wizard";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { WorkspaceRowView } from "./ui/workspace-row";
 import { mergeSoundPacks } from "./user-sound-packs";
+import { resetWindowState, watchWindowFrame } from "./window-frame";
 import { anyVoiceModelDownloaded } from "./voice/model-cache";
 import { areWorkspacesLoaded, isWorkspaceRevealReady } from "./workspace-loading";
 import { normalizeWorkspacePath, toWorkspaceRelative, workspaceBasename } from "./workspace-path";
@@ -4284,6 +4285,18 @@ const TabRuntime = memo(function TabRuntime({
     dispatch({ t: "push_notice", text, severity });
   }, []);
 
+  useEffect(() => watchWindowFrame(), []);
+
+  const resetWindow = useCallback(async () => {
+    try {
+      await resetWindowState();
+      appendNotice(t("settings.windowResetDone"), "success");
+    } catch (error) {
+      appendNotice(t("settings.windowResetFailed"), "error");
+      recordFrontendFailure("frontend.window_state_reset", error);
+    }
+  }, [appendNotice]);
+
   // Persist the transcript's annotation cards (notices + assistant warning
   // segments) with the session so none is transient — the daemon stores them in
   // the session's notices sidecar and merges them back on load/resync.
@@ -5889,6 +5902,7 @@ const TabRuntime = memo(function TabRuntime({
             onRemoveSoundPack={removeSoundPack}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
+            onResetWindowState={resetWindow}
             ollamaModels={ollamaModels}
             ollamaModelsError={ollamaModelsError ?? undefined}
             ollamaPlan={ollamaPlan ?? undefined}

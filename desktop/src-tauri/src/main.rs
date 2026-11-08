@@ -8,6 +8,7 @@ mod voice_models;
 mod voice_paths;
 mod voice_runtime;
 mod voice_worker;
+mod window_frame;
 
 use diagnostics::record_frontend_diagnostic;
 use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
@@ -20,6 +21,41 @@ use voice_runtime::{
     RuntimeInstalls, voice_runtime_install, voice_runtime_remove, voice_runtime_status,
 };
 use voice_worker::BarkWorkers;
+
+/// Applies the frame repair on the window's own thread and hands back its report.
+async fn window_frame_on_main_thread<T: Send + 'static>(
+    window: tauri::WebviewWindow,
+    work: impl FnOnce(&tauri::WebviewWindow) -> T + Send + 'static,
+) -> Result<T, String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let target = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let _ = sender.send(work(&target));
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| format!("window thread did not answer: {error}"))
+}
+
+#[tauri::command]
+async fn sync_window_frame(
+    window: tauri::WebviewWindow,
+) -> Result<window_frame::FrameReport, String> {
+    window_frame_on_main_thread(window, window_frame::sync).await
+}
+
+/// Leaves fullscreen and unmaximizes first: those two changes are tao's own, and
+/// the placement that follows has to measure the windowed window to be exact.
+#[tauri::command]
+async fn reset_window_state(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<window_frame::ResetReport, String> {
+    window_frame::begin_reset(&window);
+    window_frame_on_main_thread(window, move |target| window_frame::finish_reset(&app, target)).await
+}
 
 #[derive(Serialize)]
 struct FileEntry {
@@ -591,12 +627,11 @@ async fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 /// Shrink a windowed window that overflows the whole virtual desktop back onto
-/// its current monitor, then recenter. HiDPI screens need this: exiting
-/// fullscreen restores the pre-fullscreen rect (the 1024x720 logical config),
-/// which at 200% scale is larger than a 1080p panel, and the window-state plugin
-/// would otherwise persist that oversized rect across restarts. Maximized or
-/// fullscreen windows, and windows that fit inside the union of all monitors
-/// (a legitimate multi-monitor span), are left untouched.
+/// its current monitor, then recenter. HiDPI screens need this: the 1024x720
+/// logical config is larger than a 1080p panel at 200% scale, and the
+/// window-state plugin would otherwise persist that oversized rect across
+/// restarts. Maximized or fullscreen windows, and windows that fit inside the
+/// union of all monitors (a legitimate multi-monitor span), are left untouched.
 fn fit_window_to_displays(win: &tauri::WebviewWindow) {
     if win.is_fullscreen().unwrap_or(false) || win.is_maximized().unwrap_or(false) {
         return;
@@ -627,12 +662,15 @@ fn fit_window_to_displays(win: &tauri::WebviewWindow) {
     let Ok(Some(monitor)) = win.current_monitor() else {
         return;
     };
-    let avail = monitor.size().to_logical::<f64>(monitor.scale_factor());
-    let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize {
-        width: avail.width * 0.9,
-        height: avail.height * 0.9,
-    }));
-    let _ = win.center();
+    let work = monitor.work_area();
+    let scale = monitor.scale_factor();
+    window_frame::place_window(
+        win,
+        tauri::LogicalSize::new(
+            work.size.width as f64 * 0.9 / scale,
+            work.size.height as f64 * 0.9 / scale,
+        ),
+    );
 }
 
 fn main() {
@@ -680,7 +718,9 @@ fn main() {
             voice_runtime_status,
             voice_runtime_install,
             voice_runtime_remove,
-            voice_bark_transcribe
+            voice_bark_transcribe,
+            sync_window_frame,
+            reset_window_state
         ])
         .setup(|app| {
             use tauri::Manager;

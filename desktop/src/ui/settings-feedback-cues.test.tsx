@@ -71,6 +71,7 @@ const baseProps = {
   onCheckMcpExtension: vi.fn(),
   onInstallPlaywrightBrowser: vi.fn(),
   onCancelPlaywrightBrowserInstall: vi.fn(),
+  onResetWindowState: vi.fn(),
   mailProvider: MailProvider.Outlook,
   mailAuth: null,
   onSetMailProvider: vi.fn(),
