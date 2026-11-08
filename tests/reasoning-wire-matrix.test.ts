@@ -269,11 +269,11 @@ describe("effort on the Responses wire", () => {
 
 describe("picker agreement", () => {
   it.skipIf(!providerDeclared("gemini"))("offers only the levels the wire can carry", () => {
-    expect(supportedReasoningEfforts("gemini/gemini-3.6-flash-tiered")).toEqual([
+    expect(supportedReasoningEfforts("gemini/gemini-3.8-flash-tiered")).toEqual([
       "low",
       "medium",
       "high",
     ]);
-    expect(effectiveReasoningEffort("gemini/gemini-3.6-flash-tiered", "xhigh")).toBe("high");
+    expect(effectiveReasoningEffort("gemini/gemini-3.8-flash-tiered", "xhigh")).toBe("high");
   });
 });
