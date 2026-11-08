@@ -115,7 +115,7 @@ describe("gemini-api provider", () => {
     // The declared id scheme keeps ids outside the static catalog routable.
     expect(providerForModel("gemini-api/gemini-4-argon")).toBe("gemini-api");
     // Antigravity's catalog keeps its own route.
-    expect(providerForModel("gemini-3.6-flash-low")).toBe("gemini");
+    expect(providerForModel("gemini-3.8-flash-tiered")).toBe("gemini");
   });
 
   it("posts a step_list body to the declared path with the declared key header", async () => {

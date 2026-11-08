@@ -398,7 +398,9 @@ describe("desktop Composer model catalog", () => {
     const antigravityItems = getItemsForGroup("Google Antigravity");
     expect(antigravityItems.some((t) => t.includes("claude-opus-4-6-thinking"))).toBe(true);
     expect(antigravityItems.some((t) => t.includes("claude-sonnet-4-6"))).toBe(true);
-    expect(antigravityItems.some((t) => t.includes("gemini-3.7-flash-tiered"))).toBe(true);
+    // The wire id carries the internal suffix; the menu never shows it.
+    expect(antigravityItems.some((t) => t.includes("gemini-3.7-flash"))).toBe(true);
+    expect(antigravityItems.some((t) => t.includes("-tiered"))).toBe(false);
   });
 });
 

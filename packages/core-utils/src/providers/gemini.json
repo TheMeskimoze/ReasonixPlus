@@ -16,16 +16,10 @@
   "groupLabelKey": "composer.modelAntigravityGroup",
   "pickerGroup": "antigravity",
   "precedence": 1,
-  "defaultModel": "gemini-3.6-flash-low",
+  "defaultModel": "gemini-3.8-flash-tiered",
   "knownCatalog": true,
   "models": [
-    "gemini-3.6-flash-low",
-    "gemini-3.6-flash-medium",
-    "gemini-3.6-flash-high",
-    "gemini-3.6-flash-tiered",
-    "gemini-3.7-flash-tiered",
     "gemini-3.8-flash-tiered",
-    "gemini-3.8-flash",
     "claude-sonnet-4-6",
     "claude-opus-4-6-thinking",
     "gpt-oss-120b-medium"

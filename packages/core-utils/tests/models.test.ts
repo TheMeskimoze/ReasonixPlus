@@ -3,6 +3,7 @@ import {
   ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
   GPT56_MODELS,
+  hideInternalSuffix,
   KNOWN_MODELS,
   MIMO_MODELS,
   MODEL_DISPLAY_NAMES,
@@ -100,9 +101,9 @@ describe("modelAcceptsImages", () => {
   it("keeps Antigravity models out of the Gemini API catalog", () => {
     const api = requireProviderSpec("gemini-api", "test");
     expect(api.models).not.toContain("gemini-3.8-flash");
-    // An Antigravity id stays Antigravity's even without the bare declaration.
-    expect(modelOwnerProvider("gemini-3.8-flash")).toBe("gemini");
+    // The wire id keeps the suffix Antigravity requires; the UI hides it.
     expect(modelOwnerProvider("gemini-3.8-flash-tiered")).toBe("gemini");
+    expect(modelDisplayName("gemini-3.8-flash-tiered")).toBe("gemini-3.8-flash");
     // The API keeps the ids it actually serves.
     expect(modelOwnerProvider("gemini-2.5-pro")).toBe("gemini-api");
   });
@@ -211,8 +212,13 @@ describe("modelDisplayName", () => {
 
   it("falls back to the raw model ID when unmapped", () => {
     expect(modelDisplayName("deepseek-v4-flash")).toBe("deepseek-v4-flash");
-    expect(modelDisplayName("gemini-3.7-flash-tiered")).toBe("gemini-3.7-flash-tiered");
     expect(modelDisplayName("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+  });
+
+  it("hides the internal routing suffix the endpoint requires", () => {
+    expect(modelDisplayName("gemini-3.8-flash-tiered")).toBe("gemini-3.8-flash");
+    expect(hideInternalSuffix("gemini-3.8-flash-tiered")).toBe("gemini-3.8-flash");
+    expect(hideInternalSuffix("gemini-3.8-flash")).toBe("gemini-3.8-flash");
   });
 
   it("handles null, undefined, and empty string gracefully", () => {
@@ -228,7 +234,7 @@ describe("modelOwnerProvider", () => {
     expect(modelOwnerProvider("glm-5.3-flash")).toBe("zai");
     expect(modelOwnerProvider("mimo-v2.6-pro")).toBe("mimo");
     expect(modelOwnerProvider("big-pickle")).toBe("opencode");
-    expect(modelOwnerProvider("gemini-3.6-flash-low")).toBe("gemini");
+    expect(modelOwnerProvider("gemini-3.8-flash-tiered")).toBe("gemini");
   });
 
   it("keeps a native id with its own provider when a reseller also serves it", () => {

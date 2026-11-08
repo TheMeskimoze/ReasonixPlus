@@ -118,10 +118,21 @@ export const MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   "gemini-pro-agent": "gemini-3.5-pro",
 };
 
+/** Wire suffixes the endpoint requires but the UI never shows. */
+const HIDDEN_ID_SUFFIXES: readonly string[] = ["-tiered"];
+
+/** Drops internal routing suffixes from a label; never touches the wire id. */
+export function hideInternalSuffix(id: string): string {
+  for (const suffix of HIDDEN_ID_SUFFIXES) {
+    if (id.endsWith(suffix)) return id.slice(0, -suffix.length);
+  }
+  return id;
+}
+
 /** Returns the display label for a model id, applying friendly UI mappings. */
 export function modelDisplayName(model: string | undefined | null): string {
   if (!model) return "";
-  return MODEL_DISPLAY_NAMES[model] ?? model;
+  return hideInternalSuffix(MODEL_DISPLAY_NAMES[model] ?? model);
 }
 
 /** Live model ids a caller already holds, keyed by provider id (a discovery
@@ -236,7 +247,7 @@ export function modelDisplayLabel(
   const raw = modelDisplayName(model);
   const tag = modelProviderTag(model, hints);
   if (!tag || typeof model !== "string") return raw;
-  return `${tag} · ${modelWireName(model, hints) || raw}`;
+  return `${tag} · ${hideInternalSuffix(modelWireName(model, hints)) || raw}`;
 }
 
 /** Static OpenCode vision catalog; a models.dev sync overrides it at runtime. */

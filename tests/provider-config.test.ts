@@ -97,7 +97,7 @@ describe("provider configuration", () => {
       baseUrl: DEFAULT_ZAI_CHAT_URL,
       apiKey: undefined,
     });
-    expect(loadEndpointForModel("gemini-3.6-flash-low", path)).toEqual({
+    expect(loadEndpointForModel("gemini-3.8-flash-tiered", path)).toEqual({
       baseUrl: DEFAULT_GEMINI_CHAT_URL,
       apiKey: undefined,
     });

@@ -500,8 +500,9 @@ describe("config", () => {
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6")).toBe("gemini");
       expect(providerForModel("claude-opus-4-6-thinking")).toBe("gemini");
-      expect(providerForModel("gemini-3.6-flash-tiered")).toBe("gemini");
-      expect(providerForModel("gemini-3.6-flash-medium")).toBe("gemini");
+      expect(providerForModel("gemini-3.8-flash-tiered")).toBe("gemini");
+      // A retired id is claimed by no catalog, so it takes the default family.
+      expect(providerForModel("gemini-3.6-flash-medium")).toBe("deepseek");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");
       expect(providerForModel("big-pickle")).toBe("opencode");
       expect(providerForModel("nemotron-3-ultra-free")).toBe("opencode");
