@@ -139,6 +139,7 @@ describe("providers.json", () => {
     }
     expect(new Set(tags).size).toBe(tags.length);
     expect(requireProviderSpec("deepseek").shortLabel).toBe("DS");
+    expect(requireProviderSpec("gemini").shortLabel).toBe("ANTI");
     expect(providerShortLabel("deepseek")).toBe("DS");
     expect(providerShortLabel("no-such-provider")).toBe("");
   });

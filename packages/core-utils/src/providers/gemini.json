@@ -2,7 +2,7 @@
   "id": "gemini",
   "providerId": "gemini",
   "label": "Google Gemini",
-  "shortLabel": "GEM",
+  "shortLabel": "ANTI",
   "order": 8,
   "setupGate": ["oauth"],
   "pickerGate": "signin",
