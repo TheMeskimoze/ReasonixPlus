@@ -3,7 +3,7 @@ import type { ToolSpec } from "./types.js";
 
 /** OpenCode release the wire shape was copied from. Only the shape matters to the
  *  gateway, so this may lag the real release. */
-export const OPENCODE_SPOOF_VERSION = "2.1.3";
+export const OPENCODE_SPOOF_VERSION = "2.2.6";
 
 /** `opencode/<channel>/<version>/<artifact>` — `App.useragent()` upstream. */
 export const OPENCODE_USER_AGENT = `opencode/latest/${OPENCODE_SPOOF_VERSION}/cli`;

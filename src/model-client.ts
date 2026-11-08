@@ -5,7 +5,7 @@ import {
   stripProviderQualifier,
 } from "@reasonix/core-utils";
 import { resolveGeminiAuth } from "./antigravity-oauth.js";
-import { DeepSeekClient, type DeepSeekClientOptions } from "./client.js";
+import { DeepSeekClient, type DeepSeekClientOptions, type ResolvedTransport } from "./client.js";
 import { resolveCodexTransport } from "./codex-backend.js";
 import {
   DEFAULT_MIMO_CHAT_URL,
@@ -18,7 +18,14 @@ import {
   providerForModel,
 } from "./config.js";
 import { resolveOpenAIToken } from "./oauth.js";
+import { isOpencodeFreeModel } from "./opencode-models.js";
 import { resolveOpencodeToken } from "./opencode-oauth.js";
+import {
+  freeTierModel,
+  freeTierRelayError,
+  opencodeRelay,
+  opencodeRelayEnabled,
+} from "./opencode-relay.js";
 import { opencodeOAuthSession } from "./opencode-session.js";
 
 export interface ResolvedModelClientOptions {
@@ -109,21 +116,53 @@ export function modelClientOptions(opts: ResolvedModelClientOptions): DeepSeekCl
     endpoint,
     wireModel: stripProviderQualifier(opts.model),
   };
+  const authResolver = spec ? AUTH_RESOLVERS[spec.client.auth](ctx) : undefined;
+  const declaredTransport = spec?.client.transport
+    ? TRANSPORT_RESOLVERS[spec.client.transport](ctx)
+    : undefined;
 
   return {
     apiKey: endpoint.apiKey,
     baseUrl: endpoint.baseUrl,
     sessionId: opts.sessionId,
     allowMissingKey: spec?.client.allowMissingKey ?? true,
-    apiKeyResolver: spec ? AUTH_RESOLVERS[spec.client.auth](ctx) : undefined,
+    apiKeyResolver: authResolver,
     // Only a Console session needs its organization id on the request.
     opencodeOrgResolver:
       spec?.client.auth === "opencode" ? () => opencodeOAuthSession()?.orgId : undefined,
-    transportResolver: spec?.client.transport
-      ? TRANSPORT_RESOLVERS[spec.client.transport](ctx)
-      : undefined,
+    transportResolver: freeTierTransport({
+      provider,
+      wireModel: ctx.wireModel,
+      declaredTransport,
+    }),
     geminiAuthResolver:
       spec?.client.auth === "gemini-oauth" ? () => resolveGeminiAuth(opts.configPath) : undefined,
+  };
+}
+
+/** Free OpenCode models only work through the relay; without it the request fails. */
+export function freeTierTransport(input: {
+  provider: ReturnType<typeof providerForModel>;
+  wireModel: string;
+  declaredTransport: (() => Promise<ResolvedTransport | null>) | undefined;
+  env?: NodeJS.ProcessEnv;
+}): (() => Promise<ResolvedTransport | null>) | undefined {
+  const eligible = freeTierModel({
+    provider: input.provider,
+    wireModel: input.wireModel,
+    freeModel: isOpencodeFreeModel(input.wireModel),
+  });
+  if (!eligible) return input.declaredTransport;
+  const env = input.env ?? process.env;
+  return async () => {
+    if (!opencodeRelayEnabled(env)) throw freeTierRelayError("disabled");
+    const relay = await opencodeRelay(env);
+    if (!relay) throw freeTierRelayError("missing");
+    return {
+      endpoint: `${relay.origin}/inference/openai/v1/chat/completions`,
+      headers: {},
+      keepAuth: true,
+    };
   };
 }
 

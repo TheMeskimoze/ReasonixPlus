@@ -1,7 +1,12 @@
 /** Client retries initial requests only; loop-level guards handle safe stream replays. */
 
 import { messageOf, sleep } from "@reasonix/core-utils";
-import { RETRYABLE_HTTP_STATUSES, isAbortError, retryDelayMs } from "./core/retry-shared.js";
+import {
+  RETRYABLE_HTTP_STATUSES,
+  isAbortError,
+  parseRetryAfterMs,
+  retryDelayMs,
+} from "./core/retry-shared.js";
 
 export interface RetryOptions {
   /** Maximum total attempts (including the first). Default 4. */
@@ -55,6 +60,12 @@ export async function* fetchWithRetryProgress(
       // Retryable but out of attempts: return the last response so the caller
       // can surface the status to the user.
       if (attempt === maxAttempts - 1) return resp;
+
+      // A server asking for a wait longer than any backoff we would take is
+      // stating a quota, not a blip: retrying inside our cap cannot succeed and
+      // only delays the message the caller has to show.
+      const serverDelayMs = parseRetryAfterMs(resp.headers);
+      if (serverDelayMs !== undefined && serverDelayMs > cap) return resp;
 
       // Drain the body so the connection can be reused on the next attempt.
       await resp.text().catch(() => undefined);

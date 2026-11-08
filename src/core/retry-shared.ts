@@ -25,11 +25,16 @@ const PROVIDER_STATUS_LINE = new RegExp(`^(?:${PROVIDER_ERROR_BRANDS}) (\\d{3}):
 const RETRYABLE_FAILURE_PHRASES =
   /\[server_error\]|upstream request failed|failed to generate a response/i;
 
+// A spent daily allowance, whatever status carries it: the answer is the same
+// until the window resets, so a replay can only repeat it.
+const TERMINAL_FAILURE_PHRASES = /free usage limit|freeusagelimiterror/i;
+
 // Retry-safe replay candidates: a retryable HTTP status under any provider
 // brand, or an upstream-relayed failure phrase. 4xx request rejections and
 // unrecognized errors return false — a replay must never paper over a
 // deterministic error.
 export function isRetryableProviderFailure(message: string): boolean {
+  if (TERMINAL_FAILURE_PHRASES.test(message)) return false;
   const status = PROVIDER_STATUS_LINE.exec(message.trim())?.[1];
   if (status !== undefined) return isRetryableHttpStatus(Number(status));
   return RETRYABLE_FAILURE_PHRASES.test(message);

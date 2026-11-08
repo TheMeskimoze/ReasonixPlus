@@ -29,11 +29,18 @@ import { messageText } from "./loop/messages.js";
 import { showPayloadContextLength, showPayloadThinking } from "./ollama-model-map.js";
 import { type OllamaThinkingCapability, recordOllamaThinking } from "./ollama-thinking.js";
 import {
+  freePreambleEnabled,
+  freePromptFields,
+  withFreePreamble,
+} from "./opencode-free-preamble.js";
+import {
   opencodeIdentity,
   opencodeIdentityHeaders,
   rotateOpencodeIdentity,
   withOpencodeRequiredTool,
 } from "./opencode-identity.js";
+import { isOpencodeFreeModel } from "./opencode-models.js";
+import { freeTierModel } from "./opencode-relay.js";
 import { type ReasoningControl, reasoningControl } from "./reasoning-control.js";
 import { buildResponsesPayload } from "./responses-api.js";
 import { type RetryOptions, fetchWithRetryProgress } from "./retry.js";
@@ -808,6 +815,10 @@ export interface ResolvedTransport {
   endpoint: string;
   /** Headers to merge on top of the defaults — Authorization is replaced. */
   headers: Record<string, string>;
+  /** Keep the provider's own auth header alongside `headers`. A transport that
+   *  only moves the request to another address (a local relay) still wants the
+   *  real credential on it. */
+  keepAuth?: boolean;
   /** When "responses", the endpoint speaks the OpenAI Responses API (e.g. the
    *  ChatGPT Codex backend) — payloads use `input` instead of `messages` and
    *  responses parse from the `output` array / Responses SSE events. */
@@ -1096,6 +1107,7 @@ export class DeepSeekClient {
     if (transport) {
       log.verbose(`${stream ? "stream" : "chat"} → ${transport.endpoint}`);
       Object.assign(headers, transport.headers);
+      if (transport.keepAuth) Object.assign(headers, await this.authHeaders(wire.apiKeyHeader));
     } else {
       Object.assign(headers, await this.authHeaders(wire.apiKeyHeader));
     }
@@ -1225,6 +1237,8 @@ export class DeepSeekClient {
           provider: providerForModel(opts.model),
           stream,
           status: resp.status,
+          endpoint,
+          viaTransport: transport?.endpoint ?? null,
           rateLimitWaitMs: Number(rateLimitWaitMs.toFixed(3)),
         },
       });
@@ -1344,6 +1358,18 @@ export class DeepSeekClient {
     if (wire.parallelToolCalls !== null) payload.parallel_tool_calls = wire.parallelToolCalls;
     if (provider === "opencode") {
       payload.tools = withOpencodeRequiredTool(opts.tools);
+      const wireId = stripProviderQualifier(opts.model);
+      const freeTier = freeTierModel({
+        provider,
+        wireModel: wireId,
+        freeModel: isOpencodeFreeModel(wireId),
+      });
+      if (freeTier && freePreambleEnabled()) {
+        payload.messages = withFreePreamble(
+          payload.messages as ChatMessage[],
+          freePromptFields(wireId),
+        );
+      }
     } else if (opts.tools?.length) {
       payload.tools = opts.tools;
     }

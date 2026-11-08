@@ -875,6 +875,18 @@ describe("retry", () => {
       expect(elapsed).toBeGreaterThanOrEqual(40);
     });
 
+    it("treats a Retry-After beyond the backoff cap as terminal", async () => {
+      const f = makeFetch([
+        new Response("", {
+          status: 429,
+          headers: { "Retry-After": "34739" },
+        }),
+      ]);
+      const r = await fetchWithRetry(f.fn, "https://x", {}, { ...BASE, maxBackoffMs: 10_000 });
+      expect(r.status).toBe(429);
+      expect(f.calls).toBe(1);
+    });
+
     it("fires onRetry callback between attempts", async () => {
       const onRetry = vi.fn();
       const f = makeFetch([new Response("", { status: 429 }), new Response("ok", { status: 200 })]);
@@ -928,6 +940,14 @@ describe("retry", () => {
       expect(isRetryableProviderFailure("DeepSeek 429: rate limited")).toBe(true);
       expect(isRetryableProviderFailure("OpenCode 503: overloaded")).toBe(true);
       expect(isRetryableProviderFailure("Z.AI 502: bad gateway")).toBe(true);
+    });
+
+    it("rejects a spent free-tier allowance even under a retryable status", () => {
+      expect(
+        isRetryableProviderFailure(
+          'OpenCode 429: {"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai)"}}',
+        ),
+      ).toBe(false);
     });
 
     it("rejects 4xx request rejections and unknown errors", () => {

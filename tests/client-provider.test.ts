@@ -2935,15 +2935,17 @@ describe("client-opencode-session", () => {
       expect(reply.content).toBe("ok");
       const body = bodies()[0];
       expect(body?.stream).toBe(true);
-      expect(body?.messages).toEqual([
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Describe this image." },
-            { type: "image_url", image_url: { url: image, detail: "low" } },
-          ],
-        },
-      ]);
+      const messages = body?.messages as Array<{ role: string; content: unknown }>;
+      expect(messages).toHaveLength(2);
+      expect(messages[0]?.role).toBe("system");
+      expect(String(messages[0]?.content)).toContain("You are an AI agent running in OpenCode");
+      expect(messages[1]).toEqual({
+        role: "user",
+        content: [
+          { type: "text", text: "Describe this image." },
+          { type: "image_url", image_url: { url: image, detail: "low" } },
+        ],
+      });
       const tools = body?.tools as Array<{ function: { name: string } }>;
       expect(tools.map((tool) => tool.function.name)).toEqual(["read"]);
     });
