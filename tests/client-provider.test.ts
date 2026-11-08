@@ -2920,7 +2920,7 @@ describe("client-opencode-session", () => {
       const image = "data:image/png;base64,iVBORw0KGgo=";
 
       const reply = await client.chat({
-        model: "deepseek-v4.1-flash-free",
+        model: "deepseek-v4-flash-free",
         messages: [
           {
             role: "user",
