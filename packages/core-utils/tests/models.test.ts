@@ -97,6 +97,16 @@ describe("modelAcceptsImages", () => {
     expect(isAntigravityModel("tab_flash_lite_preview")).toBe(false);
   });
 
+  it("keeps Antigravity models out of the Gemini API catalog", () => {
+    const api = requireProviderSpec("gemini-api", "test");
+    expect(api.models).not.toContain("gemini-3.8-flash");
+    // An Antigravity id stays Antigravity's even without the bare declaration.
+    expect(modelOwnerProvider("gemini-3.8-flash")).toBe("gemini");
+    expect(modelOwnerProvider("gemini-3.8-flash-tiered")).toBe("gemini");
+    // The API keeps the ids it actually serves.
+    expect(modelOwnerProvider("gemini-2.5-pro")).toBe("gemini-api");
+  });
+
   it("rejects text-only DeepSeek, Ollama, and unknown ids", () => {
     expect(modelAcceptsImages("deepseek-v4-pro")).toBe(false);
     expect(modelAcceptsImages("ollama/llama3.1:latest")).toBe(false);
