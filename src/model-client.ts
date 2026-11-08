@@ -18,6 +18,7 @@ import {
   providerForModel,
 } from "./config.js";
 import { resolveOpenAIToken } from "./oauth.js";
+import { opencodeSessionId } from "./opencode-free-session.js";
 import { isOpencodeFreeModel } from "./opencode-models.js";
 import { resolveOpencodeToken } from "./opencode-oauth.js";
 import {
@@ -134,9 +135,22 @@ export function modelClientOptions(opts: ResolvedModelClientOptions): DeepSeekCl
       provider,
       wireModel: ctx.wireModel,
       declaredTransport,
+      sessionId: opts.sessionId,
     }),
     geminiAuthResolver:
       spec?.client.auth === "gemini-oauth" ? () => resolveGeminiAuth(opts.configPath) : undefined,
+  };
+}
+
+/** Free calls must name a session in the gateway's own id shape, or they 429. */
+export function freeTierSessionHeaders(sessionId: string | undefined): Record<string, string> {
+  const session = opencodeSessionId(sessionId);
+  return {
+    "x-opencode-session": session,
+    "x-opencode-session-id": session,
+    "x-session-affinity": session,
+    "x-session-id": session,
+    "x-opencode-client": "cli",
   };
 }
 
@@ -145,6 +159,7 @@ export function freeTierTransport(input: {
   provider: ReturnType<typeof providerForModel>;
   wireModel: string;
   declaredTransport: (() => Promise<ResolvedTransport | null>) | undefined;
+  sessionId?: string;
   env?: NodeJS.ProcessEnv;
 }): (() => Promise<ResolvedTransport | null>) | undefined {
   const eligible = freeTierModel({
@@ -154,13 +169,15 @@ export function freeTierTransport(input: {
   });
   if (!eligible) return input.declaredTransport;
   const env = input.env ?? process.env;
+  // One id per client, so repeated turns keep the gateway's prompt cache warm.
+  const headers = freeTierSessionHeaders(input.sessionId);
   return async () => {
     if (!opencodeRelayEnabled(env)) throw freeTierRelayError("disabled");
     const relay = await opencodeRelay(env);
     if (!relay) throw freeTierRelayError("missing");
     return {
       endpoint: `${relay.origin}/inference/openai/v1/chat/completions`,
-      headers: {},
+      headers,
       keepAuth: true,
     };
   };
