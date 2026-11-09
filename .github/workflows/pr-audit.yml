@@ -1,10 +1,14 @@
 name: PR audit
 
 # Audits every incoming pull request against the LATEST commit of the branch it
-# targets, not the commit it was branched from. The job checks out the merge
-# commit GitHub builds from the pull request head and the current base tip, so a
-# branch that no longer applies, or that only passes on its old base, fails here
+# targets, not the commit it branched from. The job checks out the merge commit
+# GitHub builds from the pull request head and the current base tip, so a branch
+# that no longer applies, or that only passes on its stale base, fails here
 # instead of on the base branch after the merge.
+#
+# The audit only reports. There is no merge step, no merge call and no write
+# permission anywhere in this file: a green run marks the pull request ready for a
+# human to merge, and merging stays a manual act.
 #
 # A conflicted pull request has no merge commit. The job then stops before it
 # installs anything and says so, rather than auditing the head alone and passing.
@@ -27,24 +31,25 @@ concurrency:
 
 jobs:
   audit:
-    name: audit (windows · node 22)
+    name: PR audit
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
       # `github.sha` is the pull request merge commit only while GitHub holds one
-      # for this pull request, and it can be newer than the event's snapshot once
+      # for this pull request, and it can be older than the event snapshot once
       # the base has moved. Fetching the ref by name is what makes "the latest
       # commit" literal, and a missing ref the answer to a conflicted branch.
-      - name: Check out the pull request merged with the latest base
+      - name: Merge the pull request into the latest base
         if: github.event_name == 'pull_request'
         shell: bash
         env:
           PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
         run: |
           if ! git fetch --no-tags --depth=2 origin "refs/pull/${PR}/merge:refs/pr-audit/merge"; then
-            echo "::error title=Merge conflict::This pull request does not merge cleanly into ${{ github.event.pull_request.base.ref }}. Rebase it on the latest ${{ github.event.pull_request.base.ref }} and push again."
+            echo "::error title=Merge conflict::This pull request does not merge cleanly into ${BASE}. Rebase it on the latest ${BASE} and push again."
             exit 1
           fi
           git checkout --detach refs/pr-audit/merge
@@ -64,27 +69,20 @@ jobs:
         working-directory: desktop
         run: npm ci --os=win32 --cpu=x64
 
-      # The cheap checks run first, so a formatting, policy or type error is
-      # reported in about a minute instead of after the full suite.
-      - name: Lint (biome)
-        run: npm run lint
+      # Runs before the suite, so a branch that deletes or silently skips tests is
+      # caught instead of showing up as a shorter green run.
+      - name: Test suite may not shrink
+        if: github.event_name == 'pull_request'
+        env:
+          PR_AUDIT_BASE: HEAD^1
+        run: npm run audit:tests
 
-      - name: Comment policy
-        run: npm run lint:comments
+      # One gate, defined once, in the repo: `npm run verify`. The workflow states
+      # which commit is audited and leaves what "green" means to package.json.
+      - name: Audit the merged commit
+        run: npm run verify
 
-      - name: Typecheck (root)
-        run: npm run typecheck
-
-      - name: Typecheck (desktop)
-        run: npm run typecheck:desktop
-
-      - name: Build (tsup)
-        run: npm run build
-
-      - name: Test (vitest)
-        run: npm run test
-
-      - name: Audit summary
+      - name: Report
         if: always()
         shell: bash
         run: |
@@ -93,6 +91,7 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
+            echo "| Result | ${{ job.status }} |"
             if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
               echo "| Pull request | #${{ github.event.pull_request.number }} into \`${{ github.event.pull_request.base.ref }}\` |"
               echo "| Head commit | \`$(git rev-parse --short HEAD^2 2>/dev/null || echo unknown)\` |"
@@ -103,5 +102,9 @@ jobs:
               echo "| Audited | \`$(git rev-parse --short HEAD)\` |"
             fi
             echo ""
-            echo "Lint, comment policy, both typechecks, the build and the full test suite ran against the row above."
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Ready to merge. This audit never merges: merging stays manual."
+            else
+              echo "Not ready to merge. The failing step above names what to correct."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
