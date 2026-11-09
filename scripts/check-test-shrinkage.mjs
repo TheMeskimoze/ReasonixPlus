@@ -15,7 +15,12 @@ const SKIP = /(?:^|[^\w.$])(?:it|test)\.(?:skip|todo|failing)\b/g;
 
 function git(args, allowFailure = false) {
   try {
-    return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 128 << 20 }).trim();
+    return execFileSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 128 << 20,
+      stdio: ["ignore", "pipe", allowFailure ? "ignore" : "inherit"],
+    }).trim();
   } catch (err) {
     if (allowFailure) return null;
     throw err;
