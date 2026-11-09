@@ -1799,9 +1799,21 @@ html[data-platform="macos"] .titlebar .tb-left {
   margin-top: 1px;
   font-size: 12px;
   color: var(--muted);
+  /* One line, always: a wrapped strip is what made the row two rows tall and the
+   *  list jump while a session streamed. The parts ellipsize; nothing wraps. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.list-row .body .meta > span:not(.sep):not(.rate) {
+  /* Shrinkable so the strip ellipsizes rather than pushing the rate out of sight. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .list-row .body .meta .sep {
   color: var(--border-strong);
+  flex-shrink: 0;
 }
 .list-row .body .meta .rate {
   color: var(--accent);
@@ -1914,14 +1926,6 @@ html[data-platform="macos"] .titlebar .tb-left {
    ring the outline would otherwise swallow. */
 .ctx-plan-row[data-current="true"]:focus-visible {
   box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-soft);
-}
-.ctx-plan-row .body .meta {
-  min-width: 0;
-}
-.ctx-plan-row .body .meta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* A column is half the panel, so a plan row is set one step denser than a session row. */
 .ctx-plan-row .body .title {
