@@ -60,6 +60,10 @@ jobs:
           node-version: "22"
           cache: npm
 
+      # Installed the way the release pipeline installs them, so a green audit means
+      # the same tree the release will build. The root postinstall would install the
+      # desktop dependencies with scripts disabled, so it is skipped and the desktop
+      # step below installs them with scripts, as release does.
       - name: Install root dependencies
         env:
           REASONIX_SKIP_DESKTOP_POSTINSTALL: "1"
@@ -86,6 +90,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          short() { git rev-parse --short "$1" 2>/dev/null || echo unknown; }
           {
             echo "### PR audit"
             echo ""
@@ -94,12 +99,16 @@ jobs:
             echo "| Result | ${{ job.status }} |"
             if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
               echo "| Pull request | #${{ github.event.pull_request.number }} into \`${{ github.event.pull_request.base.ref }}\` |"
-              echo "| Head commit | \`$(git rev-parse --short HEAD^2 2>/dev/null || echo unknown)\` |"
-              echo "| Base commit | \`$(git rev-parse --short HEAD^1 2>/dev/null || echo unknown)\` |"
-              echo "| Audited | \`$(git rev-parse --short HEAD)\`, the merge of head into base |"
+              if git rev-parse --verify -q HEAD^2 >/dev/null; then
+                echo "| Head commit | \`$(short HEAD^2)\` |"
+                echo "| Base commit | \`$(short HEAD^1)\` |"
+                echo "| Audited | \`$(short HEAD)\`, the merge of head into base |"
+              else
+                echo "| Audited | \`$(short HEAD)\`, not a merge: the head did not merge into the base |"
+              fi
             else
               echo "| Ref | \`${{ github.ref_name }}\` |"
-              echo "| Audited | \`$(git rev-parse --short HEAD)\` |"
+              echo "| Audited | \`$(short HEAD)\` |"
             fi
             echo ""
             if [ "${{ job.status }}" = "success" ]; then

@@ -1,15 +1,12 @@
 #!/usr/bin/env node
 // Refuses a pull request whose changes make the suite smaller: a deleted test
-// file, or fewer runnable cases than the base commit had. A suite that passes
-// because tests were removed is invisible to the run that reports on it, so the
-// comparison has to happen between the two commits.
-//
-// The base commit arrives in PR_AUDIT_BASE (the merge checkout's first parent).
-// Without it there is nothing to compare, and the check stays out of the way.
+// file, or fewer runnable cases than the base commit in PR_AUDIT_BASE had.
 import { execFileSync } from "node:child_process";
 
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-const TEST_FILE = /(^|\/)(tests|__tests__)\/|\.test\.[cm]?[jt]sx?$/;
+// Mirrors the include list in vitest.config.ts, plus .spec for a convention the
+// suite does not use yet: missing a test file would hide its cases entirely.
+const TEST_FILE = /(^|\/)(tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const CASE = /(?:^|[^\w.$])(?:it|test)(?:\.(?:only|concurrent|each))?\s*\(/g;
 const SKIP = /(?:^|[^\w.$])(?:it|test)\.(?:skip|todo|failing)\b/g;
 

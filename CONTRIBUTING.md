@@ -19,6 +19,10 @@ turned into `it.skip` or `it.todo` are compared against the base commit, because
 because its tests were removed is not a passing suite. Test deletions belong on `main`, where they are
 reviewed as the change they are.
 
+When `main` moves while a pull request is open, the branch needs a rebase or a new commit before it can
+merge. The audit has to run against the merge with the new tip, so the earlier green check no longer
+counts, and `main` requires branches to be up to date for exactly that reason.
+
 ## Merging is manual
 
 The audit never merges, and it holds no permission that would let it try. A green `PR audit` means the
@@ -28,13 +32,16 @@ maintainer.
 ## Before you open a pull request
 
 Run the same gate locally. It is the same script the audit calls, so a green run here means a green
-audit there, barring a `main` that moved under you.
+audit there.
 
 ```
 npm ci
-npm ci --prefix desktop
 npm run verify
 ```
+
+`npm ci` installs the desktop dependencies as well: the root postinstall runs
+`npm ci --prefix desktop` unless a CI job sets `REASONIX_SKIP_DESKTOP_POSTINSTALL=1` to install them
+itself.
 
 The test-shrink check is the one part of the audit that needs a base commit, so it only runs on pull
 requests:
