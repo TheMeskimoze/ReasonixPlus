@@ -1,8 +1,8 @@
 name: Release
 
-# The ONLY workflow in this repo, and it runs ONLY when manually dispatched
-# from the Actions tab, never on push. Keeping version increments and the
-# Windows installer build off the critical path of every commit is the point.
+# This workflow runs ONLY when manually dispatched from the Actions tab, never
+# on push. Keeping version increments and the Windows installer build off the
+# critical path of every commit is the point.
 #
 # A manual run verifies on Windows (lint, typecheck, build, tests) and then
 # releases from the LATEST commit of the branch it is dispatched on (main by
