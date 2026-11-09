@@ -3728,7 +3728,6 @@ interface TabRuntimeProps {
 /** Memoized at their single call site: TabRuntime re-renders on every streamed
  *  delta, and each shell child reads a small set of stable props. */
 const MemoTitleBar = memo(TitleBar);
-const MemoTabBar = memo(TabBar);
 const MemoSidebar = memo(Sidebar);
 const MemoContextPanel = memo(ContextPanel);
 const MemoStatusBar = memo(StatusBar);
@@ -5392,17 +5391,14 @@ const TabRuntime = memo(function TabRuntime({
           ctxOn={!ctxCollapsed}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
-        />
-
-        <MemoTabBar
           tabs={tabsList}
           activeId={activeTabId}
           setActive={setActiveTabId}
-          onClose={closeTab}
-          onNew={onNewTab}
+          onCloseTab={closeTab}
+          onNewTab={onNewTab}
           onClearTabs={clearTabs}
           singleTab={singleTab}
-          blocked={tabSwitchBlocked}
+          tabBlocked={tabSwitchBlocked}
         />
 
         <MemoSidebar
@@ -6074,11 +6070,28 @@ function TitleBar({
   ctxOn,
   onToggleSide,
   onToggleCtx,
+  tabs,
+  activeId,
+  setActive,
+  onCloseTab,
+  onNewTab,
+  onClearTabs,
+  singleTab,
+  tabBlocked,
 }: {
   sideOn: boolean;
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
+  /** Workspace tabs live in this row so the app spends no extra height on them. */
+  tabs: TabBarTabs;
+  activeId: string;
+  setActive: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onNewTab: () => void;
+  onClearTabs?: (scope: ClearTabsScope) => void;
+  singleTab?: boolean;
+  tabBlocked?: boolean;
 }) {
   useLang();
   const [isMaximized, setIsMaximized] = useState(false);
@@ -6161,7 +6174,19 @@ function TitleBar({
         </div>
       </div>
 
-      {/* center: drag region */}
+      {/* center: workspace tabs, browser-style, inside the title row */}
+      <TabBar
+        tabs={tabs}
+        activeId={activeId}
+        setActive={setActive}
+        onClose={onCloseTab}
+        onNew={onNewTab}
+        onClearTabs={onClearTabs}
+        singleTab={singleTab}
+        blocked={tabBlocked}
+      />
+
+      {/* drag region: only the empty space after the tabs drags the window */}
       <span className="grow" data-tauri-drag-region />
 
       {/* right: panel toggles + window controls */}
@@ -6271,6 +6296,15 @@ export function workspaceTabRepresentatives<
   });
 }
 
+/** One workspace tab as the ribbon renders it. */
+type TabBarTabs = {
+  id: string;
+  workspaceDir?: string;
+  session?: string;
+  group?: string;
+  busy?: boolean;
+}[];
+
 export function TabBar({
   tabs,
   activeId,
@@ -6281,7 +6315,7 @@ export function TabBar({
   singleTab,
   blocked,
 }: {
-  tabs: { id: string; workspaceDir?: string; session?: string; group?: string; busy?: boolean }[];
+  tabs: TabBarTabs;
   activeId: string;
   setActive: (id: string) => void;
   onClose: (id: string) => void;
@@ -6295,6 +6329,45 @@ export function TabBar({
   useLang();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
+  // Horizontal overflow: the strip scrolls, and the arrows only appear when
+  // there is something to scroll to in that direction.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const readEdges = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const next = { left: el.scrollLeft > 2, right: max > 2 && el.scrollLeft < max - 2 };
+    // Same-value renders must not re-trigger the effect that calls this.
+    setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+  }, []);
+
+  const scrollStrip = (delta: number) => {
+    const el = stripRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    readEdges();
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(readEdges);
+    ro.observe(el);
+    window.addEventListener("resize", readEdges);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", readEdges);
+    };
+  }, [readEdges]);
+
+  // No dep array: the strip's width changes when tabs come and go, and
+  // readEdges is idempotent, so running it per render costs two property reads.
+  useEffect(() => {
+    readEdges();
+  });
+
   const handleClear = (scope: ClearTabsScope) => {
     if (onClearTabs) {
       onClearTabs(scope);
@@ -6305,88 +6378,105 @@ export function TabBar({
     }
   };
 
-  // The ribbon is workspace-only. Session channels stay mounted and running,
-  // but are selected from the sidebar instead of duplicated as S1/S2 pills.
-  const groups = useMemo(() => groupTabsByWorkspace(tabs), [tabs]);
-  const lastActiveByWorkspace = useRef(new Map<string, string>());
-  const activeGroup = groups.find((group) => group.items.some((tab) => tab.id === activeId));
-  if (activeGroup) lastActiveByWorkspace.current.set(activeGroup.key, activeId);
-  const visualTabs = groups.flatMap((group) => {
-    const active = group.items.find((tab) => tab.id === activeId);
-    const rememberedId = lastActiveByWorkspace.current.get(group.key);
-    const remembered = group.items.find((tab) => tab.id === rememberedId);
-    const representative = active ?? remembered ?? group.items[0];
-    return representative ? [representative] : [];
-  });
-  const activeVisualId =
-    visualTabs.find((tab) => activeGroup?.items.some((candidate) => candidate.id === tab.id))?.id ??
-    activeId;
+  // One pill per tab, browser-style: every tab is its own target, including
+  // two tabs on the same workspace. The workspace name is the label; when a
+  // workspace appears more than once the session name disambiguates.
+  const perWorkspace = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const tab of tabs) {
+      const key = (tab.workspaceDir ?? "").replace(/[/\\]+$/, "");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [tabs]);
+
+  const visualTabs = tabs;
+  const activeVisualId = activeId;
 
   return (
-    <div
-      className="tabbar"
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenuAnchor({ x: e.clientX, y: e.clientY });
-      }}
-    >
-      {groups.map((g) => {
-        const activeInGroup = g.items.find((t) => t.id === activeId);
-        const rememberedId = lastActiveByWorkspace.current.get(g.key);
-        const head = activeInGroup ?? g.items.find((t) => t.id === rememberedId) ?? g.items[0];
-        if (!head) return null;
-        const ws = head.workspaceDir ?? "";
-        const label = ws ? workspaceBasename(ws) || "workspace" : t("sidebarPanel.noWorkspace");
-        // Active agents = sessions in this tab with a running turn. No dot when
-        // nothing is running.
-        const activeAgents = g.items.filter((t) => t.busy).length;
-        return (
-          <div
-            key={g.key}
-            className="tab tab-group"
-            data-active={activeInGroup ? "true" : undefined}
-            data-blocked={blocked ? "true" : undefined}
-            aria-disabled={blocked ? true : undefined}
-            onClick={blocked ? undefined : () => setActive(head.id)}
-            onKeyDown={blocked ? undefined : activationHandler(() => setActive(head.id))}
-            title={blocked ? t("app.tab.switchBlocked") : ws || label}
-          >
-            {activeAgents > 0 ? (
-              <span
-                className="tab-active"
-                title={`${activeAgents} active agent${activeAgents === 1 ? "" : "s"}`}
-              >
-                <span className="dot" data-state="running" />
-                <span className="tab-active-count">{activeAgents}</span>
-              </span>
-            ) : null}
-            <span className="label">{label}</span>
-            {!singleTab ? (
-              <span
-                className="close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose(head.id);
-                }}
-                onKeyDown={activationHandler((e) => {
-                  e.stopPropagation();
-                  onClose(head.id);
-                })}
-              >
-                <I.x size={11} />
-              </span>
-            ) : null}
-          </div>
-        );
-      })}
+    <div className="tabbar-wrap">
+      {edges.left ? (
+        <button
+          type="button"
+          className="tab-scroll"
+          title={t("app.tab.scrollLeft")}
+          aria-label={t("app.tab.scrollLeft")}
+          onClick={() => scrollStrip(-240)}
+        >
+          <I.chevronLeft size={13} />
+        </button>
+      ) : null}
+      <div
+        className="tabbar"
+        data-tauri-drag-region
+        ref={stripRef}
+        onScroll={readEdges}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuAnchor({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        {tabs.map((tab) => {
+          const ws = tab.workspaceDir ?? "";
+          const base = ws ? workspaceBasename(ws) || "workspace" : t("sidebarPanel.noWorkspace");
+          // Only disambiguate when this workspace holds more than one tab.
+          const shared = (perWorkspace.get(ws.replace(/[/\\]+$/, "")) ?? 0) > 1;
+          const label = shared && tab.session ? `${base} \u00b7 ${tab.session}` : base;
+          const isActive = tab.id === activeId;
+          return (
+            <div
+              key={tab.id}
+              className="tab"
+              data-active={isActive ? "true" : undefined}
+              data-blocked={blocked ? "true" : undefined}
+              aria-disabled={blocked ? true : undefined}
+              onClick={blocked ? undefined : () => setActive(tab.id)}
+              onKeyDown={blocked ? undefined : activationHandler(() => setActive(tab.id))}
+              title={blocked ? t("app.tab.switchBlocked") : ws || label}
+            >
+              {tab.busy ? (
+                <span className="tab-active" title={t("app.tab.running")}>
+                  <span className="dot" data-state="running" />
+                </span>
+              ) : null}
+              <span className="label">{label}</span>
+              {!singleTab ? (
+                <span
+                  className="close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose(tab.id);
+                  }}
+                  onKeyDown={activationHandler((e) => {
+                    e.stopPropagation();
+                    onClose(tab.id);
+                  })}
+                >
+                  <I.x size={11} />
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {edges.right ? (
+        <button
+          type="button"
+          className="tab-scroll"
+          title={t("app.tab.scrollRight")}
+          aria-label={t("app.tab.scrollRight")}
+          onClick={() => scrollStrip(240)}
+        >
+          <I.chevronRight size={13} />
+        </button>
+      ) : null}
       <div
         className="tab newtab"
         title={localizeShortcutText(t("app.tab.newTabTitle"))}
         onClick={onNew}
         onKeyDown={activationHandler(onNew)}
       >
-        <I.plus size={12} />
-        <span style={{ fontSize: 11, marginLeft: 4 }}>{t("app.tab.newTab")}</span>
+        <I.plus size={13} />
       </div>
       {menuAnchor ? (
         <TabMenu

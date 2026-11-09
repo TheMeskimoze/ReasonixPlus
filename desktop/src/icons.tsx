@@ -34,6 +34,16 @@ export const I = {
       <path d="M12 5v14M5 12l7 7 7-7" />
     </Ic>
   ),
+  chevronLeft: (p: IconProps) => (
+    <Ic {...p}>
+      <path d="M15 6l-6 6 6 6" />
+    </Ic>
+  ),
+  chevronRight: (p: IconProps) => (
+    <Ic {...p}>
+      <path d="M9 6l6 6-6 6" />
+    </Ic>
+  ),
   plus: (p: IconProps) => (
     <Ic {...p}>
       <path d="M12 5v14M5 12h14" />
@@ -265,7 +275,8 @@ export const I = {
     <Ic {...p}>
       <path d="M15 3 9 9l-4 1 9 9 1-4 6-6ZM4 20l5-5" />
     </Ic>
-  ),  rotate: (p: IconProps) => (
+  ),
+  rotate: (p: IconProps) => (
     <Ic {...p}>
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
       <path d="M3 3v5h5" />
