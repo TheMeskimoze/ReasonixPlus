@@ -8,6 +8,8 @@
 import type {
   BalanceEvent,
   BtwResultEvent,
+  BunInstall,
+  BunInstallEvent,
   CapabilityChoice,
   ChangelogEvent,
   CheckpointRequiredEvent,
@@ -161,6 +163,8 @@ export type {
   DesktopDiagnosticLevel,
   OllamaModelsEvent,
   OpencodeModelsEvent,
+  BunInstall,
+  BunInstallEvent,
   ChangelogEvent,
   CheckpointRequiredEvent,
   CheckpointVerdict,
@@ -312,6 +316,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ProviderUsageEvent
   | OllamaModelsEvent
   | OpencodeModelsEvent
+  | BunInstallEvent
   | ChangelogEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent

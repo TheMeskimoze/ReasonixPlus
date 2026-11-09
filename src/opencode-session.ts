@@ -1,5 +1,5 @@
-/** The OpenCode Console session for this process only. Tokens are never written to
- *  disk, so no account identity outlives the run that signed in. */
+/** The OpenCode Console session this process holds. Persisting it and restoring it
+ *  on the next run is `opencode-oauth.ts`'s job, so this store stays fs-free. */
 
 export interface OpencodeOAuthCreds {
   accessToken: string;

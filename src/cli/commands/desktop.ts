@@ -32,6 +32,8 @@ import type {
   AntigravityQuota,
   BalanceEvent,
   BtwResultEvent,
+  BunInstall,
+  BunInstallEvent,
   CapabilityChoice,
   ChangelogEvent,
   CheckpointRequiredEvent,
@@ -221,7 +223,6 @@ import {
   pickFallbackModel,
   providerForModel,
   providerSettingFromStore,
-  purgeOpencodeOAuth,
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
@@ -475,16 +476,24 @@ import {
 import { loadOllamaModelsCache, saveOllamaModelsCache } from "../../ollama-models-cache.js";
 import { recordOllamaThinking } from "../../ollama-thinking.js";
 import { opencodeAppCredential } from "../../opencode-app-credential.js";
+import { installBun } from "../../opencode-bun-install.js";
 import { fetchOpencodeModels, opencodeUsagePlan } from "../../opencode-models.js";
 import {
   type OpencodeDeviceFlow,
   beginOpencodeDeviceFlow,
   resolveOpencodeToken,
+  restoreOpencodeSession,
   signOutOpencode,
+  storeOpencodeSession,
 } from "../../opencode-oauth.js";
 import { fetchOpencodeQuota } from "../../opencode-quota.js";
-import { bunCommand, opencodeRelay, opencodeRelayEnabled } from "../../opencode-relay.js";
-import { opencodeOAuthSession, rememberOpencodeOAuth } from "../../opencode-session.js";
+import {
+  bunCommand,
+  bunInstallDir,
+  opencodeRelay,
+  opencodeRelayEnabled,
+} from "../../opencode-relay.js";
+import { opencodeOAuthSession } from "../../opencode-session.js";
 import {
   type CatalogProvider,
   type ProviderCatalog,
@@ -657,6 +666,7 @@ export type EmittableEvent =
   | ProviderUsageEvent
   | OllamaModelsEvent
   | OpencodeModelsEvent
+  | BunInstallEvent
   | ChangelogEvent
   | MentionResultsEvent
   | MentionPreviewEvent
@@ -2539,6 +2549,39 @@ async function freeTierStatus(): Promise<FreeTierStatus> {
     signedIn,
     credential: signedIn ? "harness" : opencodeAppCredential() ? "app" : "none",
   };
+}
+
+let bunInstalling = false;
+
+/** Install Bun where the relay looks for it, reporting each phase. The desktop
+ *  relaunches on success, so the next run starts with the new runtime available. */
+async function installBunRuntime(tab: Tab): Promise<void> {
+  const emitInstall = (install: BunInstall) => emit({ type: "$bun_install", install }, tab.id);
+  if (bunInstalling) {
+    emitInstall({ phase: "done", ok: false, reason: "installation already running" });
+    return;
+  }
+  const targetDir = bunInstallDir();
+  if (!targetDir) {
+    emitInstall({ phase: "done", ok: false, reason: "no home directory to install Bun into" });
+    return;
+  }
+  bunInstalling = true;
+  emitInstall({ phase: "downloading" });
+  try {
+    const installed = await installBun({
+      targetDir,
+      onPhase: (phase) => emitInstall({ phase }),
+    });
+    emitDiagnostic("opencode.bun.installed", { command: installed.command }, { tabId: tab.id });
+    emitInstall({ phase: "done", ok: true, reason: null });
+    await refreshOpencodeModels(true, tab);
+  } catch (err) {
+    emitDiagnosticError("opencode.bun.install_failed", err, { tabId: tab.id });
+    emitInstall({ phase: "done", ok: false, reason: messageOf(err) });
+  } finally {
+    bunInstalling = false;
+  }
 }
 
 export async function refreshOpencodeModels(force = false, tab?: Tab): Promise<void> {
@@ -9760,7 +9803,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     });
   }, QUOTA_POLL_INTERVAL_MS);
 
-  purgeOpencodeOAuth();
+  restoreOpencodeSession();
   const rl = createInterface({ input: stdin });
   emit({ type: "$connected" });
   markPhase("rpc_stdin_listening");
@@ -11192,7 +11235,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             .then((creds) => {
               if (gen !== opencodeOAuthGen) return; // superseded by a newer begin/signout
               pendingOpencodeOAuth = null;
-              rememberOpencodeOAuth(creds);
+              storeOpencodeSession(creds);
               lastOpencodeOAuthError = null;
               // A fresh credential unlocks the paid + Go catalog and may make
               // previously unusable tabs usable — build (or rebuild) them, then
@@ -11351,6 +11394,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "opencode_models_refresh") {
       void refreshOpencodeModels(!!msg.force, tab);
+      return;
+    }
+    if (msg.cmd === "bun_install") {
+      void installBunRuntime(tab);
       return;
     }
     if (msg.cmd === "changelog_get") {

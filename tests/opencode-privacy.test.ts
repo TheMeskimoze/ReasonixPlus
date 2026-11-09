@@ -1,4 +1,5 @@
-/** Guards that OpenCode credentials and request identity never reach durable storage. */
+/** Guards that OpenCode request identity and diagnostics stay out of durable storage,
+ *  and that a Console sign-in is kept by the flow that owns it. */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ describe("opencode session store", () => {
     forgetOpencodeOAuth();
   });
 
-  it("holds credentials only in memory", () => {
+  it("holds the session in memory", () => {
     expect(opencodeOAuthSession()).toBeUndefined();
     rememberOpencodeOAuth({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1000 });
     expect(opencodeOAuthSession()?.accessToken).toBe("a");
@@ -41,10 +42,11 @@ describe("durable surfaces", () => {
     expect(source).not.toContain("authPrefix");
   });
 
-  it("writes no opencode token through the config layer", () => {
+  it("writes the opencode sign-in through the same config path as the other OAuth providers", () => {
     const source = read("src/config.ts");
-    expect(source).not.toContain("cfg.opencodeOAuth =");
-    expect(source).toContain("purgeOpencodeOAuth");
+    expect(source).toContain("cfg.opencodeOAuth =");
+    expect(source).toContain("export function clearOpencodeOAuth");
+    expect(source).not.toContain("purgeOpencodeOAuth");
   });
 
   it("takes request identity from the single process-wide accessor", () => {

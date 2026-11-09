@@ -419,6 +419,8 @@ export type {
   OpencodeQuotaWindow,
   OpencodeModelsEvent,
   FreeTierStatus,
+  BunInstall,
+  BunInstallEvent,
   SettingsPatch,
   ProviderSettingsMap,
   SearchSettingsMap,
