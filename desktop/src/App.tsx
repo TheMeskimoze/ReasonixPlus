@@ -6370,11 +6370,12 @@ export function TabBar({
     readEdges();
     const el = stripRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(readEdges);
-    ro.observe(el);
+    // jsdom has no ResizeObserver, and the window resize listener still covers that case.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(readEdges) : null;
+    ro?.observe(el);
     window.addEventListener("resize", readEdges);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("resize", readEdges);
     };
   }, [readEdges]);
