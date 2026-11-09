@@ -2,7 +2,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { envFlag } from "./env-flag.js";
 import { createLogger } from "./logging.js";
 
@@ -116,6 +116,13 @@ export function bunCommand(env: NodeJS.ProcessEnv = process.env): BunCommand {
   // Nothing installed: let the spawn resolve the name through PATH.
   return { command: name, source: "path" };
 }
+/** Where a fresh install lands: the directory holding the first path `bunCommand`
+ *  searches, so an installed runtime is picked up without touching PATH. */
+export function bunInstallDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const file = BUN_INSTALLS[0]?.(env, "bun");
+  return file ? dirname(file) : undefined;
+}
+
 function relaySpawn(env: NodeJS.ProcessEnv): { command: string; args: string[] } {
   return { command: bunCommand(env).command, args: ["-e", RELAY_PROGRAM] };
 }

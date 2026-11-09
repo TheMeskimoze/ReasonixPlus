@@ -1,7 +1,7 @@
-/** OpenCode Console device-flow OAuth, mirroring the OpenCode CLI's `opencode auth login`.
- *  The bearer token authenticates Zen + Go inference and lives only in memory. */
+/** OpenCode Console device-flow OAuth, mirroring the OpenCode CLI's `opencode auth
+ *  login`. The bearer token authenticates Zen + Go inference and is persisted. */
 
-import { defaultConfigPath, purgeOpencodeOAuth } from "./config.js";
+import { clearOpencodeOAuth, defaultConfigPath, readConfig, saveOpencodeOAuth } from "./config.js";
 import { singleFlight } from "./core/lazy.js";
 import { OAUTH_FLOW_TIMEOUT_MS, envOr, fetchUserEmail, isTokenFresh } from "./oauth-shared.js";
 import {
@@ -184,6 +184,7 @@ export async function beginOpencodeDeviceFlow(
 async function refreshOpencodeToken(
   creds: OpencodeOAuthCreds,
   epoch: number,
+  path: string,
 ): Promise<OpencodeOAuthCreds | undefined> {
   const server = (creds.server ?? opencodeConsoleServer()).replace(/\/+$/, "");
   const token = await postJson<DeviceTokenResponse>(`${server}/auth/device/token`, {
@@ -200,23 +201,47 @@ async function refreshOpencodeToken(
     refreshToken: token.refresh_token ?? creds.refreshToken,
     expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
   };
-  if (!rememberOpencodeOAuth(next, epoch)) return undefined;
+  if (!storeOpencodeSession(next, path, epoch)) return undefined;
   return next;
 }
 
 const refreshOpencodeOnce = singleFlight<string | undefined>();
 
+/** Keep a Console sign-in for this process and persist it, so the next run starts
+ *  signed in. Pass the epoch a refresh started under: a refresh that settles after
+ *  sign-out is dropped. */
+export function storeOpencodeSession(
+  creds: OpencodeOAuthCreds,
+  path: string = defaultConfigPath(),
+  expectedEpoch?: number,
+): boolean {
+  if (!rememberOpencodeOAuth(creds, expectedEpoch)) return false;
+  saveOpencodeOAuth(creds, path);
+  return true;
+}
+
+/** Adopt the Console session an earlier run persisted. A session this process
+ *  already holds wins, so this never resurrects a sign-out. */
+export function restoreOpencodeSession(path: string = defaultConfigPath()): void {
+  if (opencodeOAuthSession()?.accessToken) return;
+  const creds = readConfig(path).opencodeOAuth;
+  if (creds?.accessToken) rememberOpencodeOAuth(creds);
+}
+
 /** A usable OpenCode access token — refreshes from the stored refresh token
  *  when expired or within 5 min of expiry. Undefined when no OAuth creds exist
  *  or refresh fails (callers fall back to their static key / public tier). */
-export async function resolveOpencodeToken(): Promise<string | undefined> {
+export async function resolveOpencodeToken(
+  path: string = defaultConfigPath(),
+): Promise<string | undefined> {
+  restoreOpencodeSession(path);
   const creds = opencodeOAuthSession();
   if (!creds?.accessToken) return undefined;
   if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
   const epoch = opencodeSessionEpoch();
   return refreshOpencodeOnce(async () => {
     try {
-      const next = await refreshOpencodeToken(creds, epoch);
+      const next = await refreshOpencodeToken(creds, epoch, path);
       return next?.accessToken;
     } catch {
       return undefined;
@@ -224,13 +249,14 @@ export async function resolveOpencodeToken(): Promise<string | undefined> {
   });
 }
 
-/** True while this process holds a Console session. Gates the subscription catalog. */
-export function hasOpencodeOAuthSession(): boolean {
+/** True while a Console session is held. Gates the subscription catalog. */
+export function hasOpencodeOAuthSession(path: string = defaultConfigPath()): boolean {
+  restoreOpencodeSession(path);
   return Boolean(opencodeOAuthSession()?.accessToken);
 }
 
-/** Sign-out forgets the in-memory session and deletes any legacy on-disk block. */
+/** Sign-out forgets the session and deletes the persisted tokens. */
 export async function signOutOpencode(path: string = defaultConfigPath()): Promise<void> {
   forgetOpencodeOAuth();
-  purgeOpencodeOAuth(path);
+  clearOpencodeOAuth(path);
 }

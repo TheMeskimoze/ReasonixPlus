@@ -4579,6 +4579,25 @@ describe("Desktop App reducer — OpenCode OAuth flow state", () => {
   });
 });
 
+describe("Desktop App reducer: Bun install phases", () => {
+  it("stores each phase the daemon reports for the OpenCode card", () => {
+    const downloading = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$bun_install", install: { phase: "downloading" } },
+    });
+    expect(downloading.bunInstall).toEqual({ phase: "downloading" });
+
+    const failed = reduce(downloading, {
+      t: "incoming",
+      event: {
+        type: "$bun_install",
+        install: { phase: "done", ok: false, reason: "HTTP 502" },
+      },
+    });
+    expect(failed.bunInstall).toEqual({ phase: "done", ok: false, reason: "HTTP 502" });
+  });
+});
+
 describe("Desktop App reducer — image attachments", () => {
   it("send_user with images attaches them to the optimistic user message", () => {
     const next = reduce(initialState(), {

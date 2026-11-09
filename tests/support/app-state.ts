@@ -59,6 +59,7 @@ export function baseAppState(overrides: Partial<AppState> = {}): AppState {
     mailAuth: null,
     mcpAuth: null,
     playwrightBrowserInstall: null,
+    bunInstall: null,
     sessionFiles: [],
     sessionEvents: [],
     memory: [],

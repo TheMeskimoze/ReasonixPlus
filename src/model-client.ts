@@ -68,7 +68,7 @@ const AUTH_RESOLVERS: Readonly<
     // gateways 401 it, so it is only a fallback when no service key is configured.
     const serviceKey = loadOpencodeApiKey(ctx.configPath);
     if (serviceKey) return serviceKey;
-    const session = await resolveOpencodeToken();
+    const session = await resolveOpencodeToken(ctx.configPath);
     if (session) return session;
     return freeModelAccount(ctx.wireModel);
   },
@@ -105,7 +105,7 @@ const TRANSPORT_RESOLVERS: Readonly<
           endpoint: `${ctx.endpoint.baseUrl ?? DEFAULT_OPENCODE_CHAT_URL}/responses`,
           headers: {
             Authorization: `Bearer ${
-              (await resolveOpencodeToken()) ?? ctx.endpoint.apiKey ?? "public"
+              (await resolveOpencodeToken(ctx.configPath)) ?? ctx.endpoint.apiKey ?? "public"
             }`,
           },
           api: "responses" as const,

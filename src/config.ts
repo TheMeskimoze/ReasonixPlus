@@ -57,7 +57,7 @@ import {
   isOpencodeGoModel,
   reasoningEffortsForModel,
 } from "./opencode-models.js";
-import { opencodeOAuthSession } from "./opencode-session.js";
+import { type OpencodeOAuthCreds, opencodeOAuthSession } from "./opencode-session.js";
 import { discoveredProviderModels, isCatalogProvider } from "./provider-models.js";
 import { reasonixHome } from "./reasonix-home.js";
 import { MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS } from "./telemetry/stats.js";
@@ -835,6 +835,9 @@ export interface ReasonixConfig {
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
    *  powers gemini-* models on the Antigravity quota. */
   antigravityOAuth?: AntigravityOAuthCreds;
+  /** OpenCode Console device-flow tokens — set by the "Sign in with OpenCode"
+   *  flow; unlocks the OpenCode Zen/Go paid + subscription catalog. */
+  opencodeOAuth?: OpencodeOAuthCreds;
   /** Selected managed mail integration. Outlook remains the default for existing installs. */
   mailProvider?: MailProvider;
   /** User-owned Google OAuth client and tokens for the official Gmail MCP server. */
@@ -1219,7 +1222,9 @@ export function loadMimoProtocol(): "chat" | "responses" {
 export function hasOpencodeCredential(path: string = defaultConfigPath()): boolean {
   const key = loadOpencodeApiKey(path);
   if (key && key !== "public") return true;
-  return Boolean(opencodeOAuthSession()?.accessToken);
+  return Boolean(
+    opencodeOAuthSession()?.accessToken ?? readConfig(path).opencodeOAuth?.accessToken,
+  );
 }
 
 /** Ollama cloud API key: env > config > undefined. */
@@ -2073,27 +2078,20 @@ export function clearAntigravityOAuth(path: string = defaultConfigPath()): void 
   writeConfig(rest, path);
 }
 
-/** Drop an `opencodeOAuth` block left by an older build so no Console token
- *  survives on disk. Returns true when the file changed. */
-export function purgeOpencodeOAuth(path: string = defaultConfigPath()): boolean {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
-  } catch {
-    return false;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return false;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-  const cfg = parsed as Record<string, unknown>;
-  if (!("opencodeOAuth" in cfg)) return false;
-  const rest = Object.fromEntries(Object.entries(cfg).filter(([key]) => key !== "opencodeOAuth"));
-  writeConfig(rest as ReasonixConfig, path);
-  return true;
+export function saveOpencodeOAuth(
+  creds: OpencodeOAuthCreds,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.opencodeOAuth = creds;
+  writeConfig(cfg, path);
+}
+
+export function clearOpencodeOAuth(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.opencodeOAuth) return;
+  const { opencodeOAuth: _drop, ...rest } = cfg;
+  writeConfig(rest, path);
 }
 
 /** Persist the inference key issued by MiMo browser authorization (an API key,

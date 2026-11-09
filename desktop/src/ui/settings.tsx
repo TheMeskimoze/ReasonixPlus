@@ -61,6 +61,7 @@ import type {
   SkillInfo,
 } from "../protocol";
 import {
+  type BunInstall,
   type FreeTierStatus,
   MailProvider,
   PLAYWRIGHT_MANAGED_BROWSERS,
@@ -200,6 +201,8 @@ export function SettingsModal({
   /** Forgets the persisted window state and restores the configured geometry. */
   onResetWindowState,
   freeTierStatus,
+  bunInstall,
+  onInstallBun,
   oauthWaiting,
   onOAuthBegin,
   onOAuthCancel,
@@ -279,6 +282,10 @@ export function SettingsModal({
   onResetWindowState: () => void;
   /** Whether the free OpenCode tier can be served right now. */
   freeTierStatus?: FreeTierStatus | null;
+  /** Latest Bun install phase, so the OpenCode card can show progress and failures. */
+  bunInstall?: BunInstall | null;
+  /** Download and install Bun, then relaunch: the OpenCode card's action. */
+  onInstallBun?: () => void;
   /** Ollama chat endpoint (OpenAI-compatible) shown on the Models page. */
   /** Dynamically fetched Ollama models (raw ids) — rendered as a scrollable grid. */
   ollamaModels?: string[];
@@ -446,7 +453,6 @@ export function SettingsModal({
                 customFontFamily={customFontFamily}
                 onSetCustomFontFamily={onSetCustomFontFamily}
                 onResetWindowState={onResetWindowState}
-                freeTierStatus={freeTierStatus}
               />
             )}
             {page === "quickSend" && <PageQuickSend settings={settings} onSave={onSave} />}
@@ -500,6 +506,9 @@ export function SettingsModal({
                 onOpencodeBegin={onOpencodeOAuthBegin}
                 onOpencodeCancel={onOpencodeOAuthCancel}
                 onOpencodeSignOut={onOpencodeOAuthSignOut}
+                freeTierStatus={freeTierStatus}
+                bunInstall={bunInstall}
+                onInstallBun={onInstallBun}
                 mimoOAuthWaiting={mimoOAuthWaiting}
                 onMiMoOAuthBegin={onMiMoOAuthBegin}
                 onMiMoOAuthCancel={onMiMoOAuthCancel}
@@ -860,7 +869,6 @@ function PageGeneral({
   customFontFamily,
   onSetCustomFontFamily,
   onResetWindowState,
-  freeTierStatus,
 }: {
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
@@ -869,7 +877,6 @@ function PageGeneral({
   customFontFamily: string;
   onSetCustomFontFamily: (family: string) => void;
   onResetWindowState: () => void;
-  freeTierStatus?: FreeTierStatus | null;
 }) {
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
@@ -987,31 +994,6 @@ function PageGeneral({
           </button>
         </div>
       </section>
-
-      {freeTierStatus ? (
-        <section className="section">
-          <div className="stitle">{t("settings.freeTierSection")}</div>
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.freeTierRuntime")}</div>
-              <div className="h">
-                {freeTierStatus.ready
-                  ? t("settings.freeTierReady", { command: freeTierStatus.bun.command })
-                  : freeTierStatus.relayEnabled
-                    ? t("settings.freeTierMissing")
-                    : t("settings.freeTierDisabled")}
-              </div>
-            </div>
-            <span className="h">
-              {freeTierStatus.credential === "harness"
-                ? t("settings.freeTierSignedIn")
-                : freeTierStatus.credential === "app"
-                  ? t("settings.freeTierAppAccount")
-                  : t("settings.freeTierAnonymous")}
-            </span>
-          </div>
-        </section>
-      ) : null}
       <VoiceInputSettings />
     </div>
   );
@@ -1962,6 +1944,57 @@ export function MiMoSection({
   );
 }
 
+/** The Bun runtime and the account free-tier turns run as, inside the OpenCode card.
+ *  The install button exists only while no runtime is detected; a finished install
+ *  relaunches the app, so this card never claims a runtime this process cannot use. */
+export function OpencodeFreeTierSection({
+  status,
+  install,
+  onInstall,
+}: {
+  status: FreeTierStatus;
+  install?: BunInstall | null;
+  onInstall?: () => void;
+}) {
+  const installing = install?.phase === "downloading" || install?.phase === "extracting";
+  const failure = install?.phase === "done" && !install.ok ? install.reason : null;
+  return (
+    <>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.freeTierRuntime")}</div>
+          <div className="h" title={status.ready ? status.bun.command : undefined}>
+            {status.ready
+              ? t("settings.freeTierReady")
+              : status.relayEnabled
+                ? failure
+                  ? t("settings.freeTierInstallFailed", { error: failure })
+                  : t("settings.freeTierMissing")
+                : t("settings.freeTierDisabled")}
+          </div>
+        </div>
+        {!status.ready && status.relayEnabled ? (
+          <button type="button" className="btn" onClick={onInstall} disabled={installing}>
+            {installing ? t("settings.freeTierInstalling") : t("settings.freeTierInstall")}
+          </button>
+        ) : null}
+      </div>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.freeTierAccount")}</div>
+          <div className="h">
+            {status.credential === "harness"
+              ? t("settings.freeTierSignedIn")
+              : status.credential === "app"
+                ? t("settings.freeTierAppAccount")
+                : t("settings.freeTierAnonymous")}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function OpencodeSection({
   signedIn,
   account,
@@ -2474,6 +2507,9 @@ function PageModels({
   onOpencodeBegin,
   onOpencodeCancel,
   onOpencodeSignOut,
+  freeTierStatus,
+  bunInstall,
+  onInstallBun,
   mimoOAuthWaiting,
   onMiMoOAuthBegin,
   onMiMoOAuthCancel,
@@ -2516,6 +2552,11 @@ function PageModels({
   onOpencodeBegin: () => void;
   onOpencodeCancel: () => void;
   onOpencodeSignOut: () => void;
+  /** Free-tier runtime readiness and the account its turns run as, shown in the OpenCode card. */
+  freeTierStatus?: FreeTierStatus | null;
+  /** Latest Bun install phase for the OpenCode card's own install action. */
+  bunInstall?: BunInstall | null;
+  onInstallBun?: () => void;
   /** True between mimo_oauth_begin_result and the flow's terminal state. */
   mimoOAuthWaiting: boolean;
   onMiMoOAuthBegin: () => void;
@@ -2753,6 +2794,13 @@ function PageModels({
               onCancel={onOpencodeCancel}
               onSignOut={onOpencodeSignOut}
             />
+            {freeTierStatus ? (
+              <OpencodeFreeTierSection
+                status={freeTierStatus}
+                install={bunInstall}
+                onInstall={onInstallBun}
+              />
+            ) : null}
             <ProviderCatalogRow
               label={providerString("opencode", "modelsLabel") ?? ""}
               hint={

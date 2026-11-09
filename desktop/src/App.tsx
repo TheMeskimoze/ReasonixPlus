@@ -64,6 +64,7 @@ import {
 } from "./notifications";
 import { planLabelsBySession } from "./plan-labels";
 import {
+  type BunInstall,
   type CapabilityChoice,
   type CheckpointVerdict,
   type ChoiceVerdict,
@@ -692,6 +693,8 @@ type State = {
   /** Latest MCP sign-in event ($mcp_auth) — drives the per-server sign-in control. */
   mcpAuth: McpAuthStatus | null;
   playwrightBrowserInstall: PlaywrightBrowserInstall | null;
+  /** Latest Bun install phase event ($bun_install), which drives the OpenCode card's action. */
+  bunInstall: BunInstall | null;
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   /** Plan/choice/fold verdicts recorded for the Events tab. Turns are not here:
@@ -2856,6 +2859,8 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
       return { ...state, mcpAuth: ev.auth };
     case "$playwright_browser_install":
       return { ...state, playwrightBrowserInstall: ev.install };
+    case "$bun_install":
+      return { ...state, bunInstall: ev.install };
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
@@ -3833,6 +3838,7 @@ const TabRuntime = memo(function TabRuntime({
     mailAuth: null,
     mcpAuth: null,
     playwrightBrowserInstall: null,
+    bunInstall: null,
     sessionFiles: [],
     sessionEvents: [],
     memory: [],
@@ -4170,6 +4176,15 @@ const TabRuntime = memo(function TabRuntime({
       sendRpc({ cmd: "playwright_browser_install_cancel", browser }),
     [sendRpc],
   );
+  const installBun = useCallback(() => sendRpc({ cmd: "bun_install" }), [sendRpc]);
+  // A finished install only counts in a fresh process: this one already spawned its
+  // relay, so the new runtime is adopted by relaunching instead of restarting it here.
+  const bunInstall = state.bunInstall;
+  const bunInstalled = bunInstall?.phase === "done" && bunInstall.ok;
+  useEffect(() => {
+    if (!bunInstalled) return;
+    void relaunch().catch((err) => recordFrontendFailure("frontend.relaunch_failed", err));
+  }, [bunInstalled]);
   const setMailProvider = useCallback(
     (provider: MailProvider) => sendRpc({ cmd: "mail_provider_set", provider }),
     [sendRpc],
@@ -5923,6 +5938,8 @@ const TabRuntime = memo(function TabRuntime({
             opencodeModelsError={opencodeModelsError ?? undefined}
             opencodeVisionModels={opencodeVisionModels}
             freeTierStatus={freeTierStatus}
+            bunInstall={state.bunInstall}
+            onInstallBun={installBun}
             onRefreshOpencodeModels={onRefreshOpencodeModels}
             onRefreshProviderCatalogs={onRefreshProviderCatalogs}
             changelog={changelog}

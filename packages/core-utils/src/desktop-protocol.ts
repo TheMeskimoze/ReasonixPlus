@@ -1746,6 +1746,18 @@ export interface FreeTierStatus {
   credential: "harness" | "app" | "none";
 }
 
+/** Progress of the in-app Bun install: the archive is downloaded, unpacked into the
+ *  directory the relay searches, and the desktop relaunches on `done`. */
+export type BunInstall =
+  | { phase: "downloading" }
+  | { phase: "extracting" }
+  | { phase: "done"; ok: boolean; reason: string | null };
+
+export interface BunInstallEvent {
+  type: "$bun_install";
+  install: BunInstall;
+}
+
 /** Dynamically fetched model list for the OpenCode provider from models.dev.
  *  Free Zen models are always included; the paid Zen + Go subscription catalog
  *  is included when the daemon holds an OpenCode credential. */
@@ -1938,6 +1950,8 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mimo_oauth_signout" }
   | { cmd: "antigravity_models_refresh" }
   | { cmd: "opencode_models_refresh"; force?: boolean }
+  /** Download and install the Bun runtime the OpenCode free tier needs. */
+  | { cmd: "bun_install" }
   | {
       cmd: "provider_models_refresh";
       provider?: ProviderID;

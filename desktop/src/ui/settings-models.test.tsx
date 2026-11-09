@@ -841,6 +841,94 @@ describe("Search tab", () => {
   });
 });
 
+describe("OpenCode free-tier status placement", () => {
+  const freeTier = {
+    ready: true,
+    relayEnabled: true,
+    bun: { command: "C:\\Users\\uraan\\.bun\\bin\\bun.exe", source: "install" },
+    signedIn: false,
+    credential: "app" as const,
+  };
+  const missingBun = { ...freeTier, ready: false };
+
+  /** The row carrying `text`, wherever a page rendered it. */
+  function rowWith(container: HTMLElement, text: string): HTMLElement | undefined {
+    return Array.from(container.querySelectorAll<HTMLElement>(".setting-row")).find((row) =>
+      row.textContent?.includes(text),
+    );
+  }
+
+  /** Renders the Models page with the OpenCode card expanded. */
+  function renderOpencodeCard(props: Record<string, unknown>) {
+    const rendered = render(
+      <SettingsModal {...baseProps} initialPage="models" {...props} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: t("composer.modelOpencodeGroup") }));
+    return rendered;
+  }
+
+  afterEach(cleanup);
+
+  it("reports an installed runtime inside the OpenCode card and offers no button", () => {
+    const { container } = renderOpencodeCard({ freeTierStatus: freeTier });
+    const row = rowWith(container, t("settings.freeTierReady"));
+    expect(row).toBeTruthy();
+    expect(row?.closest(".provider-card")?.textContent).toContain(
+      t("composer.modelOpencodeGroup"),
+    );
+    expect(within(row as HTMLElement).queryByRole("button")).toBeNull();
+    expect(container.textContent).toContain(t("settings.freeTierAppAccount"));
+  });
+
+  it("offers the install button while no runtime is detected", () => {
+    const onInstallBun = vi.fn();
+    const { container } = renderOpencodeCard({
+      freeTierStatus: missingBun,
+      onInstallBun,
+    });
+    const row = rowWith(container, t("settings.freeTierMissing"));
+    const button = within(row as HTMLElement).getByRole("button", {
+      name: t("settings.freeTierInstall"),
+    });
+    fireEvent.click(button);
+    expect(onInstallBun).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the button while the install runs and reports a failure in place", () => {
+    const installing = renderOpencodeCard({
+      freeTierStatus: missingBun,
+      bunInstall: { phase: "downloading" },
+      onInstallBun: vi.fn(),
+    });
+    expect(
+      (within(installing.container).getByRole("button", {
+        name: t("settings.freeTierInstalling"),
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    installing.unmount();
+
+    const failed = renderOpencodeCard({
+      freeTierStatus: missingBun,
+      bunInstall: { phase: "done", ok: false, reason: "HTTP 502" },
+      onInstallBun: vi.fn(),
+    });
+    expect(failed.container.textContent).toContain(
+      t("settings.freeTierInstallFailed", { error: "HTTP 502" }),
+    );
+    expect(
+      within(failed.container).getByRole("button", { name: t("settings.freeTierInstall") }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the whole block off the General page", () => {
+    const { container } = render(
+      <SettingsModal {...baseProps} initialPage="general" freeTierStatus={freeTier} />,
+    );
+    expect(rowWith(container, t("settings.freeTierReady"))).toBeUndefined();
+    expect(container.textContent).not.toContain(t("settings.freeTierRuntime"));
+  });
+});
+
 describe("declared-empty settings surfaces", () => {
   const PROVIDERS_BARREL = "../../../packages/core-utils/src/providers.generated.js";
   const ENGINES_BARREL = "../../../packages/core-utils/src/search-engines.generated.js";

@@ -52,7 +52,9 @@ import {
   hasOpencodeOAuthSession,
   opencodeConsoleServer,
   resolveOpencodeToken,
+  restoreOpencodeSession,
   signOutOpencode,
+  storeOpencodeSession,
 } from "../src/opencode-oauth.js";
 import { fetchOpencodeQuota, opencodeUsageUrl } from "../src/opencode-quota.js";
 import {
@@ -429,6 +431,7 @@ describe("opencode-models", () => {
 describe("opencode-oauth", () => {
   const TEST_DIR = join(process.cwd(), ".tmp-test-opencode-oauth");
   const CONFIG_PATH = join(TEST_DIR, "config.json");
+  const previousConfig = process.env.REASONIX_CONFIG;
 
   function jsonResponse(body: unknown): Response {
     return new Response(JSON.stringify(body), {
@@ -441,10 +444,16 @@ describe("opencode-oauth", () => {
     beforeEach(() => {
       forgetOpencodeOAuth();
       mkdirSync(TEST_DIR, { recursive: true });
+      // Pin the sign-in's own config file: the default path is the developer's.
+      process.env.REASONIX_CONFIG = CONFIG_PATH;
     });
 
     afterEach(() => {
+      forgetOpencodeOAuth();
       rmSync(TEST_DIR, { recursive: true, force: true });
+      // biome-ignore lint/performance/noDelete: an undefined assignment would leave the string "undefined" as the config path
+      if (previousConfig === undefined) delete process.env.REASONIX_CONFIG;
+      else process.env.REASONIX_CONFIG = previousConfig;
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
       Reflect.deleteProperty(process.env, "OPENCODE_CONSOLE_URL");
@@ -500,7 +509,7 @@ describe("opencode-oauth", () => {
       expect(existsSync(CONFIG_PATH)).toBe(false);
     });
 
-    it("returns a fresh in-memory access token without a network call", async () => {
+    it("returns a fresh access token without a network call", async () => {
       rememberOpencodeOAuth({
         accessToken: "fresh-token",
         refreshToken: "refresh-1",
@@ -510,11 +519,12 @@ describe("opencode-oauth", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       expect(hasOpencodeOAuthSession()).toBe(true);
+      // The pinned config holds no session, so restore must not overwrite this one.
       expect(await resolveOpencodeToken()).toBe("fresh-token");
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("refreshes an expired token in memory and writes nothing to disk", async () => {
+    it("persists a refreshed token so the next run starts signed in", async () => {
       rememberOpencodeOAuth({
         accessToken: "old-token",
         refreshToken: "refresh-old",
@@ -534,10 +544,10 @@ describe("opencode-oauth", () => {
       });
       vi.stubGlobal("fetch", fetchMock);
 
-      expect(await resolveOpencodeToken()).toBe("new-token");
+      expect(await resolveOpencodeToken(CONFIG_PATH)).toBe("new-token");
       expect(opencodeOAuthSession()?.accessToken).toBe("new-token");
       expect(opencodeOAuthSession()?.refreshToken).toBe("refresh-new");
-      expect(existsSync(CONFIG_PATH)).toBe(false);
+      expect(readConfig(CONFIG_PATH).opencodeOAuth?.refreshToken).toBe("refresh-new");
     });
 
     it("drops a refresh that settles after sign-out", async () => {
@@ -559,19 +569,40 @@ describe("opencode-oauth", () => {
         }),
       );
 
-      expect(await resolveOpencodeToken()).toBeUndefined();
+      expect(await resolveOpencodeToken(CONFIG_PATH)).toBeUndefined();
       expect(opencodeOAuthSession()).toBeUndefined();
+      expect(existsSync(CONFIG_PATH)).toBe(false);
     });
 
-    it("sign-out forgets the session and deletes a legacy on-disk block", async () => {
-      rememberOpencodeOAuth({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1000 });
-      writeFileSync(
+    it("keeps a sign-in across a restart", async () => {
+      storeOpencodeSession(
+        {
+          accessToken: "kept-token",
+          refreshToken: "kept-refresh",
+          expiresAt: Date.now() + 60 * 60 * 1000,
+          account: "me@example.com",
+          orgId: "org-1",
+          orgName: "Acme",
+        },
         CONFIG_PATH,
-        JSON.stringify({
-          model: "big-pickle",
-          opencodeOAuth: { accessToken: "legacy", refreshToken: "r", expiresAt: 1 },
-        }),
       );
+
+      // A restart starts with an empty process and only what the config holds.
+      forgetOpencodeOAuth();
+      restoreOpencodeSession(CONFIG_PATH);
+
+      expect(opencodeOAuthSession()?.accessToken).toBe("kept-token");
+      expect(opencodeOAuthSession()?.account).toBe("me@example.com");
+      expect(opencodeOAuthSession()?.orgName).toBe("Acme");
+      expect(hasOpencodeOAuthSession()).toBe(true);
+    });
+
+    it("sign-out forgets the session and deletes the persisted tokens", async () => {
+      storeOpencodeSession(
+        { accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1000 },
+        CONFIG_PATH,
+      );
+      writeConfig({ ...readConfig(CONFIG_PATH), model: "big-pickle" }, CONFIG_PATH);
 
       expect(hasOpencodeOAuthSession()).toBe(true);
       expect(readConfig(CONFIG_PATH)).toHaveProperty("opencodeOAuth");
