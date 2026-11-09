@@ -606,6 +606,7 @@
     "tab": {
       "newTabTitle": "New tab ⌘T",
       "newTab": "New tab",
+      "close": "Close tab",
       "switchBlocked": "Finishing a session change first",
       "clearAll": "Clear all tabs",
       "clearRight": "Clear tabs to the right",
@@ -615,7 +616,6 @@
       "running": "Agent running"
     },
     "header": {
-      "noWorkspace": "No workspace selected",
       "running": "Running",
       "clickToSelect": "Click to select workspace",
       "export": "Export",
@@ -667,8 +667,7 @@
     "exportReasoningSummary": "Reasoning",
     "exportToolLabel": "Tool",
     "session": {
-      "new": "{workspace} · New session",
-      "format": "Session {month}-{day} {hour}:{minute}"
+      "new": "{workspace} · New session"
     }
   },
   "planBadge": {
@@ -1032,7 +1031,6 @@
     "cancelMemory": "Cancel"
   },
   "sidebarPanel": {
-    "sessionTitle": "Session {month}-{day} {hour}:{minute}",
     "justNow": "just now",
     "minutesAgo": "{n}m ago",
     "hoursAgo": "{n}h ago",

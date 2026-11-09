@@ -14,7 +14,7 @@ const OWNER = "desktop-20260101000000-1";
 const OTHER = "desktop-20260102000000-1";
 
 function session(name: string, summary: string): SessionInfo {
-  return { name, summary, messageCount: 0, mtime: "2026-01-01T00:00:00.000Z" };
+  return { name, title: summary, summary, messageCount: 0, mtime: "2026-01-01T00:00:00.000Z" };
 }
 
 /** The rendered rows keyed by title, so assertions never depend on sort order. */

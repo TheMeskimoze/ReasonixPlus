@@ -214,8 +214,8 @@ describe("Session plan history", () => {
     const { container } = renderPlans({
       planSession: "mine",
       sessions: [
-        { name: "mine", summary: "My chat", messageCount: 1, mtime: now },
-        { name: "theirs", summary: "Their chat", messageCount: 1, mtime: now },
+        { name: "mine", title: "My chat", summary: "My chat", messageCount: 1, mtime: now },
+        { name: "theirs", title: "Their chat", summary: "Their chat", messageCount: 1, mtime: now },
       ],
       history: [
         plan({ id: "theirs-plan", summary: "Their work", ownerSession: "theirs" }),

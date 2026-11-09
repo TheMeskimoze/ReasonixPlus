@@ -24,7 +24,7 @@ import {
 import type { PlanSummary } from "../src/code/plans.js";
 import { Eventizer } from "../src/core/eventize.js";
 import { toPlanHistoryItems } from "../src/desktop/plan-listing.js";
-import { toSessionListItems } from "../src/desktop/session-listing.js";
+import { sessionListTitle, toSessionListItems } from "../src/desktop/session-listing.js";
 import type { SessionInfo } from "../src/memory/session.js";
 import type { ChatMessage } from "../src/types.js";
 import { baseAppState } from "./support/app-state.js";
@@ -575,6 +575,7 @@ describe("desktop-session-prime", () => {
       const [item] = toSessionListItems([session("one")]);
       expect(item).toEqual({
         name: "one",
+        title: "Title",
         messageCount: 2,
         mtime: "2026-01-02T03:04:05.000Z",
         updatedAt: 1_700_000_000_000,
@@ -589,6 +590,7 @@ describe("desktop-session-prime", () => {
         "mtime",
         "name",
         "summary",
+        "title",
         "updatedAt",
         "workspaceStatus",
       ]);
@@ -612,6 +614,37 @@ describe("desktop-session-prime", () => {
       expect(item?.updatedAt).toBe(1_700_000_000_005);
       // `lastActive` is a daemon-side record field and never crosses the wire.
       expect(item === undefined || "lastActive" in item).toBe(false);
+    });
+  });
+
+  describe("sessionListTitle — the one label every surface renders", () => {
+    const titled = (name: string, summary?: string) =>
+      sessionListTitle(session(name, { meta: { workspace: "C:\\ws", summary } }));
+
+    it("prefers the summary, trimmed", () => {
+      expect(titled("desktop-20261109101500-1", "  Fix the tab ribbon ")).toBe(
+        "Fix the tab ribbon",
+      );
+    });
+
+    it("labels a minted name by the minute it was created in", () => {
+      expect(titled("desktop-20261109101500-1")).toBe("Session 11-09 10:15");
+    });
+
+    it("numbers a same-minute sibling so two mints stay distinct", () => {
+      expect(titled("desktop-20261109101500-3")).toBe("Session 11-09 10:15 · #3");
+    });
+
+    it("reads the tab counter before a same-second dedupe suffix", () => {
+      expect(titled("desktop-20261109101500-2-1")).toBe("Session 11-09 10:15 · #2");
+    });
+
+    it("treats a whitespace-only summary as no summary", () => {
+      expect(titled("desktop-20261109101500-1", "   ")).toBe("Session 11-09 10:15");
+    });
+
+    it("keeps an adopted name's own words, minus its prefix and punctuation", () => {
+      expect(titled("code-fix_the-parser")).toBe("code fix the parser");
     });
   });
 });

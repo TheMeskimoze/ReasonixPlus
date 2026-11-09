@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -215,6 +215,8 @@ describe("desktop boot — resync and splash gating", () => {
       expect(shells).toHaveLength(multiple ? 1 : 2);
       const visible = shells.filter((shell) => shell.style.display !== "none");
       expect(visible).toHaveLength(1);
+      // A pill reads its session's row title. No listing arrived for this session,
+      // so it names the workspace it holds; the pending tab holds none.
       const expectedLabel = source === "snapshot" && !multiple ? "ws" : "No workspace";
       expect(visible[0]?.querySelector('.tab[data-active="true"]')?.textContent).toContain(
         expectedLabel,
@@ -250,5 +252,30 @@ describe("desktop boot — resync and splash gating", () => {
     await settle();
 
     expect(splash()).toBeTruthy();
+  });
+
+  it("closes one pill per tab even when both tabs share a workspace", async () => {
+    await bootTwoTabs();
+    await feed({ type: "$workspace_initialized", revision: 1 }, "t1");
+    await settle();
+
+    const visible = Array.from(document.querySelectorAll<HTMLElement>(".app")).find(
+      (shell) => shell.style.display !== "none",
+    );
+    const pills = Array.from(
+      visible?.querySelectorAll<HTMLElement>(".tabbar .tab:not(.newtab)") ?? [],
+    );
+    expect(pills).toHaveLength(2);
+    // Two sessions on one workspace are two tabs, so each carries its own close.
+    expect(pills.map((pill) => Boolean(pill.querySelector(".close")))).toEqual([true, true]);
+
+    fireEvent.click(pills[1]!.querySelector(".close")!);
+    expect(sent.filter((cmd) => cmd.cmd === "tab_close")).toEqual([
+      { cmd: "tab_close", tabId: "t2" },
+    ]);
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+    await settle(20);
+    expect(sent.filter((cmd) => cmd.cmd === "tab_close")).toHaveLength(2);
   });
 });

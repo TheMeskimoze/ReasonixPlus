@@ -8,6 +8,10 @@ export interface TabMenuProps {
   anchor: { x: number; y: number };
   tabs: readonly { id: string }[];
   activeId: string;
+  /** The pill the menu was opened on, when it was opened on one: the menu can then
+   *  offer to close exactly that tab. */
+  targetId?: string;
+  onCloseTab: (id: string) => void;
   onClear: (scope: ClearTabsScope) => void;
   onClose: () => void;
 }
@@ -33,9 +37,18 @@ export function getTabsToClear<T extends { id: string }>(
 
 /**
  * Dropdown context menu opened on right-clicking the tabs ribbon.
- * Offers options to clear all tabs, tabs to the right, and tabs to the left.
+ * Offers closing the pill it was opened on, plus clearing every tab, the tabs to
+ * the right, and the tabs to the left of the active one.
  */
-export function TabMenu({ anchor, tabs, activeId, onClear, onClose }: TabMenuProps) {
+export function TabMenu({
+  anchor,
+  tabs,
+  activeId,
+  targetId,
+  onCloseTab,
+  onClear,
+  onClose,
+}: TabMenuProps) {
   useLang();
   const scopeItems: { scope: ClearTabsScope; label: string; icon: React.ReactNode }[] = [
     { scope: "all", label: t("app.tab.clearAll"), icon: <I.x size={12} /> },
@@ -52,6 +65,17 @@ export function TabMenu({ anchor, tabs, activeId, onClear, onClose }: TabMenuPro
       onClose();
     },
   }));
+  if (targetId && tabs.some((tab) => tab.id === targetId)) {
+    items.unshift({
+      key: "close-tab",
+      label: t("app.tab.close"),
+      icon: <I.x size={12} />,
+      onSelect: () => {
+        onCloseTab(targetId);
+        onClose();
+      },
+    });
+  }
 
   return (
     <ContextMenu

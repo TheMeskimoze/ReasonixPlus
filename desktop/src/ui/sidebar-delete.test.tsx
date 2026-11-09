@@ -13,7 +13,7 @@ const RUNNING = "desktop-20260101000000-1";
 const IDLE = "desktop-20260102000000-1";
 
 function session(name: string): SessionInfo {
-  return { name, summary: name, messageCount: 1, mtime: "2026-01-01T00:00:00.000Z" };
+  return { name, title: name, summary: name, messageCount: 1, mtime: "2026-01-01T00:00:00.000Z" };
 }
 
 function renderSidebar(

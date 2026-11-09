@@ -44,6 +44,7 @@ export const EN: TranslationSchema = {
       "Set the env var, or add a key in Settings.\n",
   },
   sessions: {
+    sessionTitle: "Session {month}-{day} {hour}:{minute}",
     emptyHint: "no saved sessions yet (sessions are auto-saved).",
     listHeader: "Saved sessions (~/.reasonix/sessions/):",
     inspectHint: "Inspect sessions in the sidebar",

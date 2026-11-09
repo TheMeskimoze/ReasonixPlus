@@ -7656,9 +7656,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emit({ type: "$tab_closed" }, tab.id);
   }
 
-  /** Remove a visual workspace tab and every independently running session it
-   *  owns. This is the only user tab-close path: child agents are not exposed
-   *  as separate ribbon tabs or implicitly replaced. */
+  /** Remove a workspace tab and every session it owns: only forgetting a recent
+   *  workspace means a whole workspace. A ribbon pill closes through `closeChannel`. */
   async function closeWorkspaceTab(
     tab: Tab,
     options: { ensureFallback?: boolean; persist?: boolean } = {},
@@ -8273,19 +8272,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
-    // A workspace tab owns all of its session agents. Changing that tab's
-    // workspace stops/removes every child except this channel, which is reused
-    // for the target workspace below.
-    const siblings = channelsInWorkspaceTab(Array.from(tabs.values()), tab).filter(
-      (candidate) => candidate.id !== tab.id,
-    );
-    for (const sibling of siblings) {
-      await closeChannel(sibling, { ensureFallback: false, persist: false });
-    }
-
     // The target may already have a workspace tab. This channel JOINS that tab's
     // group instead of being replaced by it: the pick applies to the tab the user
-    // is acting from, and no tab is closed to make room for it.
+    // is acting from, and no tab is closed to make room for it. Sessions left on
+    // the workspace being left keep their own tabs and their own group below.
     const targetTab = tabsInWorkspace(target).find((candidate) => candidate.id !== tab.id);
 
     abortTurn(tab);
@@ -8304,8 +8294,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     tab.rootDir = target;
     tab.pending = false;
-    // The reused channel becomes the sole initial session in a new workspace
-    // tab. Its former sibling agents were closed above.
+    // A channel that changes workspace takes the target's group when one exists,
+    // so every group still spans exactly one directory.
     tab.groupId = targetTab?.groupId ?? nextGroupId();
     saveWorkspaceDir(target);
     pushRecentWorkspace(target);
@@ -9828,8 +9818,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "tab_open") {
       try {
-        // A workspace may appear in the ribbon only once. Opening an already-
-        // visible workspace adds a fresh independent session to that tab.
+        // One tab is one session, so opening on an already-open workspace adds
+        // another tab to it rather than a second entry for the same workspace.
         //
         // No workspace → a PENDING tab. It must not default to the local
         // install dir: that merged every new tab into the existing "Reasonix+
@@ -9855,7 +9845,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             return;
           }
           evictionNote = `Closed ${tabLabel(victim)} to stay within ${MAX_OPEN_TABS} open tabs.`;
-          void closeWorkspaceTab(victim, { persist: false });
+          // The cap counts tabs, so one eviction frees exactly one of them.
+          void closeChannel(victim, { ensureFallback: false, persist: false });
         }
         const opened = target
           ? bootstrapTab(target, { active: true, groupId: existing?.groupId })
@@ -10184,7 +10175,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "tab_close") {
-      closeWorkspaceTab(tab).catch((err) => {
+      // One pill is one tab, so closing it closes that channel only: the other
+      // sessions sharing its workspace keep their own pills.
+      closeChannel(tab).catch((err) => {
         emitDiagnosticError("tab.close.failed", err, {
           tabId: tab.id,
           details: tabDiagnosticState(tab),

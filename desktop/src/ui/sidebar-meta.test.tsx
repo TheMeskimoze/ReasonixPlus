@@ -16,6 +16,7 @@ const OWNER = "desktop-20260101000000-1";
 function session(name: string): SessionInfo {
   return {
     name,
+    title: "A recent PR from the audit",
     summary: "A recent PR from the audit",
     messageCount: 84,
     mtime: "2026-01-01T00:00:00.000Z",

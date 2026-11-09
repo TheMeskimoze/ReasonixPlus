@@ -436,7 +436,7 @@ export function StatusBar({
           })}
         >
           <I.folder size={11} />
-          <span className="v">{workspaceBasename(settings.workspaceDir) || "ws"}</span>
+          <span className="v">{workspaceBasename(settings.workspaceDir)}</span>
         </span>
       ) : null}
       {showBalance && funds.chip === "quota" ? (

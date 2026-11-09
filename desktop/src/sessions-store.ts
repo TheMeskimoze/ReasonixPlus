@@ -133,6 +133,7 @@ function sameSessionRows(a: readonly SessionInfo[], b: readonly SessionInfo[]): 
     const right = b[index]!;
     if (
       left.name !== right.name ||
+      left.title !== right.title ||
       left.messageCount !== right.messageCount ||
       left.mtime !== right.mtime ||
       left.updatedAt !== right.updatedAt ||

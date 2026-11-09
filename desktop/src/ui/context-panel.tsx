@@ -36,7 +36,6 @@ import { useInventoryRequest } from "./inventory-request";
 import { activationHandler } from "./keyboard";
 import { ListControl } from "./list-controls";
 import { pluginQualifier } from "./plugin-labels";
-import { sessionTitle } from "./session-title";
 import type { JumpTarget } from "./transcript-jump";
 
 /** Side-panel nav order and labels. Declared before `Tab` because the tab union derives from
@@ -472,11 +471,10 @@ function CtxPlanHistory({
     history[0];
   const selected = selectedPlan?.id;
   const detail = selected ? details[selected] : undefined;
-  // One title per known session, so naming every option does not re-parse the
-  // same session name. An unknown owner still gets its name-derived title.
+  // One title per listed session, so naming every option is a map read. A plan
+  // whose session is no longer listed names that session by its own id.
   const sessionTitles = useMemo(
-    () =>
-      new Map((sessions ?? []).map((session) => [session.name, sessionTitle(session)] as const)),
+    () => new Map((sessions ?? []).map((session) => [session.name, session.title] as const)),
     [sessions],
   );
   // How a plan is held right now: none for a finished plan, a name only for another
@@ -487,7 +485,7 @@ function CtxPlanHistory({
     if (!plan || !isWorkingPlanStatus(plan.status)) return null;
     const sessionName = plan.ownerSession;
     if (!sessionName) return { state: "none" };
-    const name = sessionTitles.get(sessionName) ?? sessionTitle({ name: sessionName });
+    const name = sessionTitles.get(sessionName) ?? sessionName;
     return { state: sessionName === currentSession ? "this" : "other", name };
   };
   const readPlans = useRef(onReadPlans);

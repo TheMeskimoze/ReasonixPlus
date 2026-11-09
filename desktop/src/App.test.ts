@@ -39,11 +39,11 @@ import { interfaceFields } from "../../tests/support/protocol.js";
 import {
   activePlanForMessage,
   cueIdForEvent,
-  groupTabsByWorkspace,
   hasPendingIntervention,
   mapLoadedMessages,
   parseSessionTimestamp,
   reduce,
+  ribbonTabs,
   runningSessionNames,
   sanitizeSettingsPatch,
   sessionCreationTime,
@@ -53,11 +53,11 @@ import {
   sortSessionsByCreationDescending,
   sortSessionsDescending,
   turnEngaged,
-  workspaceTabRepresentatives,
   writeStamp,
 } from "./App";
 import type { IncomingEvent, ModelTurnStartedEvent, PlanHistoryItem } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
+import { normalizeWorkspacePath } from "./workspace-path";
 
 /** One workspace plan-history row, as a $plan_history projection carries it. */
 function planHistoryRow(id: string, overrides: Partial<PlanHistoryItem> = {}): PlanHistoryItem {
@@ -5574,56 +5574,68 @@ describe("sanitizeSettingsPatch — secrets never enter the settings view state"
   });
 });
 
-describe("groupTabsByWorkspace — one ribbon tab per workspace", () => {
-  it("groups independent session channels by normalized workspace, not group id", () => {
-    const groups = groupTabsByWorkspace([
-      { id: "t1", workspaceDir: "C:\\Work\\Alpha", group: "g1" },
-      { id: "t2", workspaceDir: "c:/work/alpha/", group: "legacy-duplicate" },
-      { id: "t3", workspaceDir: "C:\\Work\\Beta", group: "g1" },
-    ]);
+describe("ribbonTabs — a pill is labelled like the session it holds", () => {
+  const row = (name: string, title?: string) => ({
+    name,
+    title: title ?? name,
+    messageCount: 2,
+    mtime: "2026-11-08T14:13:00.000Z",
+  });
+  const view = (...items: ReturnType<typeof row>[]) => ({
+    items,
+    mutation: null,
+    pendingDeleteCount: 0,
+    confirmed: true,
+  });
+  const views = (entries: [string, ReturnType<typeof view>][]) =>
+    new Map(entries.map(([dir, entry]) => [normalizeWorkspacePath(dir), entry]));
 
-    expect(groups).toHaveLength(2);
-    expect(groups[0]!.items.map((tab) => tab.id)).toEqual(["t1", "t2"]);
-    expect(groups[1]!.items.map((tab) => tab.id)).toEqual(["t3"]);
+  it("takes the pill's label from its session row, verbatim", () => {
+    const [pill] = ribbonTabs(
+      [{ id: "t1", workspaceDir: "/proj/alpha", session: "desktop-20261108141338-1" }],
+      views([["/proj/alpha", view(row("desktop-20261108141338-1", "Fix the tab ribbon"))]]),
+    );
+
+    expect(pill?.label).toBe("Fix the tab ribbon");
   });
 
-  it("preserves case-sensitive POSIX workspace identity", () => {
-    const groups = groupTabsByWorkspace([
-      { id: "t1", workspaceDir: "/work/Alpha" },
-      { id: "t2", workspaceDir: "/work/alpha" },
-    ]);
-    expect(groups).toHaveLength(2);
+  it("names a tab whose session is not listed by the workspace it holds", () => {
+    const [pill] = ribbonTabs(
+      [{ id: "t1", workspaceDir: "/proj/alpha", session: "desktop-20261108141338-1" }],
+      views([["/proj/alpha", view()]]),
+    );
+
+    expect(pill?.label).toBe("alpha");
   });
 
-  it("keeps the install dir and the local workspace nested in it as two ribbon tabs", () => {
-    const groups = groupTabsByWorkspace([
-      { id: "t1", workspaceDir: "C:\\Users\\uraan\\Documents\\ReasonixPlus" },
-      { id: "t2", workspaceDir: "C:\\Users\\uraan\\Documents\\ReasonixPlus\\local" },
-      { id: "t3", workspaceDir: "c:/users/uraan/documents/reasonixplus" },
-    ]);
+  it("matches a row only inside the tab's own workspace", () => {
+    const [pill] = ribbonTabs(
+      [{ id: "t1", workspaceDir: "/proj/alpha", session: "desktop-20261108141338-1" }],
+      views([["/proj/beta", view(row("desktop-20261108141338-1", "Someone else's chat"))]]),
+    );
 
-    // t1 and t3 are one workspace; the local workspace inside it is another.
-    expect(groups.map((group) => group.items.map((tab) => tab.id))).toEqual([["t1", "t3"], ["t2"]]);
+    expect(pill?.label).toBe("alpha");
   });
 
-  it("keeps pending channels separate unless their backend group matches", () => {
-    const groups = groupTabsByWorkspace([
-      { id: "t1", group: "g1" },
-      { id: "t2", group: "g1" },
-      { id: "t3", group: "g2" },
-    ]);
+  it("names a tab with no session and no workspace by the neutral label", () => {
+    const [pill] = ribbonTabs([{ id: "t1" }], views([]));
 
-    expect(groups.map((group) => group.items.map((tab) => tab.id))).toEqual([["t1", "t2"], ["t3"]]);
+    expect(pill?.label).toBe("No workspace");
   });
 
-  it("uses the active session channel as its workspace's representative", () => {
-    const tabs = [
-      { id: "a1", workspaceDir: "/proj/a" },
-      { id: "b1", workspaceDir: "/proj/b" },
-      { id: "a2", workspaceDir: "/proj/a" },
-    ];
+  it("carries the tab's own fields through untouched", () => {
+    const [pill] = ribbonTabs(
+      [{ id: "t1", workspaceDir: "/proj/alpha", session: "desktop-20261108141338-1", busy: true }],
+      views([["/proj/alpha", view()]]),
+    );
 
-    expect(workspaceTabRepresentatives(tabs, "a2").map((tab) => tab.id)).toEqual(["a2", "b1"]);
+    expect(pill).toEqual({
+      id: "t1",
+      workspaceDir: "/proj/alpha",
+      session: "desktop-20261108141338-1",
+      busy: true,
+      label: "alpha",
+    });
   });
 });
 

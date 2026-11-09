@@ -39,6 +39,7 @@ export interface TranslationSchema {
     missingApiKey: string;
   };
   sessions: {
+    sessionTitle: string;
     emptyHint: string;
     listHeader: string;
     inspectHint: string;

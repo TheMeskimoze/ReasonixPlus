@@ -7,11 +7,10 @@ import { I } from "../icons";
 import type { SessionPlanLabel } from "../plan-labels";
 import { clearPartition } from "../sessions-store";
 import { formatTokensPerSecond } from "../stream-rate";
-import { workspaceBasename } from "../workspace-path";
+import { workspaceName } from "../workspace-path";
 import { useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { ListControl } from "./list-controls";
-import { sessionTitle } from "./session-title";
 import { Shortcut } from "./shortcut";
 
 type PendingDelete = {
@@ -97,16 +96,13 @@ export function Sidebar({
   // Lock only: the in-flight indicator itself lives in the main-area pill, so
   // this surface never restates it as a second throbber.
   const busy = sessionMutation != null;
-  const workspaceLabel = workspaceDir
-    ? workspaceBasename(workspaceDir) || workspaceDir
-    : t("sidebarPanel.noWorkspace");
+  const workspaceLabel = workspaceName(workspaceDir);
   const filtered = useMemo(() => {
     const sorted = [...sessions].sort(sortSessionsByCreationDescending);
     if (!query) return sorted;
     const needle = query.toLowerCase();
     return sorted.filter(
-      (s) =>
-        sessionTitle(s).toLowerCase().includes(needle) || s.name.toLowerCase().includes(needle),
+      (s) => s.title.toLowerCase().includes(needle) || s.name.toLowerCase().includes(needle),
     );
   }, [sessions, query]);
 
@@ -278,7 +274,7 @@ export function Sidebar({
                 {running ? <span className="state" /> : null}
                 <div className="body">
                   <span className="title-row">
-                    <span className="title">{sessionTitle(s)}</span>
+                    <span className="title">{s.title}</span>
                     {planLabels && running ? (
                       <span
                         className="plan-tag"
@@ -334,7 +330,7 @@ export function Sidebar({
                     const rect = button.getBoundingClientRect();
                     setPendingDelete({
                       name: s.name,
-                      pretty: sessionTitle(s),
+                      pretty: s.title,
                       x: rect.right,
                       y: rect.bottom,
                     });

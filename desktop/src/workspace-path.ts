@@ -1,5 +1,6 @@
 import { toPosixPath, workspacePathKey } from "@reasonix/core-utils";
 import { LruCache } from "./cache";
+import { t } from "./i18n";
 
 function isWindowsPath(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(path) || path.includes("\\");
@@ -29,6 +30,12 @@ export function workspaceBasename(path?: string): string {
   const trimmed = posix.replace(/\/+$/, "");
   if (!trimmed) return posix;
   return trimmed.split("/").filter(Boolean).pop() ?? trimmed;
+}
+
+/** A workspace as every surface names it. The one phrase for "no workspace yet"
+ *  lives here, so no caller invents its own placeholder for it. */
+export function workspaceName(path?: string): string {
+  return workspaceBasename(path) || t("sidebarPanel.noWorkspace");
 }
 
 /** Resolve a workspace-relative path while preserving the workspace platform's separator. */

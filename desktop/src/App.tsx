@@ -5,7 +5,6 @@ import {
   type PickerWindow,
   type RuleRecord,
   SOUND_PACK_AUDIO_EXTENSIONS,
-  clipText,
   compactionCardText,
   extractPathsFromArgs,
   flattenText,
@@ -228,7 +227,7 @@ import { anyVoiceModelDownloaded } from "./voice/model-cache";
 import type { VoiceTraceRecord } from "./voice/trace";
 import { resetWindowState, watchWindowFrame } from "./window-frame";
 import { areWorkspacesLoaded, isWorkspaceRevealReady } from "./workspace-loading";
-import { normalizeWorkspacePath, toWorkspaceRelative, workspaceBasename } from "./workspace-path";
+import { normalizeWorkspacePath, toWorkspaceRelative, workspaceBasename, workspaceName } from "./workspace-path";
 import { workspacePickerRows } from "./workspace-rows";
 
 /** Thumbnail icons for queued audio/video attachments — real data-URL images so
@@ -525,6 +524,9 @@ export type UsageStats = {
 
 export type SessionInfo = {
   name: string;
+  /** What this session is called. The daemon derives it once (summary, else the
+   *  label its minted name carries) and every surface renders it verbatim. */
+  title: string;
   messageCount: number;
   mtime: string;
   /** Explicit last-activity epoch-ms from the session's meta — drives the
@@ -533,6 +535,8 @@ export type SessionInfo = {
   /** Creation epoch-ms — the sidebar's primary sort key (newest-created
    *  first). Falls back to the name-embedded timestamp, then mtime. */
   createdAt?: number;
+  /** The user's (or the auto-namer's) chosen name, kept for the rename flow and
+   *  for detecting that a session has not been named yet. */
   summary?: string;
   workspaceStatus?: "matched" | "legacy_missing_meta";
 };
@@ -3715,13 +3719,7 @@ interface TabRuntimeProps {
   /** Repo commit history grouped per release, plus a forced-refetch trigger. */
   changelog: ChangelogState;
   onRefreshChangelog: (force?: boolean) => void;
-  tabsList: {
-    id: string;
-    workspaceDir?: string;
-    session?: string;
-    group?: string;
-    busy?: boolean;
-  }[];
+  tabsList: RibbonTab[];
   activeTabId: string;
   /** The gated switch: refuses while a session mutation is still settling. */
   setActiveTabId: (id: string) => void;
@@ -5034,32 +5032,18 @@ const TabRuntime = memo(function TabRuntime({
   // Stuck-label seconds are rendered by <StuckLabel> with a self-contained 1s
   // poll; keeping them out of App state avoids a whole-transcript re-render
   // every second while a turn runs, which stuttered typing in the composer.
-  const workspaceLabel = state.settings?.workspaceDir
-    ? workspaceBasename(state.settings.workspaceDir) || "workspace"
-    : "Reasonix+";
+  const workspaceLabel = workspaceName(state.settings?.workspaceDir);
+  // This chat's name, exactly the one the daemon gave the session row it is listed
+  // under. A channel with no session names where a chat would start; a session the
+  // listing has not delivered yet is named by the workspace it belongs to.
   const session = (() => {
-    if (state.currentSession) {
-      const s = sessions.find((x) => x.name === state.currentSession);
-      if (s?.summary?.trim()) return s.summary.trim();
+    if (!state.currentSession) {
+      return state.messages.length === 0
+        ? t("app.session.new", { workspace: workspaceLabel })
+        : workspaceLabel;
     }
-    const firstUser = state.messages.find((m) => m.kind === "user");
-    if (firstUser && firstUser.kind === "user") {
-      const cleaned = flattenText(firstUser.text);
-      if (cleaned) return clipText(cleaned, 60, "…");
-    }
-    if (state.currentSession) {
-      const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
-      if (m)
-        return t("app.session.format", {
-          month: m[2],
-          day: m[3],
-          hour: m[4],
-          minute: m[5],
-        });
-    }
-    return state.messages.length === 0
-      ? t("app.session.new", { workspace: workspaceLabel })
-      : workspaceLabel;
+    const row = sessions.find((x) => x.name === state.currentSession);
+    return row?.title ?? workspaceLabel;
   })();
 
   const exportConversation = useCallback(async () => {
@@ -5142,12 +5126,11 @@ const TabRuntime = memo(function TabRuntime({
     [state.planHistory],
   );
 
-  // The ribbon only needs to know whether more than one workspace tab exists,
-  // and a full grouping walk for that boolean ran on every render.
-  const singleTab = useMemo(() => groupTabsByWorkspace(tabsList).length <= 1, [tabsList]);
+  // One pill per tab, so the ribbon has a single tab exactly when the tab list
+  // does: the last pill is the one with no close control.
+  const singleTab = tabsList.length <= 1;
 
-  // Report this channel's running-agent state up so the tab dot can count the
-  // agents active in the tab (this channel plus its siblings).
+  // Report this channel's running-agent state up so its pill can dot itself.
   useEffect(() => {
     onBusyChange(tabId, state.busy);
   }, [onBusyChange, tabId, state.busy]);
@@ -5270,15 +5253,9 @@ const TabRuntime = memo(function TabRuntime({
 
   const clearTabs = useCallback(
     (scope: ClearTabsScope) => {
-      const workspaceTabs = workspaceTabRepresentatives(tabsList, activeTabId);
-      const activeWorkspace = workspaceTabs.find((representative) => {
-        const workspace = normalizeWorkspacePath(representative.workspaceDir);
-        return tabsList.some(
-          (tab) => tab.id === activeTabId && normalizeWorkspacePath(tab.workspaceDir) === workspace,
-        );
-      });
-      const targets = getTabsToClear(workspaceTabs, activeWorkspace?.id ?? activeTabId, scope);
-      for (const target of targets) closeTab(target.id);
+      // The ribbon is flat, so the pills are the tabs: clearing a side of the
+      // strip closes exactly those sessions, whichever workspace they sit on.
+      for (const target of getTabsToClear(tabsList, activeTabId, scope)) closeTab(target.id);
     },
     [tabsList, activeTabId, closeTab],
   );
@@ -5889,7 +5866,7 @@ const TabRuntime = memo(function TabRuntime({
                     setDuplicateAsk(false);
                   }
             }
-            // Cancel discards the freshly minted session; its workspace tab stays.
+            // Cancel discards the freshly minted session; its tab stays.
             onCancel={
               state.mcpSetup
                 ? () => sendRpc({ cmd: "mcp_session_cancel" })
@@ -6100,8 +6077,8 @@ function TitleBar({
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
-  /** Workspace tabs live in this row so the app spends no extra height on them. */
-  tabs: TabBarTabs;
+  /** Session tabs live in this row so the app spends no extra height on them. */
+  tabs: RibbonTab[];
   activeId: string;
   setActive: (id: string) => void;
   onCloseTab: (id: string) => void;
@@ -6191,7 +6168,7 @@ function TitleBar({
         </div>
       </div>
 
-      {/* center: workspace tabs, browser-style, inside the title row */}
+      {/* center: session tabs, browser-style, inside the title row */}
       <TabBar
         tabs={tabs}
         activeId={activeId}
@@ -6280,47 +6257,19 @@ export function runningSessionNames<
   return out;
 }
 
-/** Group independently running session channels into unique visual workspace
- *  tabs. Workspace identity, not a historical backend group id, is the final
- *  defensive boundary against duplicate ribbon entries. */
-export function groupTabsByWorkspace<
-  T extends { id: string; workspaceDir?: string; group?: string },
->(tabs: readonly T[]): { key: string; items: T[] }[] {
-  const groups: { key: string; items: T[] }[] = [];
-  const byKey = new Map<string, { key: string; items: T[] }>();
-  for (const tab of tabs) {
-    const workspace = normalizeWorkspacePath(tab.workspaceDir);
-    const key = workspace ? `workspace:${workspace}` : `pending:${tab.group ?? tab.id}`;
-    let group = byKey.get(key);
-    if (!group) {
-      group = { key, items: [] };
-      byKey.set(key, group);
-      groups.push(group);
-    }
-    group.items.push(tab);
-  }
-  return groups;
-}
-
-/** One representative channel per visual workspace tab. The currently active
- *  channel represents its workspace so keyboard navigation preserves focus. */
-export function workspaceTabRepresentatives<
-  T extends { id: string; workspaceDir?: string; group?: string },
->(tabs: readonly T[], activeId: string): T[] {
-  return groupTabsByWorkspace(tabs).flatMap((group) => {
-    const representative = group.items.find((tab) => tab.id === activeId) ?? group.items[0];
-    return representative ? [representative] : [];
+/** Label each tab from its own session row. A tab whose session the listing has
+ *  not delivered yet is named by its workspace: the one thing it does hold. */
+export function ribbonTabs(
+  tabs: readonly TabMeta[],
+  views: ReadonlyMap<string, SessionView>,
+): RibbonTab[] {
+  return tabs.map((tab) => {
+    const row = views
+      .get(normalizeWorkspacePath(tab.workspaceDir))
+      ?.items.find((session) => session.name === tab.session);
+    return { ...tab, label: row?.title ?? workspaceName(tab.workspaceDir) };
   });
 }
-
-/** One workspace tab as the ribbon renders it. */
-type TabBarTabs = {
-  id: string;
-  workspaceDir?: string;
-  session?: string;
-  group?: string;
-  busy?: boolean;
-}[];
 
 export function TabBar({
   tabs,
@@ -6332,19 +6281,22 @@ export function TabBar({
   singleTab,
   blocked,
 }: {
-  tabs: TabBarTabs;
+  tabs: RibbonTab[];
   activeId: string;
   setActive: (id: string) => void;
   onClose: (id: string) => void;
   onNew: () => void;
   onClearTabs?: (scope: ClearTabsScope) => void;
+  /** One pill and nothing else to switch to: the last tab has no close control. */
   singleTab?: boolean;
   /** A session mutation is still settling: the ribbon shows it and refuses the switch
    *  instead of re-targeting the list the mutation belongs to. */
   blocked?: boolean;
 }) {
   useLang();
-  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; tabId?: string } | null>(
+    null,
+  );
 
   // Horizontal overflow: the strip scrolls, and the arrows only appear when
   // there is something to scroll to in that direction.
@@ -6397,17 +6349,8 @@ export function TabBar({
   };
 
   // One pill per tab, browser-style: every tab is its own target, including
-  // two tabs on the same workspace. The workspace name is the label; when a
-  // workspace appears more than once the session name disambiguates.
-  const perWorkspace = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const tab of tabs) {
-      const key = (tab.workspaceDir ?? "").replace(/[/\\]+$/, "");
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return counts;
-  }, [tabs]);
-
+  // two tabs on the same workspace. A pill is named the way the sidebar and the
+  // chat header name that session, never by its workspace directory.
   const visualTabs = tabs;
   const activeVisualId = activeId;
 
@@ -6421,7 +6364,7 @@ export function TabBar({
           aria-label={t("app.tab.scrollLeft")}
           onClick={() => scrollStrip(-240)}
         >
-          <I.chevronLeft size={13} />
+          <I.chevL size={13} />
         </button>
       ) : null}
       <div
@@ -6435,11 +6378,6 @@ export function TabBar({
         }}
       >
         {tabs.map((tab) => {
-          const ws = tab.workspaceDir ?? "";
-          const base = ws ? workspaceBasename(ws) || "workspace" : t("sidebarPanel.noWorkspace");
-          // Only disambiguate when this workspace holds more than one tab.
-          const shared = (perWorkspace.get(ws.replace(/[/\\]+$/, "")) ?? 0) > 1;
-          const label = shared && tab.session ? `${base} \u00b7 ${tab.session}` : base;
           const isActive = tab.id === activeId;
           return (
             <div
@@ -6450,17 +6388,23 @@ export function TabBar({
               aria-disabled={blocked ? true : undefined}
               onClick={blocked ? undefined : () => setActive(tab.id)}
               onKeyDown={blocked ? undefined : activationHandler(() => setActive(tab.id))}
-              title={blocked ? t("app.tab.switchBlocked") : ws || label}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuAnchor({ x: e.clientX, y: e.clientY, tabId: tab.id });
+              }}
+              title={blocked ? t("app.tab.switchBlocked") : tab.workspaceDir || tab.label}
             >
               {tab.busy ? (
                 <span className="tab-active" title={t("app.tab.running")}>
                   <span className="dot" data-state="running" />
                 </span>
               ) : null}
-              <span className="label">{label}</span>
+              <span className="label">{tab.label}</span>
               {!singleTab ? (
                 <span
                   className="close"
+                  title={t("app.tab.close")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onClose(tab.id);
@@ -6485,7 +6429,7 @@ export function TabBar({
           aria-label={t("app.tab.scrollRight")}
           onClick={() => scrollStrip(240)}
         >
-          <I.chevronRight size={13} />
+          <I.chevR size={13} />
         </button>
       ) : null}
       <div
@@ -6501,6 +6445,8 @@ export function TabBar({
           anchor={menuAnchor}
           tabs={visualTabs}
           activeId={activeVisualId}
+          targetId={menuAnchor.tabId}
+          onCloseTab={onClose}
           onClear={handleClear}
           onClose={() => setMenuAnchor(null)}
         />
@@ -6552,9 +6498,7 @@ export function MainHead({
     }
   }, [title, session, onRename]);
 
-  const wsLabel = workspaceDir
-    ? workspaceBasename(workspaceDir) || "workspace"
-    : t("app.header.noWorkspace");
+  const wsLabel = workspaceName(workspaceDir);
   return (
     <div className="main-head">
       <div className="title-wrap">
@@ -6891,15 +6835,20 @@ function UpdateOverlay({
   );
 }
 
+/** One tab as the daemon reports it: one independently running session agent. */
 type TabMeta = {
   /** Backend channel id for one independently running session agent. */
   id: string;
   workspaceDir?: string;
+  /** True while this tab's agent has a turn in flight. */
   busy?: boolean;
+  /** The session this tab holds, empty until one is bound. */
   session?: string;
-  /** Visual workspace-tab id shared by sibling session channels. */
-  group?: string;
 };
+
+/** One tab as the ribbon draws it: its label is required, so the strip renders
+ *  text it was handed rather than a rule for finding some. */
+export type RibbonTab = TabMeta & { label: string };
 
 /** Everything one channel needs to render a workspace's shared session list. */
 type SessionView = {
@@ -7002,7 +6951,7 @@ export function App() {
   );
 
   // A session delete/clear/create is settled by a snapshot that belongs to the workspace
-  // it was started on. Switching workspace tabs mid-flight re-targets that wait and leaves
+  // it was started on. Switching tabs mid-flight re-targets that wait and leaves
   // the ribbon and the backend disagreeing about which list is being replaced, so the
   // switch waits for the store to settle. The flag drives the ribbon's lock; the callback
   // is the enforcement every switch path shares.
@@ -7040,6 +6989,9 @@ export function App() {
       sessionViews.get(normalizeWorkspacePath(workspaceDir)) ?? EMPTY_SESSION_VIEW,
     [sessionViews],
   );
+
+  // One pill per tab, so the strip is the tab list plus each tab's row title.
+  const ribbon = useMemo(() => ribbonTabs(tabs, sessionViews), [tabs, sessionViews]);
 
   // Mirror of activeTabId for listener closures — the startup effect must
   // NOT re-run on every tab switch (it tears down and re-fires desktop_resync,
@@ -7498,16 +7450,14 @@ export function App() {
                       id: tabId,
                       workspaceDir: ev.workspaceDir,
                       session: openedSession,
-                      group: ev.groupId,
                     },
                   ];
                 }
-                // Merge so a workspace switch / regroup updates the existing tab.
+                // Merge so a workspace switch updates the existing tab.
                 const merged: TabMeta = {
                   ...prev[idx],
                   workspaceDir: ev.workspaceDir,
                   session: openedSession ?? prev[idx]!.session,
-                  group: ev.groupId ?? prev[idx]!.group,
                 };
                 const copy = prev.slice();
                 copy[idx] = merged;
@@ -7577,7 +7527,6 @@ export function App() {
                   workspaceDir: t.workspaceDir,
                   busy: busyById.get(t.id),
                   session: t.activeSession,
-                  group: t.groupId,
                 }));
               });
               for (const id of Array.from(dispatchersRef.current.keys())) {
@@ -8003,7 +7952,8 @@ export function App() {
 
   const closeTab = useCallback(
     (id: string) => {
-      if (groupTabsByWorkspace(tabs).length <= 1) return;
+      // The last pill has no close control, so Ctrl+W must not empty the ribbon.
+      if (tabs.length <= 1) return;
       rpcSend({ cmd: "tab_close", tabId: id }).catch((err) => {
         deliverToTab(id, {
           t: "push_notice",
@@ -8027,18 +7977,15 @@ export function App() {
         e.preventDefault();
         openTab();
       } else if (mod && (e.key === "w" || e.key === "W") && activeTabId) {
-        if (groupTabsByWorkspace(tabs).length <= 1) return;
+        if (tabs.length <= 1) return;
         e.preventDefault();
         closeTab(activeTabId);
       } else if (mod && e.key === "Tab") {
-        const workspaceTabs = workspaceTabRepresentatives(tabs, activeTabId);
-        if (workspaceTabs.length <= 1) return;
+        if (tabs.length <= 1) return;
         e.preventDefault();
-        const idx = workspaceTabs.findIndex((tab) => tab.id === activeTabId);
-        const next = e.shiftKey
-          ? (idx - 1 + workspaceTabs.length) % workspaceTabs.length
-          : (idx + 1) % workspaceTabs.length;
-        const target = workspaceTabs[next];
+        const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+        const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length;
+        const target = tabs[next];
         if (target) setActiveTabId(target.id);
       } else if (mod && (e.key === "b" || e.key === "B")) {
         if (e.altKey) {
@@ -8148,7 +8095,7 @@ export function App() {
           onRefreshProviderCatalogs={requestProviderCatalogs}
           changelog={changelog}
           onRefreshChangelog={requestChangelog}
-          tabsList={tabs}
+          tabsList={ribbon}
           activeTabId={activeTabId}
           setActiveTabId={activateWorkspaceTab}
           tabSwitchBlocked={tabSwitchBlocked}

@@ -558,6 +558,9 @@ export interface SessionsEvent {
   answers?: SessionMutationAnswer[];
   items: {
     name: string;
+    /** What this session is called on every surface: its summary, else the label
+     *  its minted name carries. Produced by the daemon so no surface derives it. */
+    title: string;
     messageCount: number;
     mtime: string;
     /** Explicit last-activity epoch-ms from the session's meta — drives the

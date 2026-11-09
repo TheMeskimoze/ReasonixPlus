@@ -86,6 +86,7 @@ describe("tab-menu", () => {
           anchor={{ x: 100, y: 100 }}
           tabs={tabs}
           activeId="tab-2"
+          onCloseTab={vi.fn()}
           onClear={onClear}
           onClose={onClose}
         />,
@@ -111,6 +112,7 @@ describe("tab-menu", () => {
           anchor={{ x: 100, y: 100 }}
           tabs={tabs}
           activeId="tab-2"
+          onCloseTab={vi.fn()}
           onClear={onClear}
           onClose={onClose}
         />,
@@ -128,6 +130,7 @@ describe("tab-menu", () => {
           anchor={{ x: 100, y: 100 }}
           tabs={tabs}
           activeId="tab-2"
+          onCloseTab={vi.fn()}
           onClear={onClear}
           onClose={onClose}
         />,
@@ -145,6 +148,7 @@ describe("tab-menu", () => {
           anchor={{ x: 100, y: 100 }}
           tabs={tabs}
           activeId="tab-2"
+          onCloseTab={vi.fn()}
           onClear={vi.fn()}
           onClose={onClose}
         />,
@@ -163,6 +167,7 @@ describe("tab-menu", () => {
             anchor={{ x: 100, y: 100 }}
             tabs={tabs}
             activeId="tab-2"
+            onCloseTab={vi.fn()}
             onClear={vi.fn()}
             onClose={onClose}
           />
@@ -175,13 +180,13 @@ describe("tab-menu", () => {
   });
 
   describe("TabBar context menu integration", () => {
-    it("switches workspace tab on click", () => {
+    it("switches tab on click", () => {
       const setActive = vi.fn();
       render(
         <TabBar
           tabs={[
-            { id: "alpha-1", workspaceDir: "/project/alpha" },
-            { id: "beta-1", workspaceDir: "/project/beta" },
+            { id: "alpha-1", workspaceDir: "/project/alpha", label: "alpha" },
+            { id: "beta-1", workspaceDir: "/project/beta", label: "beta" },
           ]}
           activeId="alpha-1"
           setActive={setActive}
@@ -201,8 +206,8 @@ describe("tab-menu", () => {
       render(
         <TabBar
           tabs={[
-            { id: "alpha-1", workspaceDir: "/project/alpha" },
-            { id: "beta-1", workspaceDir: "/project/beta" },
+            { id: "alpha-1", workspaceDir: "/project/alpha", label: "alpha" },
+            { id: "beta-1", workspaceDir: "/project/beta", label: "beta" },
           ]}
           activeId="alpha-1"
           setActive={setActive}
@@ -220,14 +225,29 @@ describe("tab-menu", () => {
       expect(setActive).not.toHaveBeenCalled();
     });
 
-    it("renders one pill per tab, including two tabs on the same workspace", () => {
+    it("renders one pill per tab, titled by its session, and closes that pill", () => {
       const onClose = vi.fn();
       const { container } = render(
         <TabBar
           tabs={[
-            { id: "alpha-1", workspaceDir: "/project/alpha", session: "session-a" },
-            { id: "alpha-2", workspaceDir: "/project/alpha/", session: "session-b" },
-            { id: "beta-1", workspaceDir: "/project/beta", session: "session-c" },
+            {
+              id: "alpha-1",
+              workspaceDir: "/project/alpha",
+              session: "desktop-20261108141338-1",
+              label: "Fix the tab ribbon",
+            },
+            {
+              id: "alpha-2",
+              workspaceDir: "/project/alpha/",
+              session: "desktop-20261108161221-2",
+              label: "Audit the release",
+            },
+            {
+              id: "beta-1",
+              workspaceDir: "/project/beta",
+              session: "desktop-20261109101500-1",
+              label: "Session 11-09 10:15",
+            },
           ]}
           activeId="alpha-2"
           setActive={vi.fn()}
@@ -240,22 +260,104 @@ describe("tab-menu", () => {
       // overflow and the scroll arrows have something to scroll.
       expect(container.querySelectorAll(".tabbar .tab:not(.newtab)")).toHaveLength(3);
 
-      // The repeated workspace is disambiguated by its session name.
-      expect(screen.getByText("alpha \u00b7 session-a")).toBeTruthy();
-      expect(screen.getByText("alpha \u00b7 session-b")).toBeTruthy();
-      expect(screen.getByText("beta")).toBeTruthy();
+      // Two tabs on one workspace are two pills, each named after its own
+      // session. A session with no summary yet shows its timestamp, never the
+      // raw `desktop-<timestamp>-<n>` id and never the workspace name.
+      expect(screen.getByText("Fix the tab ribbon")).toBeTruthy();
+      expect(screen.getByText("Audit the release")).toBeTruthy();
+      expect(screen.getByText("Session 11-09 10:15")).toBeTruthy();
+      expect(container.textContent).not.toContain("desktop-2026");
 
-      const alphaTab = screen.getByText("alpha \u00b7 session-b").closest(".tab")!;
+      const alphaTab = screen.getByText("Audit the release").closest(".tab")!;
       fireEvent.click(alphaTab.querySelector(".close")!);
       expect(onClose).toHaveBeenCalledWith("alpha-2");
+    });
+
+    it("keeps a close control on every pill when the tabs share one workspace", () => {
+      // A flat ribbon is one pill per tab, so a second tab on the same workspace
+      // is still a tab the user must be able to close.
+      const { container } = render(
+        <TabBar
+          tabs={[
+            { id: "alpha-1", workspaceDir: "/project/alpha", label: "alpha" },
+            { id: "alpha-2", workspaceDir: "/project/alpha", label: "beta" },
+          ]}
+          activeId="alpha-1"
+          setActive={vi.fn()}
+          onClose={vi.fn()}
+          onNew={vi.fn()}
+        />,
+      );
+
+      expect(container.querySelectorAll(".tabbar .tab:not(.newtab) .close")).toHaveLength(2);
+    });
+
+    it("drops the close control once a single pill is all that is left", () => {
+      const { container } = render(
+        <TabBar
+          tabs={[{ id: "alpha-1", workspaceDir: "/project/alpha", label: "alpha" }]}
+          activeId="alpha-1"
+          setActive={vi.fn()}
+          onClose={vi.fn()}
+          onNew={vi.fn()}
+          singleTab
+        />,
+      );
+
+      expect(container.querySelector(".tabbar .tab:not(.newtab) .close")).toBeNull();
+    });
+
+    it("dots a running tab without a count beside the dot", () => {
+      const { container } = render(
+        <TabBar
+          tabs={[
+            { id: "alpha-1", workspaceDir: "/project/alpha", busy: true, label: "alpha" },
+            { id: "beta-1", workspaceDir: "/project/beta", label: "beta" },
+          ]}
+          activeId="alpha-1"
+          setActive={vi.fn()}
+          onClose={vi.fn()}
+          onNew={vi.fn()}
+        />,
+      );
+
+      const running = container.querySelector(".tabbar .tab[data-active='true']")!;
+      expect(running.querySelector(".dot")?.getAttribute("data-state")).toBe("running");
+      expect(running.querySelector(".tab-active-count")).toBeNull();
+      expect(container.querySelector(".tabbar .tab:not(.newtab) + .tab .dot")).toBeNull();
+    });
+
+    it("closes the pill the menu was opened on", () => {
+      const onClose = vi.fn();
+      render(
+        <TabBar
+          tabs={[
+            { id: "alpha-1", workspaceDir: "/project/alpha", label: "alpha" },
+            { id: "beta-1", workspaceDir: "/project/beta", label: "beta" },
+          ]}
+          activeId="alpha-1"
+          setActive={vi.fn()}
+          onClose={onClose}
+          onNew={vi.fn()}
+        />,
+      );
+
+      fireEvent.contextMenu(screen.getByText("beta").closest(".tab")!, {
+        clientX: 40,
+        clientY: 12,
+      });
+      fireEvent.click(screen.getByRole("menuitem", { name: "Close tab" }));
+
+      expect(onClose).toHaveBeenCalledWith("beta-1");
+      expect(screen.queryByRole("menu")).toBeNull();
     });
 
     it("opens drop down menu on right-clicking the ribbon and clears tabs", () => {
       const onClearTabs = vi.fn();
       const tabs = [
-        { id: "tab-1", workspaceDir: "/project/alpha" },
-        { id: "tab-2", workspaceDir: "/project/beta" },
-        { id: "tab-3", workspaceDir: "/project/gamma" },
+        { id: "tab-1", workspaceDir: "/project/alpha", label: "alpha" },
+        { id: "tab-2", workspaceDir: "/project/beta", label: "beta" },
+        { id: "tab-3", workspaceDir: "/project/gamma", label: "gamma" },
       ];
 
       const { container } = render(

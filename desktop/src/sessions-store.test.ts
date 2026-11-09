@@ -22,7 +22,7 @@ import {
 const WORKSPACE = "/repo";
 
 function session(name: string, createdAt: number): SessionInfo {
-  return { name, messageCount: 1, mtime: new Date(createdAt).toISOString(), createdAt };
+  return { name, title: name, messageCount: 1, mtime: new Date(createdAt).toISOString(), createdAt };
 }
 
 const A = session("a", 1_000);

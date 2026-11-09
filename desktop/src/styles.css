@@ -784,7 +784,6 @@ html[data-platform="macos"] .app {
   align-items: center;
   gap: 3px;
 }
-.tab .tab-active-count,
 .ctx-tab-count {
   font-size: 10px;
   font-weight: 600;
@@ -797,9 +796,6 @@ html[data-platform="macos"] .app {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tab-group {
-  gap: 6px;
-}
 .tab .close {
   width: 16px;
   height: 16px;
@@ -808,7 +804,9 @@ html[data-platform="macos"] .app {
   align-items: center;
   justify-content: center;
   color: var(--muted-2);
-  opacity: 0;
+  /* Visible without a hover: in a 36px title row a close control that only
+     appears under the pointer reads as "this tab cannot be closed". */
+  opacity: 0.5;
 }
 .tab:hover .close,
 .tab[data-active="true"] .close {

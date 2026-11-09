@@ -95,7 +95,7 @@ async function startupWithSessionA() {
       type: "$sessions",
       epoch: "e1",
       revision: 1,
-      items: [{ name: "A", messageCount: 2, mtime: new Date(1).toISOString() }],
+      items: [{ name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() }],
     },
     "t1",
   );
@@ -164,6 +164,25 @@ describe("desktop — no-session main-area state", () => {
     expect(screen.queryByText(/No conversations yet/)).toBeNull();
   });
 
+  it("names one session identically in the header, its sidebar row and its pill", async () => {
+    // The three surfaces read one title from the daemon's session row, so they
+    // cannot drift the way a per-surface derivation did.
+    render(<App />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await startupWithSessionA();
+
+    const shell = document.querySelector<HTMLElement>(".app")!;
+    const header = shell.querySelector<HTMLInputElement>(".main-head input.editable")!;
+    const row = shell.querySelector<HTMLElement>(".session-item .title")!;
+    const pill = shell.querySelector<HTMLElement>(".tabbar .tab[data-active='true'] .label")!;
+
+    expect(header.value).toBe("Session A");
+    expect(row.textContent).toBe("Session A");
+    expect(pill.textContent).toBe("Session A");
+  });
+
   it("routes a delayed snapshot to the workspace it scanned", async () => {
     render(<App />);
     await act(async () => {
@@ -176,7 +195,14 @@ describe("desktop — no-session main-area state", () => {
         workspaceDir: "C:\\other",
         epoch: "e1",
         revision: 2,
-        items: [{ name: "FOREIGN-SESSION", messageCount: 1, mtime: new Date(2).toISOString() }],
+        items: [
+          {
+            name: "FOREIGN-SESSION",
+            title: "Foreign",
+            messageCount: 1,
+            mtime: new Date(2).toISOString(),
+          },
+        ],
       },
       "t1",
     );
@@ -283,7 +309,9 @@ describe("desktop — no-session main-area state", () => {
           type: "$sessions",
           epoch: "e1",
           revision,
-          items: [{ name: "A", messageCount: 2, mtime: new Date(1).toISOString() }],
+          items: [
+            { name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() },
+          ],
         },
         "t1",
       );
@@ -397,8 +425,8 @@ describe("desktop — no-session main-area state", () => {
         epoch: "e1",
         revision: 2,
         items: [
-          { name: "B", messageCount: 0, mtime: new Date(2).toISOString() },
-          { name: "A", messageCount: 2, mtime: new Date(1).toISOString() },
+          { name: "B", title: "Session B", messageCount: 0, mtime: new Date(2).toISOString() },
+          { name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() },
         ],
         answers: [{ requestId: lastRequestId("new_chat"), created: "B" }],
       },
@@ -436,8 +464,8 @@ describe("desktop — no-session main-area state", () => {
           epoch: "e1",
           revision,
           items: [
-            { name: "B", messageCount: 0, mtime: new Date(2).toISOString() },
-            { name: "A", messageCount: 2, mtime: new Date(1).toISOString() },
+            { name: "B", title: "Session B", messageCount: 0, mtime: new Date(2).toISOString() },
+            { name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() },
           ],
         },
         "t1",
@@ -453,8 +481,8 @@ describe("desktop — no-session main-area state", () => {
         epoch: "e1",
         revision: 4,
         items: [
-          { name: "B", messageCount: 0, mtime: new Date(2).toISOString() },
-          { name: "A", messageCount: 2, mtime: new Date(1).toISOString() },
+          { name: "B", title: "Session B", messageCount: 0, mtime: new Date(2).toISOString() },
+          { name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() },
         ],
         answers: [{ requestId: lastRequestId("new_chat"), created: "B" }],
       },

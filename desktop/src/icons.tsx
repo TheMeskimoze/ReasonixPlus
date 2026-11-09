@@ -34,16 +34,6 @@ export const I = {
       <path d="M12 5v14M5 12l7 7 7-7" />
     </Ic>
   ),
-  chevronLeft: (p: IconProps) => (
-    <Ic {...p}>
-      <path d="M15 6l-6 6 6 6" />
-    </Ic>
-  ),
-  chevronRight: (p: IconProps) => (
-    <Ic {...p}>
-      <path d="M9 6l6 6-6 6" />
-    </Ic>
-  ),
   plus: (p: IconProps) => (
     <Ic {...p}>
       <path d="M12 5v14M5 12h14" />
