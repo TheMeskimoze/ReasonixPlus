@@ -92,11 +92,26 @@ jobs:
             echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require the release key
+        shell: bash
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$RELEASE_DEPLOY_KEY" ]; then
+            echo "::error title=Missing secret::RELEASE_DEPLOY_KEY is unset, so the release cannot push to protected main."
+            exit 1
+          fi
+
+      # main requires the PR audit check, and a token push cannot satisfy a check on
+      # a commit that does not exist yet, so the push below goes over SSH with the
+      # deploy key this checkout supplies. The step above stops early if the secret
+      # is absent instead of letting the push fail with a protection error.
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
           fetch-tags: true
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Resolve version
         id: version
@@ -131,28 +146,13 @@ jobs:
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json','utf8'));j.version='${semver}';fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
           node scripts/sync-desktop-version.mjs "${ver}"
 
-      # `main` requires the PR audit check and the token cannot satisfy it, so the
-      # bump is pushed over SSH with the write-access deploy key the rule lets past:
-      # the only credential this job holds, repo-scoped and revoked in one call.
       # GITHUB_TOKEN pushes create no workflow runs, so neither the commit nor the
       # tag re-triggers this workflow. `HEAD:main` because checkout left a detached
       # HEAD; if main moved during verify the push is rejected and the run fails.
       - name: Commit + tag + push
         if: steps.version.outputs.new == '1'
         shell: bash
-        env:
-          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
         run: |
-          if [ -z "$RELEASE_DEPLOY_KEY" ]; then
-            echo "::error title=Missing secret::RELEASE_DEPLOY_KEY is unset, so the bump cannot reach protected main."
-            exit 1
-          fi
-          key="$RUNNER_TEMP/deploy_key"
-          printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$key"
-          chmod 600 "$key"
-          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
-          remote="git@github.com:${REPO}.git"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ver="${{ steps.version.outputs.version }}"
@@ -167,8 +167,8 @@ jobs:
             git commit -m "chore(release): $ver"
           fi
           git tag "$ver"
-          git push "$remote" HEAD:main
-          git push "$remote" "$ver"
+          git push origin HEAD:main
+          git push origin "$ver"
 
       - name: Setup Node 22
         uses: actions/setup-node@v6
