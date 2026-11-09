@@ -131,15 +131,28 @@ jobs:
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json','utf8'));j.version='${semver}';fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
           node scripts/sync-desktop-version.mjs "${ver}"
 
-      # GITHUB_TOKEN pushes don't create new workflow runs, so this commit
-      # and tag never re-trigger this workflow. `git push origin HEAD:main`
-      # (not `git push origin main`) because checkout left us on a detached
-      # HEAD at GITHUB_SHA. If main moved while verify ran, the push is
-      # rejected and the run fails; re-dispatch to release the newer commit.
+      # `main` requires the PR audit check and the token cannot satisfy it, so the
+      # bump is pushed over SSH with the write-access deploy key the rule lets past:
+      # the only credential this job holds, repo-scoped and revoked in one call.
+      # GITHUB_TOKEN pushes create no workflow runs, so neither the commit nor the
+      # tag re-triggers this workflow. `HEAD:main` because checkout left a detached
+      # HEAD; if main moved during verify the push is rejected and the run fails.
       - name: Commit + tag + push
         if: steps.version.outputs.new == '1'
         shell: bash
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          REPO: ${{ github.repository }}
         run: |
+          if [ -z "$RELEASE_DEPLOY_KEY" ]; then
+            echo "::error title=Missing secret::RELEASE_DEPLOY_KEY is unset, so the bump cannot reach protected main."
+            exit 1
+          fi
+          key="$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          remote="git@github.com:${REPO}.git"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ver="${{ steps.version.outputs.version }}"
@@ -154,8 +167,8 @@ jobs:
             git commit -m "chore(release): $ver"
           fi
           git tag "$ver"
-          git push origin HEAD:main
-          git push origin "$ver"
+          git push "$remote" HEAD:main
+          git push "$remote" "$ver"
 
       - name: Setup Node 22
         uses: actions/setup-node@v6
