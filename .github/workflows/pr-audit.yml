@@ -1,0 +1,107 @@
+name: PR audit
+
+# Audits every incoming pull request against the LATEST commit of the branch it
+# targets, not the commit it was branched from. The job checks out the merge
+# commit GitHub builds from the pull request head and the current base tip, so a
+# branch that no longer applies, or that only passes on its old base, fails here
+# instead of on the base branch after the merge.
+#
+# A conflicted pull request has no merge commit. The job then stops before it
+# installs anything and says so, rather than auditing the head alone and passing.
+#
+# `workflow_dispatch` re-runs the same audit against the dispatched ref, which is
+# how a change to this file is proven before it gates anything.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One audit per pull request: a new push cancels the run it supersedes.
+concurrency:
+  group: pr-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: audit (windows · node 22)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # `github.sha` is the pull request merge commit only while GitHub holds one
+      # for this pull request, and it can be newer than the event's snapshot once
+      # the base has moved. Fetching the ref by name is what makes "the latest
+      # commit" literal, and a missing ref the answer to a conflicted branch.
+      - name: Check out the pull request merged with the latest base
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if ! git fetch --no-tags --depth=2 origin "refs/pull/${PR}/merge:refs/pr-audit/merge"; then
+            echo "::error title=Merge conflict::This pull request does not merge cleanly into ${{ github.event.pull_request.base.ref }}. Rebase it on the latest ${{ github.event.pull_request.base.ref }} and push again."
+            exit 1
+          fi
+          git checkout --detach refs/pr-audit/merge
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install root dependencies
+        env:
+          REASONIX_SKIP_DESKTOP_POSTINSTALL: "1"
+        run: npm ci --os=win32 --cpu=x64
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --os=win32 --cpu=x64
+
+      # The cheap checks run first, so a formatting, policy or type error is
+      # reported in about a minute instead of after the full suite.
+      - name: Lint (biome)
+        run: npm run lint
+
+      - name: Comment policy
+        run: npm run lint:comments
+
+      - name: Typecheck (root)
+        run: npm run typecheck
+
+      - name: Typecheck (desktop)
+        run: npm run typecheck:desktop
+
+      - name: Build (tsup)
+        run: npm run build
+
+      - name: Test (vitest)
+        run: npm run test
+
+      - name: Audit summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### PR audit"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+              echo "| Pull request | #${{ github.event.pull_request.number }} into \`${{ github.event.pull_request.base.ref }}\` |"
+              echo "| Head commit | \`$(git rev-parse --short HEAD^2 2>/dev/null || echo unknown)\` |"
+              echo "| Base commit | \`$(git rev-parse --short HEAD^1 2>/dev/null || echo unknown)\` |"
+              echo "| Audited | \`$(git rev-parse --short HEAD)\`, the merge of head into base |"
+            else
+              echo "| Ref | \`${{ github.ref_name }}\` |"
+              echo "| Audited | \`$(git rev-parse --short HEAD)\` |"
+            fi
+            echo ""
+            echo "Lint, comment policy, both typechecks, the build and the full test suite ran against the row above."
+          } >> "$GITHUB_STEP_SUMMARY"
