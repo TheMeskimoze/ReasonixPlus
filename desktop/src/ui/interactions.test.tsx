@@ -190,7 +190,7 @@ describe("tab-menu", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("beta").closest(".tab-group")!);
+      fireEvent.click(screen.getByText("beta").closest(".tab")!);
       expect(setActive).toHaveBeenCalledWith("beta-1");
     });
 
@@ -212,7 +212,7 @@ describe("tab-menu", () => {
         />,
       );
 
-      const betaTab = screen.getByText("beta").closest(".tab-group")!;
+      const betaTab = screen.getByText("beta").closest(".tab")!;
       expect(betaTab.getAttribute("aria-disabled")).toBe("true");
       expect(betaTab.getAttribute("data-blocked")).toBe("true");
       expect(betaTab.getAttribute("title")).toBe("Finishing a session change first");
@@ -220,7 +220,7 @@ describe("tab-menu", () => {
       expect(setActive).not.toHaveBeenCalled();
     });
 
-    it("renders one workspace tab for multiple independent session channels", () => {
+    it("renders one pill per tab, including two tabs on the same workspace", () => {
       const onClose = vi.fn();
       const { container } = render(
         <TabBar
@@ -236,11 +236,16 @@ describe("tab-menu", () => {
         />,
       );
 
-      expect(container.querySelectorAll(".tab-group")).toHaveLength(2);
-      expect(container.querySelectorAll(".tab-session")).toHaveLength(0);
-      expect(screen.getAllByText("alpha")).toHaveLength(1);
+      // Browser-style ribbon: every tab is its own pill, so the strip can
+      // overflow and the scroll arrows have something to scroll.
+      expect(container.querySelectorAll(".tabbar .tab:not(.newtab)")).toHaveLength(3);
 
-      const alphaTab = screen.getByText("alpha").closest(".tab-group")!;
+      // The repeated workspace is disambiguated by its session name.
+      expect(screen.getByText("alpha \u00b7 session-a")).toBeTruthy();
+      expect(screen.getByText("alpha \u00b7 session-b")).toBeTruthy();
+      expect(screen.getByText("beta")).toBeTruthy();
+
+      const alphaTab = screen.getByText("alpha \u00b7 session-b").closest(".tab")!;
       fireEvent.click(alphaTab.querySelector(".close")!);
       expect(onClose).toHaveBeenCalledWith("alpha-2");
     });

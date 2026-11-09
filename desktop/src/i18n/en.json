@@ -609,7 +609,10 @@
       "switchBlocked": "Finishing a session change first",
       "clearAll": "Clear all tabs",
       "clearRight": "Clear tabs to the right",
-      "clearLeft": "Clear tabs to the left"
+      "clearLeft": "Clear tabs to the left",
+      "scrollLeft": "Scroll tabs left",
+      "scrollRight": "Scroll tabs right",
+      "running": "Agent running"
     },
     "header": {
       "noWorkspace": "No workspace selected",
