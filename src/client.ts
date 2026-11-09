@@ -424,6 +424,13 @@ function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** The Anthropic-shaped budget a control sends on the Cloud Code wire, if any.
+ *  The config builder and the output-allowance rule both read it, so a budget
+ *  can never ship without an allowance above it. */
+function cloudCodeThinkingBudget(control: ReasoningControl): number | undefined {
+  return control.contract.control === "cloudcode-budget" ? control.budget : undefined;
+}
+
 /** Cloud Code thinkingConfig: Gemini takes levels/budgets, the Claude thinking
  *  builds take snake_case budgets, and include_thoughts only asks for the summary. */
 export function antigravityThinkingConfig(
@@ -449,8 +456,22 @@ export function antigravityThinkingConfig(
   }
   // A Claude thinking build cannot switch thinking off here, so a budget is the
   // only thing worth sending; without one, leave the model's own default alone.
-  if (control.budget === undefined) return undefined;
-  return { include_thoughts: on, thinking_budget: control.budget };
+  const budget = cloudCodeThinkingBudget(control);
+  if (budget === undefined) return undefined;
+  return { include_thoughts: on, thinking_budget: budget };
+}
+
+/** Cloud Code forwards a Claude budget straight to Anthropic, which rejects a
+ *  request whose `max_tokens` is not strictly above `thinking.budget_tokens`.
+ *  This is the output ceiling those builds accept. */
+export const CLAUDE_THINKING_MAX_OUTPUT_TOKENS = 64_000;
+
+/** The output allowance a Claude thinking budget needs: the caller's cap when it
+ *  already fits above the budget, else the model ceiling. The result stays above
+ *  the budget, so a preset past the ceiling still yields a valid pair. */
+export function claudeThinkingOutputTokens(budget: number, maxTokens: number | undefined): number {
+  if (maxTokens !== undefined && maxTokens > budget) return maxTokens;
+  return Math.max(CLAUDE_THINKING_MAX_OUTPUT_TOKENS, budget + 1);
 }
 
 /** A selected level outranks a
@@ -2342,10 +2363,6 @@ export class DeepSeekClient {
       });
     }
     const request: Record<string, unknown> = { contents };
-    const generationConfig: Record<string, unknown> = {
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens !== undefined ? { maxOutputTokens: opts.maxTokens } : {}),
-    };
     const wireModel = stripProviderQualifier(opts.model);
     const control = reasoningControl({
       provider: "gemini",
@@ -2354,6 +2371,15 @@ export class DeepSeekClient {
       thinking: opts.thinking,
       supported: supportedReasoningEfforts(opts.model),
     });
+    const thinkingBudget = cloudCodeThinkingBudget(control);
+    const maxOutputTokens =
+      thinkingBudget === undefined
+        ? opts.maxTokens
+        : claudeThinkingOutputTokens(thinkingBudget, opts.maxTokens);
+    const generationConfig: Record<string, unknown> = {
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    };
     const thinkingConfig = antigravityThinkingConfig(control);
     if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
     if (Object.keys(generationConfig).length > 0) request.generationConfig = generationConfig;

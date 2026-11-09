@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { providerDeclared } from "@reasonix/core-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DeepSeekClient, Usage } from "../src/client.js";
+import {
+  CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
+  DeepSeekClient,
+  Usage,
+  claudeThinkingOutputTokens,
+} from "../src/client.js";
+import { SUMMARIZER_OUTPUT_HEADROOM } from "../src/loop/compaction.js";
 import { isThinkingModeModel, thinkingModeForModel } from "../src/loop/thinking.js";
 import type { ChatMessage } from "../src/types.js";
 import { makeFakeClient } from "./support/fake-client.js";
@@ -931,6 +937,54 @@ describe("client-gemini", () => {
         thinkingConfig: { includeThoughts: false },
       });
       expect(bodies[1]?.request).not.toHaveProperty("generationConfig");
+    });
+
+    it("keeps a Claude thinking budget below the request's max output tokens", async () => {
+      // Anthropic rejects max_tokens <= thinking.budget_tokens. Cloud Code forwards
+      // both, so every Claude budget request carries an output allowance above it.
+      const bodies: Array<{ request: Record<string, unknown> }> = [];
+      const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+        bodies.push(JSON.parse(init?.body as string));
+        return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch;
+      const client = geminiClient(fetch);
+      const model = "claude-opus-4-6-thinking";
+      const messages: ChatMessage[] = [{ role: "user", content: "hi" }];
+
+      await client.chat({ model, messages, reasoningEffort: "high" });
+      await client.chat({ model, messages, reasoningEffort: "high", maxTokens: 40_000 });
+      await client.chat({
+        model,
+        messages,
+        reasoningEffort: "low",
+        maxTokens: SUMMARIZER_OUTPUT_HEADROOM,
+      });
+
+      const configs = bodies.map(
+        (body) => body.request.generationConfig as Record<string, unknown>,
+      );
+      // No cap: the budget claims the model ceiling, above its 32768 budget.
+      expect(configs[0]?.thinkingConfig).toEqual({
+        include_thoughts: true,
+        thinking_budget: 32_768,
+      });
+      expect(configs[0]?.maxOutputTokens).toBe(CLAUDE_THINKING_MAX_OUTPUT_TOKENS);
+      // A cap already above the budget is the caller's and is kept.
+      expect(configs[1]?.maxOutputTokens).toBe(40_000);
+      // The summarizer's own cap cannot hold the low budget, so it takes the ceiling.
+      expect(configs[2]?.maxOutputTokens).toBe(CLAUDE_THINKING_MAX_OUTPUT_TOKENS);
+      // No request may send an allowance at or below the budget it sends.
+      for (const config of configs) {
+        expect(config?.maxOutputTokens as number).toBeGreaterThan(
+          (config?.thinkingConfig as { thinking_budget: number }).thinking_budget,
+        );
+      }
+      // A preset that outgrows the ceiling still gets an allowance above it.
+      const pastCeiling = CLAUDE_THINKING_MAX_OUTPUT_TOKENS + 1_000;
+      expect(claudeThinkingOutputTokens(pastCeiling, undefined)).toBeGreaterThan(pastCeiling);
     });
 
     it("captures thought-summary parts as reasoning_content, not content", async () => {

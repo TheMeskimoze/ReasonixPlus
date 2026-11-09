@@ -52,8 +52,10 @@ Budget labels are application presets, not vendor-defined effort enums:
 | Gemini 2.5 Flash | 1024 | 8192 | 24576 |
 | Cloud Code Claude thinking | 8192 | 16384 | 32768 |
 
-Budgets must leave output-token headroom. An explicit output cap is never raised
-silently. includeThoughts controls returned summaries, not reasoning depth.
+Budgets must leave output-token headroom. Cloud Code forwards a Claude budget to
+Anthropic, which rejects a request whose `max_tokens` is not strictly above
+`thinking.budget_tokens`: a request without a larger cap claims the 64K output
+ceiling. includeThoughts controls returned summaries, not reasoning depth.
 Explicit thinking disabled wins over effort where the model permits disabling;
 forced-thinking models retain a valid enabled control. MiMo's tool-thinking
 preference applies on both Chat and Responses.
