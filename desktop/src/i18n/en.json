@@ -1058,6 +1058,7 @@
     "deleteAll": "Delete all",
     "moveToTop": "Move to top",
     "sessionActions": "Session actions",
+    "openSessionFirst": "Open this session first",
     "planTag": "Plan #{index}",
     "planTagTitle": "Plan #{index} · {status} · {summary}",
     "noPlan": "No plan",

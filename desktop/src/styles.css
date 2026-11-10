@@ -1896,6 +1896,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   cursor: default;
 }
 .list-row .body .title-edit {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   font: inherit;
   color: var(--fg);
