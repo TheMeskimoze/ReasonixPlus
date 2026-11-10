@@ -5311,8 +5311,8 @@ const TabRuntime = memo(function TabRuntime({
     [onSessionPatch, state.settings?.workspaceDir, sendRpc],
   );
 
-  // One rename path for both surfaces that offer it: the header's editable title
-  // and the sidebar row's double click.
+  // The one rename path for a session: the sidebar row's inline title calls it, and
+  // anything else that renames must route through it too.
   const renameSession = useCallback(
     (name: string, title: string) => {
       onSessionPatch(state.settings?.workspaceDir, name, {
@@ -5423,6 +5423,7 @@ const TabRuntime = memo(function TabRuntime({
           onRenameSession={renameSession}
           onDuplicateSession={askDuplicate}
           onExportSession={exportConversation}
+          activeSessionHasMessages={state.messages.length > 0}
           onOpenWorkdir={openWorkdir}
           onOpenSettings={openSettings}
           onOpenAbout={openAbout}
@@ -6451,7 +6452,6 @@ export function TabBar({
     </div>
   );
 }
-
 
 function PendingWorkspaceView({
   local,

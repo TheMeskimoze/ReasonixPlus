@@ -12,10 +12,20 @@ export interface ContextMenuItem {
   onSelect: () => void;
   /** Render dimmed (e.g. a clear-tabs item with no tabs to clear). */
   empty?: boolean;
-  /** Inert: the item renders dimmed and cannot be selected. */
+  /** Inert: dimmed, announced disabled, and never selected. Kept clickable, unlike a
+   *  native `disabled`, so the `title` reason still reaches the pointer. */
   disabled?: boolean;
   /** Why the item is inert, for the pointer that hovers it. */
   title?: string;
+}
+
+/** The menu's selectable entries, in DOM order: an inert one carries aria-disabled
+ *  rather than disabled, so it still takes hover and reads out its reason. */
+function selectableItems(root: HTMLDivElement | null): HTMLButtonElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).filter(
+    (item) => item.getAttribute("aria-disabled") !== "true",
+  );
 }
 
 /** Clamp a popover/menu anchored at (x, y) inside the viewport, keeping an 8px margin. */
@@ -67,6 +77,12 @@ export function ContextMenu({
   });
   useClampedPopupPosition(ref, anchor, pos, setPos);
 
+  // A menu is a keyboard surface: it takes focus on open, so its entries sit one
+  // arrow key from the button that opened it instead of a Tab walk behind it.
+  useEffect(() => {
+    selectableItems(ref.current)[0]?.focus();
+  }, []);
+
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
@@ -91,6 +107,27 @@ export function ContextMenu({
       style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+        const entries = selectableItems(ref.current);
+        if (entries.length === 0) return;
+        e.preventDefault();
+        const at = entries.indexOf(document.activeElement as HTMLButtonElement);
+        const last = entries.length - 1;
+        const next =
+          e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? last
+              : e.key === "ArrowDown"
+                ? at < 0 || at === last
+                  ? 0
+                  : at + 1
+                : at <= 0
+                  ? last
+                  : at - 1;
+        entries[next]?.focus();
+      }}
     >
       {items.map((item) => (
         <button
@@ -99,9 +136,12 @@ export function ContextMenu({
           className={itemClass}
           role="menuitem"
           data-empty={item.empty ? "true" : undefined}
-          disabled={item.disabled}
+          aria-disabled={item.disabled ? true : undefined}
           title={item.title}
-          onClick={item.onSelect}
+          onClick={() => {
+            if (item.disabled) return;
+            item.onSelect();
+          }}
         >
           <span className="ico">{item.icon}</span>
           <span>{item.label}</span>

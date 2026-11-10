@@ -1446,14 +1446,16 @@ html[data-platform="macos"] .titlebar .tb-left {
 .file-menu-item:hover .ico {
   color: var(--accent);
 }
-.file-menu-item:disabled,
-.file-menu-item:disabled:hover {
+/* An inert entry stays hoverable on purpose: a native disabled button carries
+   pointer-events:none, which would swallow the title that explains it. */
+.file-menu-item[aria-disabled="true"],
+.file-menu-item[aria-disabled="true"]:hover {
   background: none;
   color: var(--muted-2);
   cursor: default;
 }
-.file-menu-item:disabled .ico,
-.file-menu-item:disabled:hover .ico {
+.file-menu-item[aria-disabled="true"] .ico,
+.file-menu-item[aria-disabled="true"]:hover .ico {
   color: var(--muted-2);
 }
 
@@ -2247,8 +2249,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-width: 0;
   overflow: hidden;
 }
-
-
 
 .thread-wrap {
   flex: 1;

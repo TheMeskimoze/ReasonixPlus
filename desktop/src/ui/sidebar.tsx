@@ -67,6 +67,7 @@ export function Sidebar({
   onRenameSession,
   onDuplicateSession,
   onExportSession,
+  activeSessionHasMessages,
   onOpenWorkdir,
   onOpenSettings,
   onOpenAbout,
@@ -102,6 +103,10 @@ export function Sidebar({
   onDuplicateSession?: () => void;
   /** Export the session this tab has open, for the same reason. */
   onExportSession?: () => void;
+  /** Whether the session this tab has open holds messages, from its live transcript.
+   *  The row's own messageCount only refreshes when a turn ends, so without this a
+   *  first turn would look empty to duplicate and export. */
+  activeSessionHasMessages?: boolean;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
@@ -278,6 +283,12 @@ export function Sidebar({
             const running = runningSessions?.has(s.name) ?? false;
             const rate = running ? sessionRates?.get(s.name) : undefined;
             const plan = planLabels?.get(s.name);
+            // A row's own count can lag the open tab mid-turn, so an active row
+            // reads the tab's live transcript where it has one.
+            const empty =
+              active && activeSessionHasMessages !== undefined
+                ? !activeSessionHasMessages
+                : s.messageCount === 0;
             return (
               <div
                 key={s.name}
@@ -360,7 +371,7 @@ export function Sidebar({
                       pretty: s.title,
                       running,
                       active,
-                      empty: s.messageCount === 0,
+                      empty,
                       x: rect.right,
                       y: rect.bottom,
                     });
@@ -398,9 +409,9 @@ export function Sidebar({
       {rowMenu ? (
         <ContextMenu
           anchor={rowMenu}
-          rootClass="file-menu session-menu"
+          rootClass="file-menu row-menu"
           itemClass="file-menu-item"
-          dismissSelector=".session-menu"
+          dismissSelector=".row-menu"
           onClose={() => setRowMenu(null)}
           items={[
             {
@@ -414,26 +425,24 @@ export function Sidebar({
             },
             {
               key: "duplicate",
-              label: t("app.header.duplicate"),
+              label: t("sidebarPanel.duplicate"),
               icon: <I.copy size={12} />,
               // Both act on the transcript this tab holds, so a row that is not
               // the open session has nothing to hand them.
               disabled: !rowMenu.active || rowMenu.empty,
               title: rowMenu.active ? undefined : t("sidebarPanel.openSessionFirst"),
               onSelect: () => {
-                if (!rowMenu.active || rowMenu.empty) return;
                 setRowMenu(null);
                 onDuplicateSession?.();
               },
             },
             {
               key: "export",
-              label: t("app.header.export"),
+              label: t("sidebarPanel.export"),
               icon: <I.download size={12} />,
               disabled: !rowMenu.active || rowMenu.empty,
               title: rowMenu.active ? undefined : t("sidebarPanel.openSessionFirst"),
               onSelect: () => {
-                if (!rowMenu.active || rowMenu.empty) return;
                 setRowMenu(null);
                 onExportSession?.();
               },
@@ -448,7 +457,6 @@ export function Sidebar({
               // delete already in flight must not be doubled.
               disabled: busy || rowMenu.running,
               onSelect: () => {
-                if (busy || rowMenu.running) return;
                 setPendingDelete(rowMenu);
                 setRowMenu(null);
               },
@@ -492,9 +500,9 @@ export function Sidebar({
   );
 }
 
-/** The row's title, which becomes an input on a double click. Only the session the
- *  tab has open is renameable: the rename is a daemon patch on one name, and an
- *  idle row would otherwise offer a control the tab cannot honour. */
+/** The row's title, which becomes an input on a double click or on Enter, Space or F2.
+ *  Only the session the tab has open is renameable: the rename is a daemon patch on
+ *  one name, and an idle row would otherwise offer a control the tab cannot honour. */
 function SessionTitle({
   title,
   canRename,
@@ -510,6 +518,8 @@ function SessionTitle({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const doneRef = useRef(false);
+  const restoreRef = useRef(false);
+  const spanRef = useRef<HTMLSpanElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -518,18 +528,41 @@ function SessionTitle({
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
+  useEffect(() => {
+    // The input is unmounted once the edit ends, so focus would fall back to the
+    // document; hand it to the title the keyboard user started from.
+    if (editing || !restoreRef.current) return;
+    restoreRef.current = false;
+    spanRef.current?.focus();
+  }, [editing]);
+
+  const start = () => {
+    doneRef.current = false;
+    setDraft(title);
+    setEditing(true);
+  };
 
   if (!editing) {
     return (
       <span
+        ref={spanRef}
         className="title"
         title={canRename && hintRename ? t("sidebarPanel.renameSession") : undefined}
+        // The row is its own activation target, so this opens the editor on the
+        // keys the row would otherwise consume to load the session again.
+        role={canRename ? "button" : undefined}
+        tabIndex={canRename ? 0 : undefined}
         onDoubleClick={(event) => {
           if (!canRename) return;
           event.stopPropagation();
-          doneRef.current = false;
-          setDraft(title);
-          setEditing(true);
+          start();
+        }}
+        onKeyDown={(event) => {
+          if (!canRename) return;
+          if (event.key !== "Enter" && event.key !== " " && event.key !== "F2") return;
+          event.preventDefault();
+          event.stopPropagation();
+          start();
         }}
       >
         {title}
@@ -540,6 +573,7 @@ function SessionTitle({
   const finish = (save: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
+    restoreRef.current = true;
     setEditing(false);
     if (!save) return;
     const next = flattenText(draft).slice(0, 200);
