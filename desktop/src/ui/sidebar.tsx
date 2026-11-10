@@ -1,3 +1,4 @@
+import { flattenText } from "@reasonix/core-utils";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type SessionInfo, type SessionMutation, sortSessionsByCreationDescending } from "../App";
@@ -30,6 +31,11 @@ type RowMenu = {
   name: string;
   pretty: string;
   running: boolean;
+  /** Whether this row is the session the tab has open, which duplicate and
+   *  export act on. */
+  active: boolean;
+  /** No messages to copy or export. */
+  empty: boolean;
   x: number;
   y: number;
 };
@@ -58,6 +64,9 @@ export function Sidebar({
   onClearSessions,
   sessionMutation,
   onReorderSession,
+  onRenameSession,
+  onDuplicateSession,
+  onExportSession,
   onOpenWorkdir,
   onOpenSettings,
   onOpenAbout,
@@ -87,6 +96,12 @@ export function Sidebar({
    *  Drives the header throbber wording and locks the clear-all control. */
   sessionMutation?: SessionMutation | null;
   onReorderSession?: (name: string) => void;
+  onRenameSession?: (name: string, title: string) => void;
+  /** Duplicate the session this tab has open: the copy is seeded from the loaded
+   *  transcript, so only the active row can offer it. */
+  onDuplicateSession?: () => void;
+  /** Export the session this tab has open, for the same reason. */
+  onExportSession?: () => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
@@ -284,7 +299,12 @@ export function Sidebar({
                 {running ? <span className="state" /> : null}
                 <div className="body">
                   <span className="title-row">
-                    <span className="title">{s.title}</span>
+                    <SessionTitle
+                      title={s.title}
+                      canRename={active && onRenameSession !== undefined}
+                      hintRename={!running}
+                      onRename={(title) => onRenameSession?.(s.name, title)}
+                    />
                     {planLabels && running ? (
                       <span
                         className="plan-tag"
@@ -339,6 +359,8 @@ export function Sidebar({
                       name: s.name,
                       pretty: s.title,
                       running,
+                      active,
+                      empty: s.messageCount === 0,
                       x: rect.right,
                       y: rect.bottom,
                     });
@@ -388,6 +410,32 @@ export function Sidebar({
               onSelect: () => {
                 onReorderSession?.(rowMenu.name);
                 setRowMenu(null);
+              },
+            },
+            {
+              key: "duplicate",
+              label: t("app.header.duplicate"),
+              icon: <I.copy size={12} />,
+              // Both act on the transcript this tab holds, so a row that is not
+              // the open session has nothing to hand them.
+              disabled: !rowMenu.active || rowMenu.empty,
+              title: rowMenu.active ? undefined : t("sidebarPanel.openSessionFirst"),
+              onSelect: () => {
+                if (!rowMenu.active || rowMenu.empty) return;
+                setRowMenu(null);
+                onDuplicateSession?.();
+              },
+            },
+            {
+              key: "export",
+              label: t("app.header.export"),
+              icon: <I.download size={12} />,
+              disabled: !rowMenu.active || rowMenu.empty,
+              title: rowMenu.active ? undefined : t("sidebarPanel.openSessionFirst"),
+              onSelect: () => {
+                if (!rowMenu.active || rowMenu.empty) return;
+                setRowMenu(null);
+                onExportSession?.();
               },
             },
             {
@@ -441,6 +489,87 @@ export function Sidebar({
         />
       ) : null}
     </aside>
+  );
+}
+
+/** The row's title, which becomes an input on a double click. Only the session the
+ *  tab has open is renameable: the rename is a daemon patch on one name, and an
+ *  idle row would otherwise offer a control the tab cannot honour. */
+function SessionTitle({
+  title,
+  canRename,
+  hintRename,
+  onRename,
+}: {
+  title: string;
+  canRename: boolean;
+  /** False on a running row, whose own tooltip explains why delete is locked. */
+  hintRename: boolean;
+  onRename: (title: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const doneRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(title);
+  }, [title, editing]);
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  if (!editing) {
+    return (
+      <span
+        className="title"
+        title={canRename && hintRename ? t("sidebarPanel.renameSession") : undefined}
+        onDoubleClick={(event) => {
+          if (!canRename) return;
+          event.stopPropagation();
+          doneRef.current = false;
+          setDraft(title);
+          setEditing(true);
+        }}
+      >
+        {title}
+      </span>
+    );
+  }
+
+  const finish = (save: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setEditing(false);
+    if (!save) return;
+    const next = flattenText(draft).slice(0, 200);
+    if (next && next !== title) onRename(next);
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      className="title-edit"
+      value={draft}
+      maxLength={200}
+      spellCheck={false}
+      aria-label={t("sidebarPanel.renameSession")}
+      onChange={(event) => setDraft(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onBlur={() => finish(true)}
+      onKeyDown={(event) => {
+        // The row is its own activation target: Enter here commits, never loads.
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finish(true);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          finish(false);
+        }
+      }}
+    />
   );
 }
 

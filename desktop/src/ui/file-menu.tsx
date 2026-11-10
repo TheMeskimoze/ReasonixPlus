@@ -14,6 +14,8 @@ export interface ContextMenuItem {
   empty?: boolean;
   /** Inert: the item renders dimmed and cannot be selected. */
   disabled?: boolean;
+  /** Why the item is inert, for the pointer that hovers it. */
+  title?: string;
 }
 
 /** Clamp a popover/menu anchored at (x, y) inside the viewport, keeping an 8px margin. */
@@ -98,6 +100,7 @@ export function ContextMenu({
           role="menuitem"
           data-empty={item.empty ? "true" : undefined}
           disabled={item.disabled}
+          title={item.title}
           onClick={item.onSelect}
         >
           <span className="ico">{item.icon}</span>

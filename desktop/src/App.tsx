@@ -5311,6 +5311,20 @@ const TabRuntime = memo(function TabRuntime({
     [onSessionPatch, state.settings?.workspaceDir, sendRpc],
   );
 
+  // One rename path for both surfaces that offer it: the header's editable title
+  // and the sidebar row's double click.
+  const renameSession = useCallback(
+    (name: string, title: string) => {
+      onSessionPatch(state.settings?.workspaceDir, name, {
+        summary: flattenText(title).slice(0, 200) || undefined,
+      });
+      sendRpc({ cmd: "session_rename", name, title });
+    },
+    [onSessionPatch, state.settings?.workspaceDir, sendRpc],
+  );
+
+  const askDuplicate = useCallback(() => setDuplicateAsk(true), []);
+
   const openWorkdir = useCallback(
     (anchor: { top?: number; bottom?: number; left: number }) => {
       // One workspace operator at a time: switching mid-mutation re-targets the
@@ -5406,6 +5420,9 @@ const TabRuntime = memo(function TabRuntime({
           onDeleteSession={deleteSession}
           onClearSessions={clearSessions}
           onReorderSession={reorderSession}
+          onRenameSession={renameSession}
+          onDuplicateSession={askDuplicate}
+          onExportSession={exportConversation}
           onOpenWorkdir={openWorkdir}
           onOpenSettings={openSettings}
           onOpenAbout={openAbout}
@@ -5462,18 +5479,13 @@ const TabRuntime = memo(function TabRuntime({
                 busy={state.busy}
                 hasMessages={state.messages.length > 0}
                 onExport={exportConversation}
-                onDuplicate={() => setDuplicateAsk(true)}
+                onDuplicate={askDuplicate}
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
                   setWdOpen(true);
                 }}
                 onRename={(title) => {
-                  if (state.currentSession) {
-                    onSessionPatch(state.settings?.workspaceDir, state.currentSession, {
-                      summary: flattenText(title).slice(0, 200) || undefined,
-                    });
-                    sendRpc({ cmd: "session_rename", name: state.currentSession, title });
-                  }
+                  if (state.currentSession) renameSession(state.currentSession, title);
                 }}
               />
               <div className="thread-wrap">
