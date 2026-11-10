@@ -616,10 +616,7 @@
       "running": "Agent running"
     },
     "header": {
-      "running": "Running",
-      "clickToSelect": "Click to select workspace",
       "export": "Export",
-      "exportMd": "Export as Markdown file",
       "duplicate": "Duplicate"
     },
     "duplicate": {

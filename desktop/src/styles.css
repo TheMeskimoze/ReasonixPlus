@@ -2248,88 +2248,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   overflow: hidden;
 }
 
-.main-head {
-  padding: 10px 18px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-.main-head .title-wrap {
-  min-width: 0;
-}
-.main-head h1 {
-  font-size: 14px;
-  margin: 0;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.main-head h1 .editable {
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--fg);
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: 1px dashed transparent;
-  border-radius: 4px;
-  padding: 1px 4px;
-  margin: -1px -4px;
-  outline: none;
-  min-width: 60px;
-  max-width: min(520px, 50vw);
-  field-sizing: content;
-  text-overflow: ellipsis;
-  white-space: pre;
-  transition: border-color 120ms, background 120ms, box-shadow 120ms;
-}
-.main-head h1 .editable:hover {
-  border-bottom-color: var(--border-strong);
-}
-.main-head h1 .editable:focus {
-  background: var(--panel);
-  border-color: var(--border-strong);
-  border-bottom-style: solid;
-  box-shadow: 0 0 0 2px var(--accent-soft);
-  text-overflow: clip;
-}
-.main-head .sub {
-  margin-top: 2px;
-  font-size: 14px;
-  color: var(--muted);
-  font-family: inherit;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.main-head .grow {
-  flex: 1;
-}
-.main-head .h-btn {
-  padding: 5px 10px;
-  font-size: 14px;
-  border-radius: 6px;
-  color: var(--fg-2);
-  border: 1px solid var(--border);
-  background: var(--panel);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.main-head .h-btn:hover {
-  background: var(--panel-2);
-  color: var(--fg);
-}
-.main-head .h-btn.primary {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: transparent;
-}
+
 
 .thread-wrap {
   flex: 1;
@@ -9856,25 +9775,6 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 }
 
 /* horizontal-cramp fixes */
-.main-head h1 {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-.main-head .title-wrap {
-  min-width: 0;
-  overflow: hidden;
-}
-.main-head .h-btn {
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.main-head .sub {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .statusbar .seg {
   white-space: nowrap;
   flex-shrink: 0;
@@ -9934,16 +9834,6 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 }
 @container composer (max-width: 520px) {
   .hint-row > span:first-child {
-    display: none;
-  }
-}
-
-/* Main head — same compression behavior */
-.main-head .h-btn .h-btn-label {
-  white-space: nowrap;
-}
-@media (max-width: 1000px) {
-  .main-head .h-btn:not(.primary) span:not(:first-child) {
     display: none;
   }
 }
@@ -10206,9 +10096,6 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.main-head .sub .ws-crumb:hover {
-  color: var(--accent);
 }
 
 /* ============================================================
