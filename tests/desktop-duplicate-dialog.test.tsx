@@ -99,7 +99,10 @@ async function boot(capabilityPrefill = rows, subagents = false) {
 }
 
 function openDuplicate(): HTMLElement {
-  fireEvent.click(screen.getByTitle("Duplicate session"));
+  // The row menu is where a session's duplicate entry lives now; the header that
+  // used to carry it is gone.
+  fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
   return screen.getByRole("dialog", { name: "Duplicate session" });
 }
 
