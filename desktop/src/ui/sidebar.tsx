@@ -8,7 +8,7 @@ import type { SessionPlanLabel } from "../plan-labels";
 import { clearPartition } from "../sessions-store";
 import { formatTokensPerSecond } from "../stream-rate";
 import { workspaceName } from "../workspace-path";
-import { useClampedPopupPosition } from "./file-menu";
+import { ContextMenu, useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { ListControl } from "./list-controls";
 import { Shortcut } from "./shortcut";
@@ -21,6 +21,15 @@ type PendingDelete = {
 };
 
 type PendingClear = {
+  x: number;
+  y: number;
+};
+
+/** The row whose 3-dot menu is open, anchored on the button that opened it. */
+type RowMenu = {
+  name: string;
+  pretty: string;
+  running: boolean;
   x: number;
   y: number;
 };
@@ -86,6 +95,7 @@ export function Sidebar({
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
+  const [rowMenu, setRowMenu] = useState<RowMenu | null>(null);
   // One minute-resolution clock for the whole list: the labels are relative, so they
   // must refresh on their own. Local state keeps the tick out of App's render path.
   const [now, setNow] = useState(() => Date.now());
@@ -311,31 +321,34 @@ export function Sidebar({
                     ) : null}
                   </span>
                 </div>
-                <ListControl
-                  kind="reorder"
-                  label={t("sidebarPanel.moveToTop")}
-                  onAct={() => onReorderSession?.(s.name)}
-                />
-                <ListControl
-                  kind="remove"
-                  label={
-                    running
-                      ? t("sidebarPanel.deleteRunningBlocked")
-                      : t("sidebarPanel.deleteSession")
-                  }
-                  // Locked while a delete is in flight (no double action) and for a
-                  // running session, which the daemon refuses to delete anyway.
-                  disabled={busy || running}
-                  onAct={(button) => {
-                    const rect = button.getBoundingClientRect();
-                    setPendingDelete({
+                <button
+                  type="button"
+                  className="row-menu-btn"
+                  title={t("sidebarPanel.sessionActions")}
+                  aria-label={t("sidebarPanel.sessionActions")}
+                  aria-haspopup="menu"
+                  aria-expanded={rowMenu?.name === s.name}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (rowMenu?.name === s.name) {
+                      setRowMenu(null);
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setRowMenu({
                       name: s.name,
                       pretty: s.title,
+                      running,
                       x: rect.right,
                       y: rect.bottom,
                     });
                   }}
-                />
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                  }}
+                >
+                  <I.more size={12} />
+                </button>
               </div>
             );
           })}
@@ -360,6 +373,41 @@ export function Sidebar({
         </div>
       </div>
 
+      {rowMenu ? (
+        <ContextMenu
+          anchor={rowMenu}
+          rootClass="file-menu session-menu"
+          itemClass="file-menu-item"
+          dismissSelector=".session-menu"
+          onClose={() => setRowMenu(null)}
+          items={[
+            {
+              key: "reorder",
+              label: t("sidebarPanel.moveToTop"),
+              icon: <I.arrowUp size={12} />,
+              onSelect: () => {
+                onReorderSession?.(rowMenu.name);
+                setRowMenu(null);
+              },
+            },
+            {
+              key: "delete",
+              label: rowMenu.running
+                ? t("sidebarPanel.deleteRunningBlocked")
+                : t("sidebarPanel.deleteSession"),
+              icon: <I.x size={12} />,
+              // A running session is one the daemon refuses to delete, and a
+              // delete already in flight must not be doubled.
+              disabled: busy || rowMenu.running,
+              onSelect: () => {
+                if (busy || rowMenu.running) return;
+                setPendingDelete(rowMenu);
+                setRowMenu(null);
+              },
+            },
+          ]}
+        />
+      ) : null}
       {pendingDelete ? (
         <SessionConfirmPopover
           anchor={pendingDelete}

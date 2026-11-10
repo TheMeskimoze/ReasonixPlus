@@ -1057,6 +1057,7 @@
     "clearAllKeepsRunning": "{count} running session(s) will be kept",
     "deleteAll": "Delete all",
     "moveToTop": "Move to top",
+    "sessionActions": "Session actions",
     "planTag": "Plan #{index}",
     "planTagTitle": "Plan #{index} · {status} · {summary}",
     "noPlan": "No plan",

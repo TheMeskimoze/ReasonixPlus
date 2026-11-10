@@ -207,7 +207,11 @@ describe("desktop — no-session main-area state", () => {
       "t1",
     );
     expect(screen.queryByText("FOREIGN-SESSION")).toBeNull();
-    expect(screen.getByRole("button", { name: "Delete session" })).toBeTruthy();
+    // The row still offers its actions, reached through its 3-dot menu.
+    await act(async () => {
+      screen.getByRole("button", { name: "Session actions" }).click();
+    });
+    expect(screen.getByRole("menuitem", { name: "Delete session" })).toBeTruthy();
   });
 
   it("keeps the composer, not a prompt, once the last session is gone", async () => {
@@ -248,7 +252,10 @@ describe("desktop — no-session main-area state", () => {
 
     // Optimistically delete session A through the sidebar confirm popover.
     await act(async () => {
-      screen.getByRole("button", { name: "Delete session" }).click();
+      screen.getByRole("button", { name: "Session actions" }).click();
+    });
+    await act(async () => {
+      screen.getByRole("menuitem", { name: "Delete session" }).click();
     });
     await act(async () => {
       screen.getByRole("button", { name: "Delete" }).click();
@@ -289,7 +296,10 @@ describe("desktop — no-session main-area state", () => {
     expect(document.querySelectorAll(".session-item")).toHaveLength(1);
 
     await act(async () => {
-      screen.getByRole("button", { name: "Delete session" }).click();
+      screen.getByRole("button", { name: "Session actions" }).click();
+    });
+    await act(async () => {
+      screen.getByRole("menuitem", { name: "Delete session" }).click();
     });
     await act(async () => {
       screen.getByRole("button", { name: "Delete" }).click();

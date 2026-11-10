@@ -12,6 +12,8 @@ export interface ContextMenuItem {
   onSelect: () => void;
   /** Render dimmed (e.g. a clear-tabs item with no tabs to clear). */
   empty?: boolean;
+  /** Inert: the item renders dimmed and cannot be selected. */
+  disabled?: boolean;
 }
 
 /** Clamp a popover/menu anchored at (x, y) inside the viewport, keeping an 8px margin. */
@@ -95,6 +97,7 @@ export function ContextMenu({
           className={itemClass}
           role="menuitem"
           data-empty={item.empty ? "true" : undefined}
+          disabled={item.disabled}
           onClick={item.onSelect}
         >
           <span className="ico">{item.icon}</span>
