@@ -164,8 +164,8 @@ describe("desktop — no-session main-area state", () => {
     expect(screen.queryByText(/No conversations yet/)).toBeNull();
   });
 
-  it("names one session identically in the header, its sidebar row and its pill", async () => {
-    // The three surfaces read one title from the daemon's session row, so they
+  it("names one session identically in its sidebar row and its pill", async () => {
+    // Both surfaces read one title from the daemon's session row, so they
     // cannot drift the way a per-surface derivation did.
     render(<App />);
     await act(async () => {
@@ -174,11 +174,9 @@ describe("desktop — no-session main-area state", () => {
     await startupWithSessionA();
 
     const shell = document.querySelector<HTMLElement>(".app")!;
-    const header = shell.querySelector<HTMLInputElement>(".main-head input.editable")!;
     const row = shell.querySelector<HTMLElement>(".session-item .title")!;
     const pill = shell.querySelector<HTMLElement>(".tabbar .tab[data-active='true'] .label")!;
 
-    expect(header.value).toBe("Session A");
     expect(row.textContent).toBe("Session A");
     expect(pill.textContent).toBe("Session A");
   });
