@@ -23,6 +23,7 @@ function renderSidebar(
     onRenameSession?: (name: string, title: string) => void;
     onDuplicateSession?: () => void;
     onExportSession?: () => void;
+    activeSessionHasMessages?: boolean;
   } = {},
 ) {
   return render(
@@ -37,6 +38,7 @@ function renderSidebar(
       onRenameSession={over.onRenameSession ?? (() => {})}
       onDuplicateSession={over.onDuplicateSession}
       onExportSession={over.onExportSession}
+      activeSessionHasMessages={over.activeSessionHasMessages}
       onOpenWorkdir={() => {}}
       onOpenSettings={() => {}}
       onOpenAbout={() => {}}
@@ -55,9 +57,15 @@ function openRowMenu(container: HTMLElement, name: string): void {
 }
 
 function menuItem(container: HTMLElement, label: string): HTMLButtonElement {
-  const menu = container.querySelector<HTMLElement>(".session-menu");
+  const menu = container.querySelector<HTMLElement>(".row-menu");
   if (!menu) throw new Error("no row menu is open");
   return within(menu).getByRole("menuitem", { name: label }) as HTMLButtonElement;
+}
+
+/** Inert entries are announced with aria-disabled, not `disabled`, so their hover
+ *  reason still opens: a disabled button swallows pointer events. */
+function inert(item: HTMLButtonElement): boolean {
+  return item.getAttribute("aria-disabled") === "true";
 }
 
 describe("sidebar row menu actions", () => {
@@ -68,10 +76,10 @@ describe("sidebar row menu actions", () => {
 
     openRowMenu(container, ACTIVE);
     const duplicate = menuItem(container, "Duplicate");
-    expect(duplicate.disabled).toBe(false);
+    expect(inert(duplicate)).toBe(false);
     fireEvent.click(duplicate);
     expect(onDuplicateSession).toHaveBeenCalledTimes(1);
-    expect(container.querySelector(".session-menu")).toBeNull();
+    expect(container.querySelector(".row-menu")).toBeNull();
 
     openRowMenu(container, ACTIVE);
     fireEvent.click(menuItem(container, "Export"));
@@ -88,8 +96,8 @@ describe("sidebar row menu actions", () => {
     openRowMenu(container, IDLE);
     const duplicate = menuItem(container, "Duplicate");
     const exp = menuItem(container, "Export");
-    expect(duplicate.disabled).toBe(true);
-    expect(exp.disabled).toBe(true);
+    expect(inert(duplicate)).toBe(true);
+    expect(inert(exp)).toBe(true);
     expect(duplicate.title).toBe("Open this session first");
 
     fireEvent.click(duplicate);
@@ -101,8 +109,24 @@ describe("sidebar row menu actions", () => {
   it("locks duplicate and export on a session with nothing in it", () => {
     const { container } = renderSidebar({ sessions: [session(ACTIVE, "Empty chat", 0)] });
     openRowMenu(container, ACTIVE);
-    expect(menuItem(container, "Duplicate").disabled).toBe(true);
-    expect(menuItem(container, "Export").disabled).toBe(true);
+    expect(inert(menuItem(container, "Duplicate"))).toBe(true);
+    expect(inert(menuItem(container, "Export"))).toBe(true);
+  });
+
+  it("keeps duplicate and export live through the first turn of the open session", () => {
+    // The list's count lands when the turn ends, so the open row reads the tab's
+    // transcript instead of a row that still says zero messages.
+    const onDuplicateSession = vi.fn();
+    const { container } = renderSidebar({
+      sessions: [session(ACTIVE, "Fresh chat", 0)],
+      activeSessionHasMessages: true,
+      onDuplicateSession,
+    });
+    openRowMenu(container, ACTIVE);
+    const duplicate = menuItem(container, "Duplicate");
+    expect(inert(duplicate)).toBe(false);
+    fireEvent.click(duplicate);
+    expect(onDuplicateSession).toHaveBeenCalledTimes(1);
   });
 
   it("renames the open session from a double click on its title", () => {
@@ -141,5 +165,26 @@ describe("sidebar row menu actions", () => {
     expect(onRenameSession).not.toHaveBeenCalled();
     expect(container.querySelector("input.title-edit")).toBeNull();
     expect(screen.getByText("Active chat")).toBeTruthy();
+  });
+
+  it("opens the rename editor from the keyboard and hands focus back afterwards", () => {
+    const { container } = renderSidebar();
+    const title = within(rowOf(container, ACTIVE)).getByText("Active chat");
+
+    title.focus();
+    fireEvent.keyDown(title, { key: "F2" });
+    expect(container.querySelector("input.title-edit")).not.toBeNull();
+
+    fireEvent.keyDown(container.querySelector("input.title-edit")!, { key: "Escape" });
+    expect(container.querySelector("input.title-edit")).toBeNull();
+    expect(document.activeElement).toBe(within(rowOf(container, ACTIVE)).getByText("Active chat"));
+  });
+
+  it("takes focus into the menu so its entries are one arrow key away", () => {
+    const { container } = renderSidebar();
+    openRowMenu(container, ACTIVE);
+    expect(document.activeElement).toBe(menuItem(container, "Move to top"));
+    fireEvent.keyDown(menuItem(container, "Move to top"), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(menuItem(container, "Duplicate"));
   });
 });

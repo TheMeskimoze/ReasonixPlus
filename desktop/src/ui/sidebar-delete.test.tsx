@@ -60,9 +60,15 @@ function openRowMenu(container: HTMLElement, name: string): void {
 
 /** One entry of the open row menu, by the wording the user reads. */
 function menuItem(container: HTMLElement, label: string): HTMLButtonElement {
-  const menu = container.querySelector<HTMLElement>(".session-menu");
+  const menu = container.querySelector<HTMLElement>(".row-menu");
   if (!menu) throw new Error("no row menu is open");
   return within(menu).getByRole("menuitem", { name: label }) as HTMLButtonElement;
+}
+
+/** Inert entries carry aria-disabled rather than `disabled`, so their reason still
+ *  reaches the pointer. */
+function inert(item: HTMLButtonElement): boolean {
+  return item.getAttribute("aria-disabled") === "true";
 }
 
 describe("sidebar delete operators", () => {
@@ -70,13 +76,14 @@ describe("sidebar delete operators", () => {
     const { container } = renderSidebar();
     openRowMenu(container, RUNNING);
     const running = menuItem(container, "Stop this session's agent to delete it");
-    expect(running.disabled).toBe(true);
+    expect(inert(running)).toBe(true);
     openRowMenu(container, IDLE);
-    expect(menuItem(container, "Delete session").disabled).toBe(false);
+    expect(inert(menuItem(container, "Delete session"))).toBe(false);
   });
 
   it("names the running state on the row itself", () => {
-    // A disabled button is pointer-events:none, so its own tooltip never opens.
+    // The row states the running lock without the menu being opened: an entry
+    // nobody has opened yet cannot explain why delete will not act.
     const { container } = renderSidebar();
     const titles = Array.from(container.querySelectorAll(".session-item")).map((row) =>
       row.getAttribute("title"),
@@ -104,15 +111,15 @@ describe("sidebar delete operators", () => {
     openRowMenu(container, IDLE);
     fireEvent.click(menuItem(container, "Move to top"));
     expect(onReorderSession).toHaveBeenCalledWith(IDLE);
-    expect(container.querySelector(".session-menu")).toBeNull();
+    expect(container.querySelector(".row-menu")).toBeNull();
   });
 
   it("locks every delete operator while a delete is in flight", () => {
     const { container } = renderSidebar({ sessionMutation: { kind: "delete" } });
     openRowMenu(container, RUNNING);
-    expect(menuItem(container, "Stop this session's agent to delete it").disabled).toBe(true);
+    expect(inert(menuItem(container, "Stop this session's agent to delete it"))).toBe(true);
     openRowMenu(container, IDLE);
-    expect(menuItem(container, "Delete session").disabled).toBe(true);
+    expect(inert(menuItem(container, "Delete session"))).toBe(true);
     const clearAll = screen.getByRole("button", { name: "Clear all sessions" });
     expect((clearAll as HTMLButtonElement).disabled).toBe(true);
   });

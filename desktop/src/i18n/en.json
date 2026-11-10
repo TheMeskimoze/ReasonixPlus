@@ -615,10 +615,6 @@
       "scrollRight": "Scroll tabs right",
       "running": "Agent running"
     },
-    "header": {
-      "export": "Export",
-      "duplicate": "Duplicate"
-    },
     "duplicate": {
       "confirm": "Duplicate",
       "back": "Back",
@@ -1056,6 +1052,8 @@
     "moveToTop": "Move to top",
     "sessionActions": "Session actions",
     "openSessionFirst": "Open this session first",
+    "duplicate": "Duplicate",
+    "export": "Export",
     "planTag": "Plan #{index}",
     "planTagTitle": "Plan #{index} · {status} · {summary}",
     "noPlan": "No plan",
