@@ -1446,6 +1446,16 @@ html[data-platform="macos"] .titlebar .tb-left {
 .file-menu-item:hover .ico {
   color: var(--accent);
 }
+.file-menu-item:disabled,
+.file-menu-item:disabled:hover {
+  background: none;
+  color: var(--muted-2);
+  cursor: default;
+}
+.file-menu-item:disabled .ico,
+.file-menu-item:disabled:hover .ico {
+  color: var(--muted-2);
+}
 
 .tab-menu {
   min-width: 190px;
@@ -1822,7 +1832,8 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .list-row .delete-btn,
 .list-row .rename-btn,
-.list-row .reorder-btn {
+.list-row .reorder-btn,
+.list-row .row-menu-btn {
   flex-shrink: 0;
   width: var(--row-action-size);
   height: var(--row-action-size);
@@ -1845,7 +1856,11 @@ html[data-platform="macos"] .titlebar .tb-left {
 .list-row .rename-btn:focus-visible,
 .list-row:hover .reorder-btn,
 .list-row:focus-within .reorder-btn,
-.list-row .reorder-btn:focus-visible {
+.list-row .reorder-btn:focus-visible,
+.list-row:hover .row-menu-btn,
+.list-row:focus-within .row-menu-btn,
+.list-row .row-menu-btn:focus-visible,
+.list-row .row-menu-btn[aria-expanded="true"] {
   opacity: 1;
 }
 .list-row .delete-btn:hover {
@@ -1866,12 +1881,14 @@ html[data-platform="macos"] .titlebar .tb-left {
   box-shadow: none;
 }
 .list-row .rename-btn:hover,
-.list-row .reorder-btn:hover {
+.list-row .reorder-btn:hover,
+.list-row .row-menu-btn:hover {
   background: var(--panel-2, rgba(255, 255, 255, 0.06));
   color: var(--fg);
 }
 .list-row .rename-btn:focus-visible,
-.list-row .reorder-btn:focus-visible {
+.list-row .reorder-btn:focus-visible,
+.list-row .row-menu-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }

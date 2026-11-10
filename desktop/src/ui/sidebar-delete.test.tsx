@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "../App";
 import { Sidebar } from "./sidebar";
@@ -22,6 +22,7 @@ function renderSidebar(
     running?: string[];
     sessionMutation?: { kind: "delete" } | { kind: "clear" } | { kind: "create" } | null;
     onDeleteSession?: (name: string) => void;
+    onReorderSession?: (name: string) => void;
   } = {},
 ) {
   return render(
@@ -33,6 +34,7 @@ function renderSidebar(
       onLoadSession={() => {}}
       onDeleteSession={over.onDeleteSession ?? (() => {})}
       onClearSessions={() => {}}
+      onReorderSession={over.onReorderSession}
       onOpenWorkdir={() => {}}
       onOpenSettings={() => {}}
       onOpenAbout={() => {}}
@@ -40,30 +42,37 @@ function renderSidebar(
   );
 }
 
-/** The delete operator as the user sees it: a disabled state plus the wording that
- *  explains it, keyed off whether the row's agent is running. */
-function deleteButtons(container: HTMLElement): {
-  idle?: HTMLButtonElement;
-  running?: HTMLButtonElement;
-} {
-  const buttons = Array.from(
-    container.querySelectorAll<HTMLButtonElement>(".session-item .delete-btn"),
+/** The row for a session, found by the title it carries (a running row appends its
+ *  own explanation after the name). */
+function rowOf(container: HTMLElement, name: string): HTMLElement {
+  const row = Array.from(container.querySelectorAll<HTMLElement>(".session-item")).find((el) =>
+    el.getAttribute("title")?.startsWith(name),
   );
-  return {
-    idle: buttons.find((b) => b.getAttribute("aria-label") === "Delete session"),
-    running: buttons.find(
-      (b) => b.getAttribute("aria-label") === "Stop this session's agent to delete it",
-    ),
-  };
+  if (!row) throw new Error(`no sidebar row for ${name}`);
+  return row;
+}
+
+/** Open a row's 3-dot menu the way the user does: one click on the row's button.
+ *  Only one row menu exists at a time, so opening another row replaces it. */
+function openRowMenu(container: HTMLElement, name: string): void {
+  fireEvent.click(within(rowOf(container, name)).getByRole("button", { name: "Session actions" }));
+}
+
+/** One entry of the open row menu, by the wording the user reads. */
+function menuItem(container: HTMLElement, label: string): HTMLButtonElement {
+  const menu = container.querySelector<HTMLElement>(".session-menu");
+  if (!menu) throw new Error("no row menu is open");
+  return within(menu).getByRole("menuitem", { name: label }) as HTMLButtonElement;
 }
 
 describe("sidebar delete operators", () => {
   it("locks the delete button of a running session and says why", () => {
     const { container } = renderSidebar();
-    const { idle, running } = deleteButtons(container);
-    expect(running?.disabled).toBe(true);
-    expect(idle?.disabled).toBe(false);
-    expect(running?.title).toBe("Stop this session's agent to delete it");
+    openRowMenu(container, RUNNING);
+    const running = menuItem(container, "Stop this session's agent to delete it");
+    expect(running.disabled).toBe(true);
+    openRowMenu(container, IDLE);
+    expect(menuItem(container, "Delete session").disabled).toBe(false);
   });
 
   it("names the running state on the row itself", () => {
@@ -79,8 +88,8 @@ describe("sidebar delete operators", () => {
   it("opens the confirmation for a deletable session and reports the pick", () => {
     const onDeleteSession = vi.fn();
     const { container } = renderSidebar({ onDeleteSession });
-    const { idle } = deleteButtons(container);
-    fireEvent.click(idle!);
+    openRowMenu(container, IDLE);
+    fireEvent.click(menuItem(container, "Delete session"));
     const confirm = container.querySelector<HTMLButtonElement>(
       ".session-delete-popover button.confirm",
     );
@@ -89,11 +98,21 @@ describe("sidebar delete operators", () => {
     expect(onDeleteSession).toHaveBeenCalledWith(IDLE);
   });
 
+  it("moves a session to the top from its menu and closes the menu", () => {
+    const onReorderSession = vi.fn();
+    const { container } = renderSidebar({ onReorderSession });
+    openRowMenu(container, IDLE);
+    fireEvent.click(menuItem(container, "Move to top"));
+    expect(onReorderSession).toHaveBeenCalledWith(IDLE);
+    expect(container.querySelector(".session-menu")).toBeNull();
+  });
+
   it("locks every delete operator while a delete is in flight", () => {
     const { container } = renderSidebar({ sessionMutation: { kind: "delete" } });
-    const { idle, running } = deleteButtons(container);
-    expect(running?.disabled).toBe(true);
-    expect(idle?.disabled).toBe(true);
+    openRowMenu(container, RUNNING);
+    expect(menuItem(container, "Stop this session's agent to delete it").disabled).toBe(true);
+    openRowMenu(container, IDLE);
+    expect(menuItem(container, "Delete session").disabled).toBe(true);
     const clearAll = screen.getByRole("button", { name: "Clear all sessions" });
     expect((clearAll as HTMLButtonElement).disabled).toBe(true);
   });
