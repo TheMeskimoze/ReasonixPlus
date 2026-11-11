@@ -1305,7 +1305,7 @@ export type SubagentResultView = {
   /** True when the result WAS the subagent envelope, false for passed-through text. */
   structured: boolean;
   success: boolean;
-  /** Stopped before finishing: a repetition or context guard force-summarized it. */
+  /** Stopped before finishing: a repetition guard or an unattended stop force-summarized it. */
   partial: boolean;
   output: string;
   error?: string;

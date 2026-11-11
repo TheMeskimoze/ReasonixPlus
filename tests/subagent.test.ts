@@ -699,6 +699,7 @@ describe("formatSubagentResult — forcedSummary path", () => {
     expect(parsed.partial).toBe(true);
     expect(parsed.output).toMatch(/found X and Y/);
     expect(parsed.note).toMatch(/force-summarized/i);
+    expect(parsed.note).not.toMatch(/context guard|context limit/i);
   });
 
   it("forcedSummary takes precedence over the generic !success branch", () => {
@@ -1496,6 +1497,10 @@ describe("inherited loop options", () => {
     expect(summarised.length).toBeGreaterThanOrEqual(1);
     // And the child survives its own compaction to finish normally.
     expect(result.success).toBe(true);
+    // A routine compaction is not a stop: it must not become the parent's
+    // explanation of why the child ended.
+    expect(result.stopReason).toBeUndefined();
+    expect(result.stopCause).toBeUndefined();
     expect(events.at(-1)).toMatchObject({ kind: "end", contextMax: 128_000 });
   }, 120_000);
 
@@ -1750,9 +1755,13 @@ describe("subagent prompt", () => {
     // One rule text lives in src/prompt-fragments.ts and one in src/loop/compaction.ts:
     // a child and the parent that spawned it cannot describe effort or a fold differently.
     expect(SUBAGENT_BASE_SYSTEM).toContain(NO_EFFORT_LIMIT_RULE);
-    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step or tool-call budget");
+    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step, tool-call, or effort budget");
     expect(SUBAGENT_BASE_SYSTEM).toContain(CONTEXT_FOLD_RULE);
-    expect(CONTEXT_FOLD_RULE).toContain("Never base any decision on a context limit");
+    expect(CONTEXT_FOLD_RULE).toContain("Context size is none of your business");
+    expect(CONTEXT_FOLD_RULE).toContain("Never mention your own context limits");
+    expect(CONTEXT_FOLD_RULE).toContain(
+      "never take any action because you believe your context is running out",
+    );
   });
 
   it("tells the child how to read its prompt's clock stamp", () => {

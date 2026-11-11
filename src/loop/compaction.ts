@@ -22,6 +22,10 @@ const DIGEST_ENTRY_MAX_CHARS = 160;
 const NOTICE_REPLY_MAX_CHARS = 300;
 const NOTICE_PROMPT_MAX_CHARS = 120;
 
+/** What a fold is, stated once for the standing rule and every notice it installs. */
+const FOLD_IS_ROUTINE =
+  "A fold is routine housekeeping, not a context limit: continue at full scope.";
+
 /** What a fold costs a reader, stated once for the standing rule and the notice. */
 const FOLD_DETAIL_LOSS =
   "A fold keeps work going but not detail: a summary carries decisions, file paths and intent, and drops most exact bytes, offsets, counts and line numbers.";
@@ -31,11 +35,11 @@ const RE_READ_HINT = "Re-read a file or re-run a command before relying on a spe
 
 /** The one rule about context limits and the fold. Every agent prompt interpolates this
  *  text, so a parent and a child cannot describe the fold differently. */
-export const CONTEXT_FOLD_RULE = `Never base any decision on a context limit. Window sizes, token counts and usage meters are arbitrary, unreliable and transient: the user may buy new limits, switch provider or model, and the same request may run against a different window at any moment. Never reason from a usage meter or a perceived remaining window, and never let either narrow, shorten, defer or refuse what the user asked for: do not compress a brief, an answer, a read, a search, a plan or a scope to save room, and do not skip work because the conversation seems full. The harness, not you, decides when to fold older turns into a summary marked ${COMPACTION_SUMMARY_PREFIX} with a notice marked ${FOLD_NOTICE_PREFIX}; a fold that cannot produce a summary lists the files and commands it dropped under ${DROPPED_WORK_NOTICE_PREFIX} instead. ${FOLD_DETAIL_LOSS} Keep the plan, exact values and partial findings in a file as you produce them, so the work remains reviewable and durable. ${RE_READ_HINT}`;
+export const CONTEXT_FOLD_RULE = `Context size is none of your business: the harness handles compaction, and no window, token count, usage meter, or remaining-space estimate is a signal you may act on. Never mention your own context limits, token counts, remaining space, or how much of the conversation you think is left in your reasoning or replies, and never take any action because you believe your context is running out: do not summarize early, delegate to save space, write a status file for a fold, narrow scope, skip verification, rush, or stop. A summary marked ${COMPACTION_SUMMARY_PREFIX} and a notice marked ${FOLD_NOTICE_PREFIX} mean only that earlier turns were folded. ${FOLD_IS_ROUTINE} ${FOLD_DETAIL_LOSS} Keep the plan, exact values and partial findings in a file as ordinary good practice. ${RE_READ_HINT} A fold that cannot produce a summary lists the files and commands it dropped under ${DROPPED_WORK_NOTICE_PREFIX}.`;
 
 /** Body of the notice that follows a summary fold, composed from the sentences the
  *  standing rule already states. */
-const FOLD_NOTICE_BODY = `Earlier turns of this conversation were folded into the summary above. ${FOLD_DETAIL_LOSS} ${RE_READ_HINT}`;
+const FOLD_NOTICE_BODY = `Earlier turns of this conversation were folded into the summary above. ${FOLD_IS_ROUTINE} ${FOLD_DETAIL_LOSS} ${RE_READ_HINT}`;
 
 export function isCompactionSummary(m: ChatMessage): boolean {
   return messageText(m).trimStart().startsWith(COMPACTION_SUMMARY_PREFIX);
@@ -193,7 +197,9 @@ function section(title: string, entries: string[]): string[] {
 export function buildDroppedWorkNotice(digest: ToolActivityDigest): string {
   const lines = [
     DROPPED_WORK_NOTICE_PREFIX,
-    "Earlier turns were folded away. Work that happened in the dropped span:",
+    "Earlier turns were folded away.",
+    FOLD_IS_ROUTINE,
+    "Work that happened in the dropped span:",
     ...section("Files read", digest.filesRead),
     ...section("Files edited", digest.filesEdited),
     ...section("Commands ran", digest.commands),
@@ -509,19 +515,26 @@ export function renderTranscript(messages: readonly ChatMessage[]): string {
   return lines.join("\n");
 }
 
+/** The one rule that keeps an agent's context-limit narration out of a continuation
+ *  summary. Shared by the summarizer and the verification probe; the rolling anchor
+ *  inherits it from the summarizer instruction. */
+const SUMMARIZER_NO_CONTEXT_NARRATION =
+  "Never record or repeat any statement about the agent's own context limits, token counts, remaining space, usage meters, or how much work it thinks it can afford, whether the agent or the user said it: those are not task facts, and carrying them into the summary makes the next turn act on a limit that does not exist. Do not describe the compaction itself or the fold notice.";
+
 const SUMMARIZATION_INSTRUCTION = `You are compacting an agent conversation into a continuation summary.
 Write the summary the agent can work from without the original history.
 Keep every technical detail that matters for continuing the work: file paths, function names, decisions and their rationale, constraints the user stated, error messages, test results, and the current state of any task in progress.
 Keep user requests and intent verbatim where possible.
 Do not invent anything that is not in the conversation.
 Do not omit detail to save space: the harness chose this span, and your summary is the only record of it.
+${SUMMARIZER_NO_CONTEXT_NARRATION}
 Structure the summary with short sections (Goal, Key decisions, Files and changes, Current state, Next steps).
 Write the summary only, with no preamble.`;
 
 function withPriorSummaryAnchor(instruction: string, priorSummary: string | null): string {
   if (!priorSummary)
     return `${instruction}\n\nGenerate a new state summary based on the provided history.`;
-  return `${instruction}\n\nA previous compaction summary exists. You MUST integrate all still-relevant information from it, updating it with the more recent events. Do not lose established constraints or critical knowledge.\n\nPrevious summary:\n${priorSummary}`;
+  return `${instruction}\n\nA previous compaction summary exists. You MUST integrate all still-relevant information from it, updating it with the more recent events. Do not lose established constraints or critical knowledge. The no-narration rule above also applies to this previous summary.\n\nPrevious summary:\n${priorSummary}`;
 }
 
 /** The newest messages of the folded span that fit the budget, and how many older
@@ -575,6 +588,7 @@ const VERIFICATION_INSTRUCTION = `Critically evaluate the compaction summary abo
 Did it omit any specific technical details, file paths, tool results, decisions, or user constraints?
 If anything is missing or could be more precise, write a FINAL improved summary.
 Otherwise repeat the exact same summary again.
+${SUMMARIZER_NO_CONTEXT_NARRATION}
 Write the summary only, with no preamble or commentary.`;
 
 /** Gemini-style verification probe: the second call self-corrects the summary. It

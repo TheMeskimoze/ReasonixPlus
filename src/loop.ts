@@ -2394,8 +2394,7 @@ export class CacheFirstLoop {
     }
     // Unreachable — the for-loop above is unbounded. The model exits the
     // loop via return statements when it produces no more tool calls,
-    // when the context guard fires, when an abort fires, or when a fatal
-    // error escapes the inner try blocks.
+    // when an abort fires, or when a fatal error escapes the inner try blocks.
   }
 
   /** Terminal shape for a turn nobody watches: reason, forced summary, `done` — the

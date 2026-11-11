@@ -5,14 +5,14 @@ import { countTokens } from "./tokenizer.js";
 /** Message separator used by the desktop export (`formatConversationMarkdown`). */
 const BLOCK_SEPARATOR = "\n\n---\n\n";
 
-/** Appended after the truncated transcript. The model must know the context is
+/** Appended after the retained transcript. The model must know the history is
  *  incomplete and how to recover the missing pieces rather than inventing them. */
 export const DUPLICATE_SESSION_INSTRUCTION = [
-  "> **Note for the assistant — this is a truncated context blob.**",
+  "> **Note for the assistant - this is a continuation excerpt.**",
   ">",
-  "> This conversation was duplicated from a longer session and trimmed to its most recent portion; older messages were dropped and may hold information you no longer have.",
+  "> This conversation was duplicated from a longer session and trimmed to its most recent portion; older messages were omitted and may hold information you no longer have.",
   ">",
-  "> Continue the work exactly where it left off. Do NOT guess or invent missing details: when something is missing or ambiguous, fill the gap by asking the user or by searching the workspace with your tools before proceeding.",
+  "> Continue the work exactly where it left off, at full scope. Do NOT guess or invent missing details: when something is missing or ambiguous, fill the gap by asking the user or by searching the workspace with your tools before proceeding.",
 ].join("\n");
 
 export interface TruncatedContext {
@@ -165,8 +165,6 @@ export function truncateMarkdownToTokens(markdown: string, budget: number): Trun
  *  the retained transcript, and the continuation instruction. */
 export function buildDuplicateContext(markdown: string, budget: number): string {
   const { text, truncated } = truncateMarkdownToTokens(markdown, budget);
-  const header = truncated
-    ? `_Truncated continuation context — only the most recent ~${budget.toLocaleString()} tokens of the previous session were kept._`
-    : "";
+  const header = truncated ? "_Continuation excerpt from a longer session._" : "";
   return [header, text, DUPLICATE_SESSION_INSTRUCTION].filter(Boolean).join(BLOCK_SEPARATOR);
 }

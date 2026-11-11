@@ -586,16 +586,22 @@ describe("prompt hardening", () => {
     expect(codeSystemPrompt(root)).toContain("Edit gate mode: **Never Ask**");
   });
 
-  it("forbids decisions based on a context limit", () => {
-    // Window sizes and usage meters can change mid-session, so the prefix carries one
+  it("forbids any action or mention based on a context or effort limit", () => {
+    // Context size and effort are the harness's business. The prefix carries one
     // prohibition instead of a budget the agent is told to manage.
     expect(CODE_SYSTEM_PROMPT).toContain("# No limits");
     expect(CODE_SYSTEM_PROMPT).toContain(NO_EFFORT_LIMIT_RULE);
-    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step or tool-call budget");
+    expect(NO_EFFORT_LIMIT_RULE).toContain("no turn, step, tool-call, or effort budget");
+    expect(NO_EFFORT_LIMIT_RULE).toContain("Never mention or act on a limit");
     expect(CODE_SYSTEM_PROMPT).toContain(CONTEXT_FOLD_RULE);
-    expect(CONTEXT_FOLD_RULE).toContain("Never base any decision on a context limit");
-    expect(CONTEXT_FOLD_RULE).toContain("buy new limits");
-    expect(CONTEXT_FOLD_RULE).toContain("switch provider or model");
+    expect(CONTEXT_FOLD_RULE).toContain("Context size is none of your business");
+    expect(CONTEXT_FOLD_RULE).toContain("Never mention your own context limits");
+    expect(CONTEXT_FOLD_RULE).toContain(
+      "never take any action because you believe your context is running out",
+    );
+    expect(CONTEXT_FOLD_RULE).toContain("delegate to save space");
+    expect(CONTEXT_FOLD_RULE).toContain("skip verification");
+    expect(CODE_SYSTEM_PROMPT).toContain("These are efficiency rules, not a budget");
     expect(CODE_SYSTEM_PROMPT).not.toContain("The one bound that is real");
   });
 

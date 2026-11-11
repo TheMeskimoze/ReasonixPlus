@@ -1062,6 +1062,7 @@ describe("compaction", () => {
       const notice = buildDroppedWorkNotice(digest);
       expect(notice.startsWith(DROPPED_WORK_NOTICE_PREFIX)).toBe(true);
       expect(notice).toContain("Commands ran:");
+      expect(notice).toContain("routine housekeeping, not a context limit");
       expect(notice).not.toContain("context window");
       expect(notice).not.toMatch(/[\u2013\u2014]/);
     });
@@ -1085,6 +1086,9 @@ describe("compaction", () => {
       expect(text).toContain("read_file");
       expect(text).toMatch(/Generate a new state summary/);
       expect(text).toContain("Do not omit detail to save space");
+      expect(text).toContain(
+        "Never record or repeat any statement about the agent's own context limits",
+      );
       expect(text).not.toContain("free context window space");
     });
 
@@ -1102,6 +1106,11 @@ describe("compaction", () => {
       const text = String(req[0]!.content);
       expect(text).toContain("previous compaction summary");
       expect(text).toContain("known facts");
+      expect(text).toContain("The no-narration rule above also applies to this previous summary");
+      // The one no-narration rule is stated once, not repeated by the anchor.
+      expect(
+        text.match(/Never record or repeat any statement about the agent's own context limits/g),
+      ).toHaveLength(1);
     });
 
     it("caps the summarizer input and notes omissions", () => {
@@ -1116,6 +1125,9 @@ describe("compaction", () => {
       const req = buildVerificationRequest(plan!, "candidate summary text");
       expect(String(req[0]!.content)).toContain("candidate summary text");
       expect(String(req[0]!.content)).toContain("FINAL improved summary");
+      expect(String(req[0]!.content)).toContain(
+        "Never record or repeat any statement about the agent's own context limits",
+      );
     });
 
     it("renders a role-tagged transcript", () => {
@@ -1161,7 +1173,10 @@ describe("compaction", () => {
       const plan = planCompaction(messages, { targetTokens: 1_500, preserveRecentTokens: 500 });
       const result = renderWithSummary(plan!, "The goal was refactoring widgets.");
       expect(result).not.toBeNull();
-      expect(result!.messages.filter((m) => isFoldNotice(m))).toHaveLength(1);
+      const notices = result!.messages.filter((m) => isFoldNotice(m));
+      expect(notices).toHaveLength(1);
+      expect(String(notices[0]!.content)).toContain("routine housekeeping, not a context limit");
+      expect(String(notices[0]!.content)).toContain("continue at full scope");
       // The notice is its own message, so the rolling summary body stays exactly the
       // model's text and cannot accumulate notices across folds.
       expect(compactionSummaryBody(result!.messages)).toBe("The goal was refactoring widgets.");
@@ -1272,14 +1287,19 @@ describe("duplicate-session", () => {
       const md = `### You${SEP}${"x ".repeat(4000)}${SEP}### Reasonix+${SEP}latest`;
       const out = buildDuplicateContext(md, 60);
       expect(out).toContain(DUPLICATE_SESSION_INSTRUCTION);
-      expect(out).toContain("Truncated continuation context");
+      expect(out).toContain("Continuation excerpt");
       expect(out).toContain("latest");
     });
 
     it("omits the truncation header when nothing was dropped", () => {
       const out = buildDuplicateContext("### You\n\nsmall session", 100_000);
-      expect(out).not.toContain("Truncated continuation context");
+      expect(out).not.toContain("Continuation excerpt");
       expect(out).toContain(DUPLICATE_SESSION_INSTRUCTION);
+    });
+
+    it("tells the assistant to continue at full scope", () => {
+      expect(DUPLICATE_SESSION_INSTRUCTION).toContain("at full scope");
+      expect(DUPLICATE_SESSION_INSTRUCTION).not.toContain("context blob");
     });
 
     it("truncates bloated command outputs to 3 lines max per card output while keeping thinking intact", () => {

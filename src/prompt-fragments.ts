@@ -14,7 +14,7 @@ export const TUI_FORMATTING_RULES = `Formatting (rendered in a TUI markdown rend
 
 /** Model identity note used by session prompts. Models must complete work directly. */
 export function escalationContract(modelId: string): string {
-  return `You are running on \`${modelId}\`. Deliver the strongest answer you can directly. Do not stop merely because a task is difficult or uncertain. If asked which model you are, answer \`${modelId}\`.`;
+  return `You are running on \`${modelId}\`. Deliver the strongest answer you can directly. Do not stop merely because a task is difficult, uncertain, or long. If asked which model you are, answer \`${modelId}\`.`;
 }
 
 /** Backward-compatible export retained for public API consumers. */
@@ -25,7 +25,7 @@ export const SHARED_WORKSPACE_SAFETY = `Multiple agents or the user may change t
 /** The harness has no effort budget. Shared so a parent and a child cannot tell
  *  different stories about why the agent should keep working. */
 export const NO_EFFORT_LIMIT_RULE =
-  "This harness enforces no turn, step or tool-call budget. Nothing stops you for working long, and no counter is running that you should conserve against. Do not stop or shrink the work for a limit you believe you are near: keep working until the task is done.";
+  "This harness enforces no turn, step, tool-call, or effort budget. Nothing stops you for working long, and no counter is running that you should conserve against. Never mention or act on a limit you believe you are near: keep working at full scope until the task is done.";
 
 export const NEGATIVE_CLAIM_RULE = `Negative claims ("X is missing", "Y isn't implemented") are the #1 hallucination shape: they feel safe because no citation seems possible, which is exactly why they must not be instinct.
 

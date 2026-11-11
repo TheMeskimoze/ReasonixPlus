@@ -189,9 +189,8 @@ export interface SubagentResult {
   usage: Usage;
   /** True when the child terminated without a full answer (a user-abort placeholder) — `output` carries the placeholder text, routed to `error`. */
   forcedSummary?: boolean;
-  /** The child loop's own explanation for a stop it initiated (repetition or context
-   *  guard). Present so the parent reads WHY the run ended
-   *  instead of an unattributed "no answer". */
+  /** The child loop's own explanation for a terminal stop it initiated. Present so
+   *  the parent reads WHY the run ended instead of an unattributed "no answer". */
   stopReason?: string;
   /** Machine tag for that stop. `repetition-guard` means the run was terminated
    *  as lost (degenerate loop) and is the one stop that may carry no answer. */
@@ -633,11 +632,13 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         // model; a malformed request or a bad key would fail just as fast.
         if (isQuotaExhaustedError(ev.errorDetail?.message)) quotaExhausted = true;
       }
-      if (ev.role === "warning" && ev.severity === "high" && ev.content) {
+      if (ev.role === "warning" && ev.severity === "high" && ev.content && ev.cause) {
         // The child loop's only statement of WHY it stopped. A warning never
-        // reaches the parent by itself, so keep the last one for attribution.
+        // reaches the parent by itself, so keep the last terminal one for attribution.
+        // Transient warnings (compaction, retries, reconnects) carry no cause and
+        // must not become the parent's explanation of the stop.
         stopReason = ev.content;
-        if (ev.cause) stopCause = ev.cause;
+        stopCause = ev.cause;
       }
     }
   } catch (err) {
@@ -764,7 +765,7 @@ export function formatSubagentResult(r: SubagentResult): string {
       tool_iters: r.toolIters,
       elapsed_ms: r.elapsedMs,
       ...meta,
-      note: "Subagent was force-summarized: it was stopped before finishing (repetition or context guard) and never produced an answer of its own. `output` carries what it had produced: useful but potentially incomplete. Decide whether to accept the partial, narrow the task and re-spawn, or fall back to direct tools.",
+      note: "Subagent was force-summarized: it was stopped before finishing and never produced an answer of its own. `output` carries what it had produced: useful but potentially incomplete. Decide whether to accept the partial, narrow the task and re-spawn, or fall back to direct tools.",
     });
   }
   if (!r.success) {
