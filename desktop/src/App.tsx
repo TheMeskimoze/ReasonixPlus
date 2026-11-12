@@ -218,7 +218,7 @@ import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useIsScrollable } from "./ui/useIsScrollable";
-import { appElements, useResizable } from "./ui/useResizable";
+import { useResizable } from "./ui/useResizable";
 import { useTurnWatchdog } from "./ui/useTurnWatchdog";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { WorkspaceRowView } from "./ui/workspace-row";
@@ -6971,16 +6971,6 @@ export function App() {
     document.documentElement.dataset.theme = activeTabTheme.theme;
     document.documentElement.dataset.themeStyle = activeTabTheme.themeStyle;
   }, [activeTabTheme]);
-
-  // Sync --composer-max-width to every .app shell: the value is written straight to
-  // the DOM because the shells' style prop is React-owned and would drop it on the
-  // next render. Every mounted tab needs it, or a shell keeps whatever a panel drag
-  // last left there and its composer stops following a collapse.
-  useEffect(() => {
-    for (const el of appElements()) {
-      el.style.setProperty("--composer-max-width", `${threadMaxWidth}px`);
-    }
-  }, [threadMaxWidth]);
 
   useEffect(() => {
     let raf = 0;

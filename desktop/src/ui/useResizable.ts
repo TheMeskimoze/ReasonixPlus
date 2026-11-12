@@ -9,7 +9,7 @@ const PERSIST_KEY_CTX = "reasonix.ctxWidth";
 
 // Every tab renders its own `.app` shell and they all share the same column
 // widths, so a resize has to touch all of them.
-export function appElements(): HTMLElement[] {
+function appElements(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(".app"));
 }
 
@@ -33,7 +33,6 @@ function applyColumnWidths(
   for (const el of els) {
     el.style.setProperty(cssVar, `${width}px`);
     el.style.setProperty("--thread-max-width", `${tMax}px`);
-    el.style.setProperty("--composer-max-width", `${tMax}px`);
   }
 }
 

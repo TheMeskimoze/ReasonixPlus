@@ -632,16 +632,13 @@ html[data-platform="macos"] .app {
 .app[data-ctx-collapsed="true"] {
   --ctx-width: 0px;
   --thread-max-width: 960px;
-  --composer-max-width: 880px;
 }
 .app[data-side-collapsed="true"] {
   --side-width: 0px;
   --thread-max-width: 960px;
-  --composer-max-width: 880px;
 }
 .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
   --thread-max-width: 1120px;
-  --composer-max-width: 1040px;
 }
 
 /* ---------- RESIZE HANDLES ---------- */
@@ -4638,7 +4635,9 @@ html[data-platform="macos"] .startup-loading-overlay {
   pointer-events: none;
 }
 .composer-inner {
-  max-width: var(--composer-max-width, 760px);
+  /* The thread's content width: same cap, minus the 32px padding the transcript
+     rows sit inside, so the composer box lines up with the cards above it. */
+  max-width: calc(var(--thread-max-width, 740px) - 64px);
   margin: 0 auto;
   position: relative;
   container-type: inline-size;
