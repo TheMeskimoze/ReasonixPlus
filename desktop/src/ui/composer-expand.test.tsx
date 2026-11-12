@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer";
 import { makeComposerBaseProps } from "./composer-test-fixtures";
@@ -11,14 +12,16 @@ afterEach(cleanup);
 
 function renderComposer(over: { expanded?: boolean } = {}) {
   const onToggleExpanded = vi.fn();
+  const textareaRef = createRef<HTMLTextAreaElement>();
   const { container } = render(
     <Composer
       {...makeComposerBaseProps()}
+      textareaRef={textareaRef}
       expanded={over.expanded ?? false}
       onToggleExpanded={onToggleExpanded}
     />,
   );
-  return { container, onToggleExpanded };
+  return { container, onToggleExpanded, textareaRef };
 }
 
 function expandButton(container: HTMLElement): HTMLButtonElement | null {
@@ -44,6 +47,13 @@ describe("composer expand toggle", () => {
 
     fireEvent.click(btn);
     expect(onToggleExpanded).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns focus to the textarea so the expanded composer is ready to type", () => {
+    const { container, textareaRef } = renderComposer();
+    fireEvent.click(expandButton(container)!);
+    expect(document.activeElement).toBe(textareaRef.current);
+    expect(textareaRef.current).toBe(container.querySelector("textarea"));
   });
 
   it("reads as pressed and offers the way back once expanded", () => {

@@ -5484,6 +5484,17 @@ const TabRuntime = memo(function TabRuntime({
           ) : (
             <>
               <div className="thread-wrap">
+                {threadScrollable ? (
+                  <button
+                    type="button"
+                    className="thread-scroll-btn top"
+                    onClick={() => scrollToTop(true)}
+                    title={t("app.jumpToTop") ?? "Jump to top"}
+                    aria-label={t("app.jumpToTop") ?? "Jump to top"}
+                  >
+                    <I.chevU size={14} />
+                  </button>
+                ) : null}
                 <div className="thread" ref={threadRef}>
                   <div className="thread-inner" ref={threadInnerRef}>
                     {active || keepAlive ? (
@@ -5616,26 +5627,15 @@ const TabRuntime = memo(function TabRuntime({
                   </div>
                 </div>
                 {threadScrollable ? (
-                  <>
-                    <button
-                      type="button"
-                      className="thread-scroll-btn top"
-                      onClick={() => scrollToTop(true)}
-                      title={t("app.jumpToTop") ?? "Jump to top"}
-                      aria-label={t("app.jumpToTop") ?? "Jump to top"}
-                    >
-                      <I.chevU size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="thread-scroll-btn bottom"
-                      onClick={() => scrollToBottom(true)}
-                      title={t("app.jumpToBottom") ?? "Jump to bottom"}
-                      aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
-                    >
-                      <I.chev size={14} />
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="thread-scroll-btn bottom"
+                    onClick={() => scrollToBottom(true)}
+                    title={t("app.jumpToBottom") ?? "Jump to bottom"}
+                    aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
+                  >
+                    <I.chev size={14} />
+                  </button>
                 ) : null}
               </div>
 

@@ -298,7 +298,8 @@ export function Composer({
   /** The composer owns the main area instead of sharing it with the transcript. */
   expanded?: boolean;
   /** Toggles that; omitted, the control does not render at all. */
-  onToggleExpanded?: () => void;  busy?: boolean;
+  onToggleExpanded?: () => void;
+  busy?: boolean;
   /** Drives the status row above the hint row while the agent is running — typically "Reasoning" or "Calling tool: <name>". */
   busyLabel?: string;
   /** Renders the "stuck Ns" hint once the turn has been silent this long. The 1s
@@ -1073,7 +1074,10 @@ export function Composer({
               aria-pressed={expanded}
               title={t(expanded ? "composer.collapse" : "composer.expand")}
               aria-label={t(expanded ? "composer.collapse" : "composer.expand")}
-              onClick={onToggleExpanded}
+              onClick={() => {
+                onToggleExpanded();
+                textareaRef.current?.focus();
+              }}
             >
               {expanded ? <I.collapse size={13} /> : <I.expand size={13} />}
             </button>

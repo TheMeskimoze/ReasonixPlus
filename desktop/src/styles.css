@@ -606,6 +606,15 @@ button:disabled {
 .app {
   --side-width: 244px;
   --ctx-width: 320px;
+  /* Transcript and composer share one content width. The scroller reserves
+     --thread-gutter for its bar; the composer wrap carries the same gutter in
+     its right padding so both boxes centre on the same axis. */
+  --thread-gutter: 5px;
+  --thread-pad: 32px;
+  --composer-pad: 28px;
+  --composer-inset: calc(2 * var(--thread-pad) - 2 * var(--composer-pad));
+  --composer-btn-size: 28px;
+  --composer-btn-gap: 6px;
   position: relative;
   display: grid;
   grid-template-rows: 36px 1fr 26px;
@@ -2106,11 +2115,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 /* Jump-to-top / jump-to-bottom chevrons, rendered only while the transcript
    actually overflows (see useIsScrollable). They float over the native scrollbar
    column instead of holding rows of their own: the wrap is nothing but the
-   scroller, and 5px of right offset lines a 16px button up with the track the
+   scroller, and the thread gutter lines a 16px button up with the track the
    `.thread` margin and scrollbar leave at that edge. */
 .thread-scroll-btn {
   position: absolute;
-  right: 5px;
+  right: var(--thread-gutter);
   z-index: 2;
   display: flex;
   align-items: center;
@@ -2143,7 +2152,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin-right: 5px;
+  margin-right: var(--thread-gutter);
   padding: 28px 0 40px;
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
@@ -2162,7 +2171,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .thread-inner {
   max-width: var(--thread-max-width, 740px);
   margin: 0 auto;
-  padding: 0 32px;
+  padding: 0 var(--thread-pad);
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -4621,7 +4630,9 @@ html[data-platform="macos"] .startup-loading-overlay {
 
 /* ---------- COMPOSER ---------- */
 .composer-wrap {
-  padding: 12px 28px 18px;
+  /* The extra right padding mirrors the transcript's scrollbar gutter so the
+     centred composer and the rows above it share one centre line. */
+  padding: 12px calc(var(--composer-pad) + var(--thread-gutter)) 18px var(--composer-pad);
   background: var(--bg);
   border-top: 1px solid var(--border);
   position: relative;
@@ -4635,9 +4646,14 @@ html[data-platform="macos"] .startup-loading-overlay {
   pointer-events: none;
 }
 .composer-inner {
-  /* The thread's content width: same cap, minus the 32px padding the transcript
-     rows sit inside, so the composer box lines up with the cards above it. */
-  max-width: calc(var(--thread-max-width, 740px) - 64px);
+  /* The thread's content width: the same cap minus its two row paddings, and
+     never wider than the wrap's content minus the extra gutter. Both terms are
+     derived from the shared shell variables, so the box tracks the cards above
+     it at every width instead of only at the cap. */
+  max-width: min(
+    calc(var(--thread-max-width, 740px) - 2 * var(--thread-pad)),
+    calc(100% - var(--composer-inset))
+  );
   margin: 0 auto;
   position: relative;
   container-type: inline-size;
@@ -4661,9 +4677,11 @@ html[data-platform="macos"] .startup-loading-overlay {
 .composer-expand-btn {
   position: absolute;
   top: 8px;
-  right: -36px;
-  width: 28px;
-  height: 28px;
+  /* The offset is the button plus its gap, so the right edge stays inside the
+     wrap's padding even when the card fills the content width. */
+  right: calc(-1 * (var(--composer-btn-size) + var(--composer-btn-gap)));
+  width: var(--composer-btn-size);
+  height: var(--composer-btn-size);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4768,8 +4786,8 @@ html[data-platform="macos"] .startup-loading-overlay {
   padding: 12px 14px 6px;
   font-size: 14px;
   line-height: 1.55;
-  /* One row at rest, growing with the text up to five rows, then scrolling. The
-     18px is the vertical padding above (12px top + 6px bottom). */
+  /* One row at rest, growing with the text up to four rows, then scrolling. The
+     18px is the vertical padding (12px top + 6px bottom). */
   height: auto;
   min-height: calc(1.55em + 18px);
   max-height: calc(4 * 1.55em + 18px);

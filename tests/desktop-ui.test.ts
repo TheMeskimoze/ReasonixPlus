@@ -659,6 +659,45 @@ describe("desktop-composer-autosize", () => {
       expect(far.heightPx).toBe(heightFor(MAX_COMPOSER_ROWS));
     });
   });
+
+  describe("desktop composer matches the transcript content width", () => {
+    it("derives both boxes from the shared shell variables", () => {
+      const app = cssRule(".app");
+      expect(app).toContain("--thread-pad: 32px");
+      expect(app).toContain("--composer-pad: 28px");
+      expect(app).toContain(
+        "--composer-inset: calc(2 * var(--thread-pad) - 2 * var(--composer-pad))",
+      );
+      expect(cssRule(".thread-inner")).toContain("padding: 0 var(--thread-pad)");
+      expect(cssRule(".composer-wrap")).toContain(
+        "padding: 12px calc(var(--composer-pad) + var(--thread-gutter)) 18px var(--composer-pad)",
+      );
+
+      const inner = cssRule(".composer-inner");
+      expect(inner).toContain("max-width: min(");
+      expect(inner).toContain("calc(var(--thread-max-width, 740px) - 2 * var(--thread-pad))");
+      expect(inner).toContain("calc(100% - var(--composer-inset))");
+    });
+
+    it("keeps the expand control inside the wrap padding", () => {
+      const btn = cssRule(".composer-expand-btn");
+      expect(btn).toContain(
+        "right: calc(-1 * (var(--composer-btn-size) + var(--composer-btn-gap)))",
+      );
+      expect(btn).toContain("width: var(--composer-btn-size)");
+    });
+  });
+});
+
+describe("desktop transcript scroll controls", () => {
+  it("keeps the jump-to-top control before the transcript in DOM order", () => {
+    const app = sourceFile("desktop/src/App.tsx");
+    const top = app.indexOf('className="thread-scroll-btn top"');
+    const thread = app.indexOf('<div className="thread" ref={threadRef}>');
+    expect(top).toBeGreaterThan(-1);
+    expect(thread).toBeGreaterThan(-1);
+    expect(top).toBeLessThan(thread);
+  });
 });
 
 // jsdom has no layout engine, so the composer foot's width contract is pinned on the
