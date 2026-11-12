@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextAbortDraftCandidate, restoreAbortedDraft } from "../desktop/src/abort-draft";
 import {
   DEFAULT_COMPOSER_ROWS,
+  MAX_COMPOSER_ROWS,
   getComposerTextareaSizing,
 } from "../desktop/src/ui/composer-sizing";
 import {
@@ -598,58 +599,64 @@ describe("desktop-card-row-window", () => {
 });
 
 describe("desktop-composer-autosize", () => {
-  // The composer must hold a fixed height and never resize (#1594 regression):
-  // it previously expanded past a five-row threshold, so the box jumped as the
-  // user typed across that boundary.
-  describe("desktop composer textarea never resizes", () => {
-    const height = DEFAULT_COMPOSER_ROWS * 20 + 18;
+  // The composer opens at one row and grows with the text up to five, then
+  // scrolls. The clamp lives in the stylesheet (min/max-height plus
+  // `field-sizing: content`), and getComposerTextareaSizing is the same
+  // arithmetic in TypeScript, so the box never needs a per-render measurement.
+  describe("desktop composer textarea grows from one row to five", () => {
+    const line = 20;
+    const pad = 18;
+    const heightFor = (rows: number) => rows * line + pad;
 
     it("uses CSS sizing and native overflow without per-render layout measurement", () => {
       const composer = sourceFile("desktop/src/ui/composer.tsx");
       const textareaRule = cssRule(".composer textarea");
-      expect(textareaRule).toContain("height: calc(2 * 1.55em + 18px)");
+      expect(textareaRule).toContain("field-sizing: content");
+      expect(textareaRule).toContain("min-height: calc(1.55em + 18px)");
+      expect(textareaRule).toContain("max-height: calc(5 * 1.55em + 18px)");
       expect(textareaRule).toContain("overflow-y: auto");
       expect(composer).not.toContain("applyComposerTextareaSize");
     });
 
-    it("holds the fixed height for a single line", () => {
+    it("opens at a single row", () => {
       const sizing = getComposerTextareaSizing({
         contentRows: 1,
-        lineHeightPx: 20,
-        verticalPaddingPx: 18,
+        lineHeightPx: line,
+        verticalPaddingPx: pad,
       });
 
-      expect(sizing.heightPx).toBe(height);
+      expect(sizing.heightPx).toBe(heightFor(DEFAULT_COMPOSER_ROWS));
       expect(sizing.overflowY).toBe("hidden");
     });
 
-    it("keeps the same height regardless of how much content is typed", () => {
-      for (const contentRows of [1, 2, 3, 5, 10, 20]) {
+    it("grows one row at a time up to the five-row cap", () => {
+      for (const contentRows of [2, 3, 4, 5]) {
         const sizing = getComposerTextareaSizing({
           contentRows,
-          lineHeightPx: 20,
-          verticalPaddingPx: 18,
+          lineHeightPx: line,
+          verticalPaddingPx: pad,
         });
 
-        expect(sizing.heightPx).toBe(height);
+        expect(sizing.heightPx).toBe(heightFor(contentRows));
+        expect(sizing.overflowY).toBe("hidden");
       }
     });
 
-    it("scrolls inside the box instead of growing once content overflows", () => {
-      const fits = getComposerTextareaSizing({
-        contentRows: DEFAULT_COMPOSER_ROWS,
-        lineHeightPx: 20,
-        verticalPaddingPx: 18,
-      });
+    it("stops at the cap and scrolls inside the box past it", () => {
       const overflows = getComposerTextareaSizing({
-        contentRows: DEFAULT_COMPOSER_ROWS + 1,
-        lineHeightPx: 20,
-        verticalPaddingPx: 18,
+        contentRows: MAX_COMPOSER_ROWS + 1,
+        lineHeightPx: line,
+        verticalPaddingPx: pad,
+      });
+      const far = getComposerTextareaSizing({
+        contentRows: 20,
+        lineHeightPx: line,
+        verticalPaddingPx: pad,
       });
 
-      expect(fits.overflowY).toBe("hidden");
+      expect(overflows.heightPx).toBe(heightFor(MAX_COMPOSER_ROWS));
       expect(overflows.overflowY).toBe("auto");
-      expect(overflows.heightPx).toBe(height);
+      expect(far.heightPx).toBe(heightFor(MAX_COMPOSER_ROWS));
     });
   });
 });

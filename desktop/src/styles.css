@@ -4703,8 +4703,12 @@ html[data-platform="macos"] .startup-loading-overlay {
   padding: 12px 14px 6px;
   font-size: 14px;
   line-height: 1.55;
-  height: calc(2 * 1.55em + 18px);
-  min-height: calc(2 * 1.55em + 18px);
+  /* One row at rest, growing with the text up to five rows, then scrolling. The
+     18px is the vertical padding above (12px top + 6px bottom). */
+  height: auto;
+  min-height: calc(1.55em + 18px);
+  max-height: calc(5 * 1.55em + 18px);
+  field-sizing: content;
   overflow-y: auto;
   font-family: inherit;
 }
