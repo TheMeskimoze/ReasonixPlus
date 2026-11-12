@@ -573,7 +573,9 @@ button:disabled {
 /* One wide, grabbable scrollbar everywhere the UI scrolls. Individual
    scroll containers must not re-declare the width or thumb; ones that
    deliberately hide their bar opt out with `scrollbar-width: none` plus
-   `::-webkit-scrollbar { display: none }`. */
+   `::-webkit-scrollbar { display: none }`. The composer's textarea is the one
+   exception: it is a few rows tall, where the 16px bar reads as a panel edge
+   rather than a thumb. */
 ::-webkit-scrollbar {
   width: 16px;
   height: 16px;
@@ -4707,13 +4709,17 @@ html[data-platform="macos"] .startup-loading-overlay {
      18px is the vertical padding above (12px top + 6px bottom). */
   height: auto;
   min-height: calc(1.55em + 18px);
-  max-height: calc(5 * 1.55em + 18px);
+  max-height: calc(4 * 1.55em + 18px);
   field-sizing: content;
   overflow-y: auto;
   font-family: inherit;
 }
 .composer textarea::placeholder {
   color: var(--muted-2);
+}
+/* Thinner than the shared 16px bar: this box is at most four rows tall. */
+.composer textarea::-webkit-scrollbar {
+  width: 8px;
 }
 
 .composer-foot {

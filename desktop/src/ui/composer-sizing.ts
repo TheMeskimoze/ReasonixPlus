@@ -1,6 +1,6 @@
 /** Rows the composer opens at, and the ceiling it grows to before it scrolls. */
 export const DEFAULT_COMPOSER_ROWS = 1;
-export const MAX_COMPOSER_ROWS = 5;
+export const MAX_COMPOSER_ROWS = 4;
 
 export type ComposerTextareaSizing = {
   heightPx: number;

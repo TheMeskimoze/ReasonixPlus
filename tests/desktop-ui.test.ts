@@ -599,11 +599,11 @@ describe("desktop-card-row-window", () => {
 });
 
 describe("desktop-composer-autosize", () => {
-  // The composer opens at one row and grows with the text up to five, then
+  // The composer opens at one row and grows with the text up to four, then
   // scrolls. The clamp lives in the stylesheet (min/max-height plus
   // `field-sizing: content`), and getComposerTextareaSizing is the same
   // arithmetic in TypeScript, so the box never needs a per-render measurement.
-  describe("desktop composer textarea grows from one row to five", () => {
+  describe("desktop composer textarea grows from one row to four", () => {
     const line = 20;
     const pad = 18;
     const heightFor = (rows: number) => rows * line + pad;
@@ -613,7 +613,7 @@ describe("desktop-composer-autosize", () => {
       const textareaRule = cssRule(".composer textarea");
       expect(textareaRule).toContain("field-sizing: content");
       expect(textareaRule).toContain("min-height: calc(1.55em + 18px)");
-      expect(textareaRule).toContain("max-height: calc(5 * 1.55em + 18px)");
+      expect(textareaRule).toContain("max-height: calc(4 * 1.55em + 18px)");
       expect(textareaRule).toContain("overflow-y: auto");
       expect(composer).not.toContain("applyComposerTextareaSize");
     });
@@ -629,8 +629,8 @@ describe("desktop-composer-autosize", () => {
       expect(sizing.overflowY).toBe("hidden");
     });
 
-    it("grows one row at a time up to the five-row cap", () => {
-      for (const contentRows of [2, 3, 4, 5]) {
+    it("grows one row at a time up to the four-row cap", () => {
+      for (const contentRows of [2, 3, 4]) {
         const sizing = getComposerTextareaSizing({
           contentRows,
           lineHeightPx: line,
