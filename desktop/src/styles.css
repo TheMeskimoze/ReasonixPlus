@@ -2149,6 +2149,17 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
 }
+/* The chevrons own the first and last band of the scrollbar column: 4px of inset
+   plus the 18px glyph above. Reserving it as an inert scrollbar button keeps the
+   thumb out of that band, so the visible scrollbar starts below the top arrow and
+   stops above the bottom one instead of travelling under either. Scoped to the
+   transcript, because every other scroller keeps its full track. */
+.thread::-webkit-scrollbar-button:vertical:start:decrement,
+.thread::-webkit-scrollbar-button:vertical:end:increment {
+  display: block;
+  height: 22px;
+  background: transparent;
+}
 .thread-inner {
   max-width: var(--thread-max-width, 740px);
   margin: 0 auto;
