@@ -2101,20 +2101,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* The chevrons below are absolute against this box. */
+  position: relative;
 }
 /* Jump-to-top / jump-to-bottom chevrons, rendered only while the transcript
-   actually overflows (see useIsScrollable). The wrap is a flex column of three
-   rows: chevron, scroll container, chevron, so the native scrollbar track
-   physically spans only the middle row and the bare chevron glyphs sit directly
-   above and below the track instead of overlapping it. */
-.thread-rail {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  padding-right: 5px;
-}
+   actually overflows (see useIsScrollable). They float over the native scrollbar
+   column instead of holding rows of their own: the wrap is nothing but the
+   scroller, and 5px of right offset lines a 16px button up with the track the
+   `.thread` margin and scrollbar leave at that edge. */
 .thread-scroll-btn {
+  position: absolute;
+  right: 5px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2122,15 +2120,25 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   height: 18px;
   padding: 0;
   border: none;
+  border-radius: 4px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   opacity: 0.8;
-  transition: opacity 150ms, color 150ms;
+  transition: opacity 150ms, color 150ms, background 150ms;
+}
+.thread-scroll-btn.top {
+  top: 4px;
+}
+.thread-scroll-btn.bottom {
+  bottom: 4px;
 }
 .thread-scroll-btn:hover {
   opacity: 1;
   color: var(--fg);
+  /* Painted on hover only: the glyph has to stay readable where the thumb
+     happens to sit under it. */
+  background: var(--panel-2);
 }
 .thread {
   flex: 1;
