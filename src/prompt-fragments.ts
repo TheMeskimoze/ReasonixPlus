@@ -45,6 +45,12 @@ export const DELEGATION_TRIGGER =
 export const DELEGATION_WAVE_RULE =
   "Issue independent spawns together, with no write, shell or MCP call between them: an interleaved unsafe call splits the burst, so the later spawns start only after the earlier ones finish.";
 
+/** When a decision needs the user, the picker is the only surface that can carry it.
+ *  One text for the planning section and the ask_choice spec, so neither surface can
+ *  invite a prose menu or a turn that ends on the question. */
+export const CHOICE_DECISION_RULE =
+  "Never enumerate the options as prose and never end a turn asking the user to decide: a decision that needs their preference goes through this tool. Skip it when one option is clearly best and just do it.";
+
 /** The instant the instructions show as an example, derived so a format change cannot
  *  leave the rule describing a shape nothing writes. */
 const STAMP_EXAMPLE = formatClockUtc(Date.UTC(2026, 10, 5, 13, 10, 4));

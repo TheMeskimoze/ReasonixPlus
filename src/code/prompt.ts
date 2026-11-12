@@ -4,6 +4,7 @@ import { CONTEXT_FOLD_RULE } from "../loop/compaction.js";
 import { applyMemoryBlock, readCappedTextFile, truncateWithMarker } from "../memory/read-capped.js";
 import { type MemoryLayer, applyMemoryLayers, memoryStackLayers } from "../memory/user.js";
 import {
+  CHOICE_DECISION_RULE,
   DELEGATION_TRIGGER,
   DELEGATION_WAVE_RULE,
   NO_EFFORT_LIMIT_RULE,
@@ -318,7 +319,7 @@ ${TIME_STAMP_RULE}
 Use the appropriate tool without duplicating its interface in prose.
 
 - \`submit_plan\`: Multi-file refactors, architectural changes, or changes expensive to reverse. Submit structured steps and wait for approval.
-- \`ask_choice\`: Decisions requiring user preference. Skip when one option is clearly appropriate. Wait for the decision.
+- \`ask_choice\`: ${CHOICE_DECISION_RULE}
 - \`todo_write\`: In-session tracking for tasks with at least three steps. Maintain one \`in_progress\` item.
 
 Both decision tools wait internally. Do not act on an unresolved decision; once the tool returns approval or an answer, continue the authorized work without requiring another "proceed". Honor cancellations and requested refinements.

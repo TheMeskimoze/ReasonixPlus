@@ -76,4 +76,13 @@ describe("tool to prompt parity", () => {
       expect(prompt).toContain(name);
     }
   });
+
+  it("carries the decision rule on both the prompt and the ask_choice spec", () => {
+    const spec = tools.get("ask_choice")?.description ?? "";
+    for (const surface of [prompt, spec]) {
+      expect(surface).toContain(
+        "never end a turn asking the user to decide: a decision that needs their preference goes through this tool",
+      );
+    }
+  });
 });
