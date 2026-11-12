@@ -3892,6 +3892,9 @@ const TabRuntime = memo(function TabRuntime({
   // session-start gate raises; `$mcpSetup` outranks it because a gated chat has no
   // messages, so the two never compete for the screen.
   const [duplicateAsk, setDuplicateAsk] = useState(false);
+  // The composer can take the whole main area instead of sharing it with the
+  // transcript, for long prompts.
+  const [composerExpanded, setComposerExpanded] = useState(false);
   const previousApprovalSnapshotRef = useRef<ApprovalSnapshot>({
     confirms: [],
     pathAccess: [],
@@ -5440,7 +5443,11 @@ const TabRuntime = memo(function TabRuntime({
           />
         ) : null}
 
-        <main className="main" style={{ position: "relative" }}>
+        <main
+          className="main"
+          style={{ position: "relative" }}
+          data-composer-expanded={composerExpanded || undefined}
+        >
           {/* Workspace-scoped, but surfaced once: only the channel the user is
               looking at paints the pill, so a hidden tab adds no second copy. */}
           {active && sessionsMutation !== null ? (
@@ -5734,6 +5741,8 @@ const TabRuntime = memo(function TabRuntime({
                 onVoiceError={(message) => appendNotice(message, "error")}
                 onVoiceEvent={(event) => dispatch({ t: "voice_event", event })}
                 voiceAvailable={voiceAvailable}
+                expanded={composerExpanded}
+                onToggleExpanded={() => setComposerExpanded((v) => !v)}
               />
             </>
           )}

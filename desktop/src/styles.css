@@ -4655,6 +4655,70 @@ html[data-platform="macos"] .startup-loading-overlay {
   border-color: var(--accent);
   box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft);
 }
+/* The expand control sits outside the card, in the margin the centred composer
+   leaves on the right, so the text box itself stays the width of the transcript
+   rows. */
+.composer-expand-btn {
+  position: absolute;
+  top: 8px;
+  right: -36px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.composer-expand-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+.composer-expand-btn[data-on="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer-expand-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* Expanded: the composer owns the main area and the transcript steps aside, so
+   the text box grows to the window instead of four rows. */
+.main[data-composer-expanded="true"] .thread-wrap {
+  display: none;
+}
+.main[data-composer-expanded="true"] .composer-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main[data-composer-expanded="true"] .composer-inner {
+  flex: 1;
+  min-height: 0;
+  /* width, not just flex: the auto margins that centre it would otherwise
+     shrink it to its content in this column. */
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.main[data-composer-expanded="true"] .composer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main[data-composer-expanded="true"] .composer textarea {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
 .composer-images {
   display: flex;
   flex-wrap: wrap;
