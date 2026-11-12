@@ -9,7 +9,7 @@ const PERSIST_KEY_CTX = "reasonix.ctxWidth";
 
 // Every tab renders its own `.app` shell and they all share the same column
 // widths, so a resize has to touch all of them.
-function appElements(): HTMLElement[] {
+export function appElements(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(".app"));
 }
 
