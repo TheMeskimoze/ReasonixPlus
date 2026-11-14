@@ -186,11 +186,29 @@ function buildUserContent(
   return parts;
 }
 
+/** Whether a logged user record carries exactly this prompt: plain text compares as-is,
+ *  and content parts (a prompt with images) compare by value. Key order is deterministic
+ *  because both sides are serialized from one buildUserContent call. */
+function sameUserContent(
+  stored: ChatMessage["content"],
+  expected: string | UserContentPart[],
+): boolean {
+  if (typeof stored === "string" || typeof expected === "string") return stored === expected;
+  return JSON.stringify(stored) === JSON.stringify(expected);
+}
+
+/** True for a user record that starts a turn: an attached-file prompt counts, and so does
+ *  an injected tool image, but a steer or nudge (synthetic) never does. The one rule behind
+ *  turn numbering and retry targets. */
+function isRealUserMessage(message: ChatMessage): boolean {
+  return message.role === "user" && !message.synthetic;
+}
+
 /** Turn ordinal for a resumed session: the count of REAL user records. Steer/nudge records
  *  are marked `synthetic` (never a turn start), so the counter matches the desktop's
  *  user-position numbering even with failed turns (no reply) or tool loops (many records). */
 export function resumeTurnBaseline(messages: readonly ChatMessage[]): number {
-  return messages.reduce((n, m) => (m.role === "user" && !m.synthetic ? n + 1 : n), 0);
+  return messages.reduce((n, m) => (isRealUserMessage(m) ? n + 1 : n), 0);
 }
 
 export {
@@ -1176,6 +1194,7 @@ export class CacheFirstLoop {
     return missing.length;
   }
 
+  /** Drop the log from `index` on and persist the rewrite. */
   private discardLogFrom(index: number): void {
     const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
@@ -1230,24 +1249,42 @@ export class CacheFirstLoop {
     };
   }
 
+  /** Index of the newest record {@link isRealUserMessage} accepts, or -1. */
+  private lastRealUserIndex(): number {
+    const entries = this.log.entries;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (isRealUserMessage(entries[i]!)) return i;
+    }
+    return -1;
+  }
+
+  /** Drop the log from the newest REAL user turn on, after `accept` approves its stored
+   *  content (when given), and report what was dropped. One truncation path behind both
+   *  the Retry button and a failover replay, so neither can leave a different tail. */
+  private rewindLastRealUser(
+    accept?: (content: ChatMessage["content"]) => boolean,
+  ): { content: ChatMessage["content"] } | null {
+    const lastUserIdx = this.lastRealUserIndex();
+    if (lastUserIdx < 0) return null;
+    const content = this.log.entries[lastUserIdx]!.content;
+    if (accept && !accept(content)) return null;
+    this.discardLogFrom(lastUserIdx);
+    return { content };
+  }
+
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
   retryLastUser(): string | null {
-    const entries = this.log.entries;
-    let lastUserIdx = -1;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      // Retry re-sends the last REAL user prompt — steer/nudge records are never retry targets.
-      if (entries[i]!.role === "user" && !entries[i]!.synthetic) {
-        lastUserIdx = i;
-        break;
-      }
-    }
-    if (lastUserIdx < 0) return null;
-    const raw = entries[lastUserIdx]!.content;
-    const userText = typeof raw === "string" ? raw : "";
-    const preserved = entries.slice(0, lastUserIdx).map((m) => ({ ...m }));
-    this.log.compactInPlace(preserved);
-    this.persistLog(preserved);
-    return userText;
+    const dropped = this.rewindLastRealUser();
+    if (!dropped) return null;
+    return typeof dropped.content === "string" ? dropped.content : "";
+  }
+
+  /** Rewind for replaying `text` on another model, reporting whether the newest real user
+   *  turn IS that prompt. The whole payload is compared, so a prompt with images replays
+   *  like plain text; a prompt compaction folded away refuses without touching the log. */
+  rewindForReplay(text: string, images?: ReadonlyArray<string | TurnImage>): boolean {
+    const expected = buildUserContent(text, toTurnImages(images));
+    return this.rewindLastRealUser((stored) => sameUserContent(stored, expected)) !== null;
   }
 
   /** Replace the system prompt + log wholesale from the Raw editor. The editor omits

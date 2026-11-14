@@ -5716,7 +5716,7 @@ interface RuntimeState {
 /** The one rule for "this failure is the model's, not the user's and not the
  *  conversation's": both the loop's error event and a throwing generator feed it,
  *  so the two paths can never disagree about whether a backup may take over. */
-function isModelFailure(
+export function isModelFailure(
   err: { name?: string; message?: string } | undefined,
   aborted: boolean,
 ): boolean {
@@ -5732,17 +5732,27 @@ export function turnStoppedByUser(tab: { aborter: { signal: AbortSignal } | null
   return tab.aborter?.signal.aborted === true;
 }
 
-/** Whether a finished attempt hands the turn to a backup model. A terminal model
- *  failure and a model that stalled on its own (empty response, thinking without an
- *  answer) both qualify; an answer, a user abort and a context overflow do not. */
+/** Whether an attempt ended with a real answer. Text streamed before a terminal error
+ *  or a stall is partial work from an unfinished turn, never an answer: an agentic turn
+ *  narrates before each tool call, so its first sentence must not decide the outcome. */
+export function attemptAnswered(attempt: {
+  sawFinalText: boolean;
+  sawError: boolean;
+  modelStalled: boolean;
+}): boolean {
+  return attempt.sawFinalText && !attempt.sawError && !attempt.modelStalled;
+}
+
+/** Whether a finished attempt hands the turn to a backup model. A terminal model failure
+ *  and a model that stalled on its own both qualify. Streamed text does not disqualify
+ *  it (see {@link attemptAnswered}), and neither a user abort nor a context overflow does. */
 export function shouldFailover(attempt: {
   aborted: boolean;
-  producedAnswer: boolean;
   modelFailure: boolean;
   /** The loop spent every in-model recovery it had for "no answer" and stopped anyway. */
   modelStalled?: boolean;
 }): boolean {
-  if (attempt.aborted || attempt.producedAnswer) return false;
+  if (attempt.aborted) return false;
   return attempt.modelFailure || attempt.modelStalled === true;
 }
 
@@ -5789,6 +5799,7 @@ interface TurnAttempt {
   aborted: boolean;
   lastTurn: number;
   sawAssistantFinal: boolean;
+  /** The turn finished with visible text and no fatal stop — see {@link attemptAnswered}. */
   producedAnswer: boolean;
   sawError: boolean;
   lastStopReason: string;
@@ -7943,9 +7954,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         let aborted = false;
         let lastTurn = -1;
         let sawAssistantFinal = false;
-        // Terminal-outcome tracking: `producedAnswer` distinguishes a real reply from
-        // a model that stopped silently, so the UI never shows false success.
-        let producedAnswer = false;
+        // Terminal-outcome tracking: text alone is not an answer (see attemptAnswered),
+        // so the intent is recorded here and classified once the attempt has ended.
+        let sawFinalText = false;
         let sawError = false;
         let lastStopReason = "";
         let modelFailure = false;
@@ -7978,10 +7989,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             }
             if (ev.role === "assistant_final") {
               sawAssistantFinal = true;
-              if (ev.content?.trim()) producedAnswer = true;
+              if (ev.content?.trim()) sawFinalText = true;
               if (ev.content) lastAssistantText = ev.content;
             }
-            if (ev.role === "done" && ev.content?.trim()) producedAnswer = true;
+            if (ev.role === "done" && ev.content?.trim()) sawFinalText = true;
             if (ev.role === "error") {
               sawError = true;
               if (ev.error) lastStopReason = ev.error;
@@ -8047,7 +8058,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           aborted,
           lastTurn,
           sawAssistantFinal,
-          producedAnswer,
+          // A turn that died on a provider error or a stall did not answer, however
+          // much text it streamed on the way there: the outcome stays honest and the
+          // chain below still offers the backups their turn.
+          producedAnswer: attemptAnswered({ sawFinalText, sawError, modelStalled }),
           sawError,
           lastStopReason,
           modelFailure,
@@ -8107,21 +8121,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           continue;
         }
         rt = tab.runtime!;
-        attemptedBackups.push(next);
         failedOverTo = next;
         // Rewind on the NEW runtime, never before the switch: the truncation is
         // persisted to the session file, so doing it first would drop the prompt
-        // from the log whenever the switch itself failed.
+        // from the log whenever the switch itself failed. The whole prompt payload is
+        // matched (text plus attachments), so a turn with images replays like any other.
         const before = rt.loop.log.length;
-        if (rt.loop.retryLastUser() !== text) {
-          // The prompt is no longer the log's last real user turn (compaction folded
-          // it away, or it carried attachments), so replaying would send a different
-          // request. Keep the switch and hand the user an actionable stop message
+        if (!rt.loop.rewindForReplay(text, images)) {
+          // Compaction folded this turn's prompt away, so the log no longer ends on the
+          // request being replayed. Re-sending would be a DIFFERENT request; say so
           // instead of ending the turn on a bare provider error.
           notify(t("loop.failoverPromptUnavailable", { next }));
           failoverBroken = true;
           break;
         }
+        attemptedBackups.push(next);
         emitKernelEvent(
           rt.eventizer.emitSessionRetracted(
             rt.loop.currentTurn,
@@ -8137,21 +8151,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         notify(t("loop.failoverSwitching", { failed: failedModel, next }));
         attempt = await driveAttempt(text);
       }
-      if (shouldFailover(attempt) && !turnStoppedByUser(tab) && !failoverBroken) {
+      if (shouldFailover(attempt) && !turnStoppedByUser(tab)) {
         // Nothing left to try. Name the situation the run ended in, so the stop is
         // explained instead of left to the provider's raw error card: no backups at
         // all, backups that cannot run here, or backups that were tried and failed.
-        notify(
-          failoverStopMessage({
-            failed: primaryModel,
-            configured: configuredFallbacks,
-            attempted: attemptedBackups,
-            skipped: skippedBackups,
-            // Named so the stop can say "already failed earlier in this chat" instead
-            // of claiming a credential problem the user may not have.
-            excluded: [...tab.failoverExcluded],
-          }),
-        );
+        // An unreplayable prompt already got its own, more specific notice.
+        if (!failoverBroken) {
+          notify(
+            failoverStopMessage({
+              failed: primaryModel,
+              configured: configuredFallbacks,
+              attempted: attemptedBackups,
+              skipped: skippedBackups,
+              // Named so the stop can say "already failed earlier in this chat" instead
+              // of claiming a credential problem the user may not have.
+              excluded: [...tab.failoverExcluded],
+            }),
+          );
+        }
         // A spent chain must not leave the tab on a backup that could not see the turn
         // through: the composer would show a model the user never picked, and their
         // next send would hit the same wall. Put the model the turn started on back.

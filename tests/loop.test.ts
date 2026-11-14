@@ -119,6 +119,83 @@ describe("retryLastUser with synthetic records", () => {
   });
 });
 
+describe("rewindForReplay — the prompt a failover replays", () => {
+  const RATE_LIMITED = {
+    "deepseek-v4-flash": { status: 429, body: { error: { message: "subscription rate limits" } } },
+  };
+  const failingLoop = (): CacheFirstLoop => {
+    const { client } = makeFakeClient([], {
+      failModels: RATE_LIMITED,
+      retry: { maxAttempts: 1 },
+    });
+    return new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+  };
+  const drain = async (loop: CacheFirstLoop, text: string, images?: { url: string }[]) => {
+    for await (const _ev of loop.step(text, images)) {
+      // Consume the turn; the log is what the assertions read.
+    }
+  };
+
+  it("rewinds a plain-text prompt after a failed call", async () => {
+    const loop = failingLoop();
+    await drain(loop, "fix the build");
+    expect(loop.rewindForReplay("fix the build")).toBe(true);
+    expect(loop.log.length).toBe(0);
+  });
+
+  it("rewinds a prompt that carried images, not just a bare string", async () => {
+    // The reported chain stopped here: a multimodal prompt has no string content, so
+    // the old text comparison read it as unreplayable and every later backup went
+    // untried.
+    const loop = failingLoop();
+    const images = [{ url: "data:image/png;base64,AAAA" }];
+    await drain(loop, "look at this", images);
+    expect(loop.log.entries.at(-1)?.role).toBe("user");
+    expect(loop.rewindForReplay("look at this", images)).toBe(true);
+    expect(loop.log.length).toBe(0);
+  });
+
+  it("refuses a prompt the log does not end on, leaving the log untouched", async () => {
+    const client = makeClient([{ content: "done" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    await drain(loop, "first ask");
+    await drain(loop, "second ask");
+    const before = loop.log.length;
+    expect(loop.rewindForReplay("first ask")).toBe(false);
+    expect(loop.log.length).toBe(before);
+  });
+
+  it("refuses an image prompt that is not the one being replayed", async () => {
+    const loop = failingLoop();
+    await drain(loop, "look at this", [{ url: "data:image/png;base64,AAAA" }]);
+    const before = loop.log.length;
+    expect(loop.rewindForReplay("look at this", [{ url: "data:image/png;base64,BBBB" }])).toBe(
+      false,
+    );
+    expect(loop.log.length).toBe(before);
+  });
+
+  it("reports false on a log with no real user turn", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "steer", synthetic: true });
+    expect(loop.rewindForReplay("steer")).toBe(false);
+    expect(loop.log.length).toBe(1);
+  });
+});
+
 describe("CacheFirstLoop (non-streaming)", () => {
   afterEach(() => {
     vi.useRealTimers();

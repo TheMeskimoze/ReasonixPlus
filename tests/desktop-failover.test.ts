@@ -7,15 +7,21 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FAILOVER_COOLDOWN_MS,
+  attemptAnswered,
   failoverCooldown,
   failoverStopMessage,
+  isModelFailure,
   shouldFailover,
   subagentPinFollowsFailover,
   turnStoppedByUser,
 } from "../src/cli/commands/desktop.js";
+import { DeepSeekClient } from "../src/client.js";
 import { pickFallbackModel, walkFallbackChain } from "../src/config.js";
 import { t } from "../src/i18n/index.js";
+import { CacheFirstLoop } from "../src/loop.js";
 import { isContextOverflowError } from "../src/loop/errors.js";
+import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { ToolRegistry } from "../src/tools.js";
 
 const allUsable = () => true;
 
@@ -157,6 +163,15 @@ describe("failover wiring — structural invariants in the daemon", () => {
   const bodyEnd = src.indexOf("async function switchWorkspace(");
   const body = src.slice(bodyStart, bodyEnd);
 
+  it("never lets streamed text disqualify a failed attempt", () => {
+    // An agentic turn narrates before every tool call. Counting that text as an
+    // answer is what silently spent a whole turn on one dead model: the 429 landed
+    // after an edit, the attempt looked "answered", and the backup list went unused.
+    expect(body).toContain(
+      "producedAnswer: attemptAnswered({ sawFinalText, sawError, modelStalled })",
+    );
+  });
+
   it("fails over on any terminal model failure, never only on a quota wall", () => {
     // The case that exposed this was an OpenCode 429 ("Upstream request failed:
     // Endpoint is unavailable") that stopped the stream with backups configured:
@@ -173,7 +188,7 @@ describe("failover wiring — structural invariants in the daemon", () => {
 
   it("switches before it rewinds, so a failed switch cannot drop the prompt", () => {
     const switchModel = body.indexOf("switchTabModel(tab, next");
-    const rewound = body.indexOf("rt.loop.retryLastUser()");
+    const rewound = body.indexOf("rt.loop.rewindForReplay(");
     // The LAST drive call is the one inside the failover loop ("let attempt = …"
     // contains the same substring, so the first match is the initial drive).
     const replay = body.lastIndexOf("attempt = await driveAttempt(text)");
@@ -337,7 +352,9 @@ describe("failover wiring — structural invariants in the daemon", () => {
     expect(body).toContain("const turnAborted = (): boolean => aborted || turnStoppedByUser(tab);");
     expect(body).toContain("while (shouldFailover(attempt) && !turnStoppedByUser(tab))");
     // …and a turn the user stopped is never reported as an exhausted chain.
-    expect(body).toContain(
+    expect(body).toContain("if (shouldFailover(attempt) && !turnStoppedByUser(tab))");
+    // A chain that cannot replay its prompt still puts the tab's model back.
+    expect(body).not.toContain(
       "if (shouldFailover(attempt) && !turnStoppedByUser(tab) && !failoverBroken)",
     );
   });
@@ -353,17 +370,12 @@ describe("failover wiring — structural invariants in the daemon", () => {
 describe("shouldFailover — which attempt hands the turn to a backup", () => {
   const attempt = (over: Partial<Parameters<typeof shouldFailover>[0]> = {}) => ({
     aborted: false,
-    producedAnswer: false,
     modelFailure: true,
     ...over,
   });
 
   it("hands over on a provider failure, whether it is a rate limit, a quota or an outage", () => {
     expect(shouldFailover(attempt())).toBe(true);
-  });
-
-  it("never hands over a turn that already answered", () => {
-    expect(shouldFailover(attempt({ producedAnswer: true }))).toBe(false);
   });
 
   it("never hands over a user abort", () => {
@@ -392,29 +404,116 @@ describe("shouldFailover — which attempt hands the turn to a backup", () => {
     expect(
       shouldFailover({
         aborted: false,
-        producedAnswer: false,
         modelFailure: false,
         modelStalled: true,
       }),
     ).toBe(true);
-    // An answer is still an answer, however much warning noise preceded it.
-    expect(
-      shouldFailover({
-        aborted: false,
-        producedAnswer: true,
-        modelFailure: false,
-        modelStalled: true,
-      }),
-    ).toBe(false);
     // A user abort dominates every other signal.
     expect(
       shouldFailover({
         aborted: true,
-        producedAnswer: false,
         modelFailure: true,
         modelStalled: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("attemptAnswered — text streamed before a stop is not an answer", () => {
+  it("counts a turn that finished with its final reply", () => {
+    expect(attemptAnswered({ sawFinalText: true, sawError: false, modelStalled: false })).toBe(
+      true,
+    );
+  });
+
+  it("does not count text that preceded a provider error", () => {
+    // The reported failure: a file edit landed, then the next request hit a 429.
+    expect(attemptAnswered({ sawFinalText: true, sawError: true, modelStalled: false })).toBe(
+      false,
+    );
+  });
+
+  it("does not count text that preceded a stall", () => {
+    expect(attemptAnswered({ sawFinalText: true, sawError: false, modelStalled: true })).toBe(
+      false,
+    );
+  });
+
+  it("does not count a silent stop", () => {
+    expect(attemptAnswered({ sawFinalText: false, sawError: false, modelStalled: false })).toBe(
+      false,
+    );
+  });
+});
+
+describe("the reported failure — an agentic turn hitting a rate limit", () => {
+  it("still hands the turn to a backup after it streamed text and changed a file", async () => {
+    // Turn shape from the report: the model narrates, calls an edit tool, and the next
+    // request hits the provider's 429. The streamed sentence is not an answer, so the
+    // attempt must stay failover-eligible and the prompt must stay replayable.
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "I will patch the file.",
+                  tool_calls: [
+                    { id: "c1", type: "function", function: { name: "patch", arguments: "{}" } },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: { message: "You've exceeded your subscription rate limits." } }),
+        { status: 429, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fetchMock as unknown as typeof fetch,
+      retry: { maxAttempts: 1 },
+    });
+    const tools = new ToolRegistry();
+    tools.register({ name: "patch", fn: async () => "patched 1 file" });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    let sawFinalText = false;
+    let sawError = false;
+    let modelFailure = false;
+    let toolResults = 0;
+    for await (const ev of loop.step("fix the failing test")) {
+      if (ev.role === "assistant_final" && ev.content?.trim()) sawFinalText = true;
+      if (ev.role === "tool") toolResults += 1;
+      if (ev.role === "error") {
+        sawError = true;
+        modelFailure = isModelFailure(ev.errorDetail, false);
+      }
+    }
+
+    expect(toolResults).toBe(1);
+    expect(sawFinalText).toBe(true);
+    expect(sawError).toBe(true);
+    expect(modelFailure).toBe(true);
+    expect(attemptAnswered({ sawFinalText, sawError, modelStalled: false })).toBe(false);
+    expect(shouldFailover({ aborted: false, modelFailure })).toBe(true);
+    expect(loop.rewindForReplay("fix the failing test")).toBe(true);
   });
 });
 
