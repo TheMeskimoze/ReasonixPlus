@@ -4798,6 +4798,9 @@ html[data-platform="macos"] .startup-loading-overlay {
 .composer textarea::placeholder {
   color: var(--muted-2);
 }
+.composer textarea:focus {
+  outline: none;
+}
 /* Thinner than the shared 16px bar: this box is at most four rows tall. */
 .composer textarea::-webkit-scrollbar {
   width: 8px;
@@ -5183,8 +5186,8 @@ html[data-platform="macos"] .startup-loading-overlay {
 .model-menu-list {
   max-height: 460px;
 }
-/* Compact the shared model rows (main-agent + subagent columns) so each
-   column stays narrow and the whole picker fits narrow windows. */
+/* Compact the shared model rows (agent and subagent tabs) so the list stays
+   compact and the whole picker fits narrow windows. */
 .model-menu-list .popup-item {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
@@ -9790,19 +9793,19 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 /* The edit gate pill keeps the segmented control's colours: one mode at a time,
    tinted by which one is in force. The three share one recipe, a soft tint with the
    tone's own text, and the tones are fixed hues so a theme cannot re-colour a mode. */
+.composer-foot .mode-pill {
+  border-color: transparent;
+}
 .composer-foot .mode-pill[data-k="follow"] {
   background: var(--tone-warn-soft);
-  border-color: transparent;
   color: var(--tone-warn);
 }
 .composer-foot .mode-pill[data-k="read-only"] {
   background: var(--tone-info-soft);
-  border-color: transparent;
   color: var(--tone-info);
 }
 .composer-foot .mode-pill[data-k="never-ask"] {
   background: var(--tone-err-soft);
-  border-color: transparent;
   color: var(--tone-err);
   /* A soft fill alone reads as one more tint, so the danger mode keeps a ring and a
      glow that no other mode has. */

@@ -1477,13 +1477,83 @@ describe("composer-menu-headers", () => {
 
       // No header: the tabs name what the list below edits.
       expect(container.querySelector(".popup .ph")).toBeNull();
-      const tabs = Array.from(container.querySelectorAll(".model-menu-tab"));
+      const tabs = Array.from(
+        container.querySelectorAll<HTMLButtonElement>(".model-menu-tab"),
+      );
       expect(tabs.map((tab) => tab.textContent)).toEqual(["Agent model", "Sub agent model"]);
       expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
 
-      fireEvent.click(tabs[1]!);
-      expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
-      expect(tabs[0]!.getAttribute("aria-selected")).toBe("false");
+      // One controlled panel, one tab in the tab order, and arrow keys switch it.
+      const panel = container.querySelector('.model-menu-list[role="tabpanel"]');
+      expect(panel).not.toBeNull();
+      expect(tabs.map((tab) => tab.getAttribute("aria-controls"))).toEqual([
+        panel?.id,
+        panel?.id,
+      ]);
+      expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1]);
+      expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0]?.id);
+
+      fireEvent.keyDown(tabs[0]!, { key: "ArrowRight" });
+      const switched = Array.from(
+        container.querySelectorAll<HTMLButtonElement>(".model-menu-tab"),
+      );
+      expect(switched.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["false", "true"]);
+      expect(switched.map((tab) => tab.tabIndex)).toEqual([-1, 0]);
+      expect(panel?.getAttribute("aria-labelledby")).toBe(switched[1]?.id);
+      expect(document.activeElement).toBe(switched[1]);
+
+      fireEvent.click(switched[1]!);
+      expect(switched[1]!.getAttribute("aria-selected")).toBe("true");
+      expect(switched[0]!.getAttribute("aria-selected")).toBe("false");
+    });
+
+    it("starts the model menu on the agent tab every time it opens", () => {
+      const { container } = render(
+        <Composer {...makeComposerBaseProps({ subagentsEnabled: true })} />,
+      );
+      const trigger = container.querySelector<HTMLButtonElement>(".model-pill")!;
+
+      fireEvent.click(trigger);
+      fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+      expect(container.querySelectorAll(".model-menu-tab")[1]?.getAttribute("aria-selected")).toBe(
+        "true",
+      );
+
+      fireEvent.click(trigger);
+      fireEvent.click(trigger);
+      expect(container.querySelectorAll(".model-menu-tab")[0]?.getAttribute("aria-selected")).toBe(
+        "true",
+      );
+    });
+
+    it("offers the three edit modes behind one pill and routes the pick", () => {
+      const onEditModeChange = vi.fn();
+      const { container } = render(
+        <Composer {...makeComposerBaseProps({ editMode: "follow", onEditModeChange })} />,
+      );
+      const pill = container.querySelector<HTMLButtonElement>(".composer-foot .mode-pill");
+      expect(pill?.getAttribute("data-k")).toBe("follow");
+      expect(pill?.textContent).toContain("Follow Rules");
+      expect(pill?.getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.click(pill!);
+      expect(pill?.getAttribute("aria-expanded")).toBe("true");
+      expect(container.querySelector(".popup .ph")?.textContent).toBe("Edit gate");
+      const rows = Array.from(container.querySelectorAll<HTMLElement>(".popup-item"));
+      expect(rows.map((row) => row.querySelector(".cmd")?.textContent)).toEqual([
+        "Read only",
+        "Follow Rules",
+        "Never Ask",
+      ]);
+      expect(rows.map((row) => row.getAttribute("data-active"))).toEqual([
+        "false",
+        "true",
+        "false",
+      ]);
+
+      fireEvent.click(rows[2]!);
+      expect(onEditModeChange).toHaveBeenCalledWith("never-ask");
+      expect(container.querySelector(".popup")).toBeNull();
     });
 
     it("offers only the agent tab on a session without the subagent tool", () => {
@@ -1544,6 +1614,12 @@ describe("composer-menu-headers", () => {
       rerender(<Composer {...makeComposerBaseProps()} />);
       expect(container.querySelectorAll(".model-menu-tab")).toHaveLength(1);
       expect(container.querySelector('.popup-item[data-active="true"]')).not.toBeNull();
+
+      // Regaining the capability must not resurrect the tab the user left selected.
+      rerender(<Composer {...props} />);
+      expect(
+        container.querySelectorAll(".model-menu-tab")[0]?.getAttribute("aria-selected"),
+      ).toBe("true");
     });
   });
 });
@@ -1554,7 +1630,7 @@ describe("composer-pill-space", () => {
   /** The pill is label + chevron. A leading glyph costs the width the label needs,
    *  so the only icon a closed pill keeps is the one that says "this opens". */
   describe("Composer pill width", () => {
-    /** Both agent pills plus an effort picker; each test varies one prop, so the
+    /** The model, effort and mode pickers; each test varies one prop, so the
      *  shared baseline lives here instead of in every body. */
     const renderPills = (props: Parameters<typeof makeComposerBaseProps>[0] = {}) =>
       render(<Composer {...makeComposerBaseProps({ subagentsEnabled: true, ...props })} />);
@@ -1570,7 +1646,7 @@ describe("composer-pill-space", () => {
       }
     });
 
-    it("parks the two pickers left of the slack, with the tools after it", () => {
+    it("parks the three pickers left of the slack, with the tools after it", () => {
       // The pills sit at the left edge; the spacer holds everything else against the
       // right, where the attach control leads into quick send.
       const { container } = renderPills();
@@ -1588,6 +1664,7 @@ describe("composer-pill-space", () => {
       expect(spacer, "spacer").toBeGreaterThan(-1);
       expect(footChild(".model-pill"), "main").toBe(0);
       expect(footChild(".effort-pill"), "effort").toBe(1);
+      expect(footChild(".mode-pill"), "mode").toBe(2);
       // The attach control follows the slack, immediately before quick send.
       expect(footChild(".cf-btn"), "attach").toBeGreaterThan(spacer);
       expect(footChild(".quick-send-wrap") - footChild(".cf-btn"), "quick send").toBe(1);

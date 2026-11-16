@@ -13,6 +13,7 @@ import {
   type KeyboardEvent,
   type RefObject,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -64,7 +65,10 @@ export type QueuedSendItem = string | QueuedSend;
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
 /** The composer's mutually-exclusive dropdowns — at most one is open at a time. */
-type MenuId = "model" | "subagent" | "effort" | "mode" | "quick";
+type MenuId = "model" | "effort" | "mode" | "quick";
+
+/** The two targets the one model pill edits through its tabs. */
+type ModelTarget = "agent" | "subagent";
 
 const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -210,32 +214,29 @@ export function StoredComposer({
   return <Composer {...props} draft={draft} setDraft={draftStore.setDraft} />;
 }
 
-/** One model picker pill: the box, the fit-to-width label, the cost badge and the
- *  trigger. Its dropdown content is supplied by the caller, because the main pill
- *  offers both models behind tabs while the subagent pill lists only its own. */
+/** One model pill: the box, the fit-to-width label, the cost badge and the
+ *  trigger. Its dropdown content is supplied by the caller, because one pill
+ *  offers both the agent and subagent targets behind tabs. */
 function ModelPickerPill({
   tag,
-  className = "",
-  menuId,
   title,
   label,
   cost,
-  openMenu,
+  open,
   onToggle,
   wrapRef,
   menu,
 }: {
-  /** Corner notch letter naming this picker ("M" main agent, "S" subagent). */
+  /** Corner notch letter naming the model the closed pill shows: M for the agent
+   *  model. The subagent target lives in the dropdown's tab. */
   tag: string;
-  className?: string;
-  menuId: MenuId;
   /** The pill's tooltip. */
   title: string;
   label: string;
   /** What this model costs against the declared baseline, when its price is published. */
   cost?: ModelCost | null;
-  openMenu: MenuId | null;
-  onToggle: (id: MenuId) => void;
+  open: boolean;
+  onToggle: () => void;
   wrapRef: (el: HTMLDivElement | null) => void;
   /** Popup content, rendered inside the shared menu shell. */
   menu: React.ReactNode;
@@ -244,16 +245,16 @@ function ModelPickerPill({
     <div ref={wrapRef} className="model-pill-wrap">
       <button
         type="button"
-        className={`model-pill ${className}`.trim()}
+        className="model-pill"
         data-pill-tag={tag}
-        onClick={() => onToggle(menuId)}
+        onClick={onToggle}
         title={title}
       >
         <FitText text={label} />
         <CostBadge cost={cost} />
         <I.chev size={10} />
       </button>
-      {openMenu === menuId ? <MenuPop width={420}>{menu}</MenuPop> : null}
+      {open ? <MenuPop width={420}>{menu}</MenuPop> : null}
     </div>
   );
 }
@@ -271,8 +272,8 @@ function ModelPickerMenu({
   onPickSubagent,
   listProps,
 }: {
-  tab: "agent" | "subagent";
-  onTabChange: (tab: "agent" | "subagent") => void;
+  tab: ModelTarget;
+  onTabChange: (tab: ModelTarget) => void;
   subagentsEnabled: boolean;
   agentModel: string;
   subagentModel: string;
@@ -280,18 +281,34 @@ function ModelPickerMenu({
   onPickSubagent: (model: string) => void;
   listProps: Omit<React.ComponentProps<typeof ModelList>, "activeModel" | "onPick">;
 }) {
-  const active = subagentsEnabled && tab === "subagent" ? "subagent" : "agent";
-  const pick = active === "subagent" ? onPickSubagent : onPickAgent;
+  const panelId = useId();
+  const tabId = (target: ModelTarget) => `${panelId}-${target}`;
+  const isSubagent = subagentsEnabled && tab === "subagent";
+  const pick = isSubagent ? onPickSubagent : onPickAgent;
+  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, from: ModelTarget) => {
+    if (!subagentsEnabled || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    e.preventDefault();
+    const next: ModelTarget = from === "agent" ? "subagent" : "agent";
+    onTabChange(next);
+    e.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[data-model-tab="${next}"]`)
+      ?.focus();
+  };
   return (
     <>
       <div className="model-menu-tabs" role="tablist">
         <button
           type="button"
           role="tab"
+          id={tabId("agent")}
           className="model-menu-tab"
-          data-on={active === "agent"}
-          aria-selected={active === "agent"}
+          data-on={!isSubagent}
+          data-model-tab="agent"
+          aria-selected={!isSubagent}
+          aria-controls={panelId}
+          tabIndex={isSubagent ? -1 : 0}
           onClick={() => onTabChange("agent")}
+          onKeyDown={(e) => onTabKeyDown(e, "agent")}
         >
           {t("composer.agentModel")}
         </button>
@@ -299,19 +316,29 @@ function ModelPickerMenu({
           <button
             type="button"
             role="tab"
+            id={tabId("subagent")}
             className="model-menu-tab"
-            data-on={active === "subagent"}
-            aria-selected={active === "subagent"}
+            data-on={isSubagent}
+            data-model-tab="subagent"
+            aria-selected={isSubagent}
+            aria-controls={panelId}
+            tabIndex={isSubagent ? 0 : -1}
             onClick={() => onTabChange("subagent")}
+            onKeyDown={(e) => onTabKeyDown(e, "subagent")}
           >
             {t("composer.subagentModel")}
           </button>
         ) : null}
       </div>
       <ModelList
-        activeModel={active === "subagent" ? subagentModel : agentModel}
+        activeModel={isSubagent ? subagentModel : agentModel}
         onPick={pick}
         {...listProps}
+        panelProps={{
+          id: panelId,
+          role: "tabpanel",
+          "aria-labelledby": tabId(isSubagent ? "subagent" : "agent"),
+        }}
       />
     </>
   );
@@ -399,16 +426,16 @@ export function Composer({
   /** Toggles that; omitted, the control does not render at all. */
   onToggleExpanded?: () => void;
   busy?: boolean;
-  /** Drives the status row above the hint row while the agent is running — typically "Reasoning" or "Calling tool: <name>". */
+  /** Drives the status row above the card while the agent is running — typically "Reasoning" or "Calling tool: <name>". */
   busyLabel?: string;
   /** Renders the "stuck Ns" hint once the turn has been silent this long. The 1s
    *  poll lives inside StuckLabel so the conversation never re-renders per second. */
   stuckLabel?: { sinceMs: number; render: (sec: number) => React.ReactNode };
   modelLabel: string;
-  /** Per-tab subagent model shown in the menu's subagent column. Defaults to the shared model default. */
+  /** Subagent model shown in the menu's subagent tab. Defaults to the shared model default. */
   subagentModelLabel?: string;
   /** Whether this session was minted with the subagent tool. Without the tool the
-   *  subagent model has nothing to spawn, so its picker is hidden rather than
+   *  subagent model has nothing to spawn, so its tab is hidden rather than
    *  disabled — the capability is frozen at chat creation, never toggled here. */
   subagentsEnabled?: boolean;
   reasoningEffort: ReasoningEffort;
@@ -417,7 +444,7 @@ export function Composer({
    *  the model has no effort control (pill disabled). */
   supportedEfforts?: readonly ReasoningEffort[];
   onModelChange: (model: string) => void;
-  /** Called when the user picks a model in the subagent column. */
+  /** Called when the user picks a model in the subagent tab. */
   onSubagentModelChange?: (model: string) => void;
   onEffortChange: (effort: ReasoningEffort) => void;
   editMode: EditMode;
@@ -511,7 +538,7 @@ export function Composer({
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
   // Which target the model pill's dropdown is editing. Every opening starts on the
   // agent model, so the tab never depends on what was last changed.
-  const [modelTab, setModelTab] = useState<"agent" | "subagent">("agent");
+  const [modelTab, setModelTab] = useState<ModelTarget>("agent");
   const menuWraps = useRef<Partial<Record<MenuId, HTMLDivElement | null>>>({});
   const toggleMenu = (id: MenuId) => {
     if (id === "model") setModelTab("agent");
@@ -522,7 +549,7 @@ export function Composer({
   // picker re-queries them: the lists are current without a refresh button. Each source
   // keeps its own cache window in the backend, so reopening inside that window is free.
   useEffect(() => {
-    if (openMenu !== "model" && openMenu !== "subagent") return;
+    if (openMenu !== "model") return;
     onRefreshOllamaModels?.();
     onRefreshOpencodeModels?.();
     onRefreshProviderCatalogs?.();
@@ -552,11 +579,10 @@ export function Composer({
     return () => window.removeEventListener("mousedown", onDown);
   }, [openMenu]);
 
-  // The subagent pill unmounts when the session loses the tool, so a menu left open
-  // across that switch would survive the state and pop open, unclicked, on the next
-  // chat that has it.
+  // A session switch can take the subagent tab away. Reset the target so a later
+  // re-enable cannot bring the hidden tab back without a click.
   useEffect(() => {
-    if (!subagentsEnabled) setOpenMenu((cur) => (cur === "subagent" ? null : cur));
+    if (!subagentsEnabled) setModelTab("agent");
   }, [subagentsEnabled]);
 
   const attachFile = async () => {
@@ -1262,12 +1288,11 @@ export function Composer({
           <div className="composer-foot">
             <ModelPickerPill
               tag="M"
-              menuId="model"
               title={t("composer.switchModel")}
               label={modelDisplayLabel(modelLabel, providerHints)}
               cost={modelCost(modelLabel, providerHints, rateNow)}
-              openMenu={openMenu}
-              onToggle={toggleMenu}
+              open={openMenu === "model"}
+              onToggle={() => toggleMenu("model")}
               wrapRef={anchor("model")}
               menu={
                 <ModelPickerMenu
@@ -1439,9 +1464,10 @@ export function Composer({
   );
 }
 
-/** Shared model picker column. Rendered once per selector (main agent and
- *  subagent) so both expose the exact same model options — KNOWN_MODELS, the
- *  signed-in Antigravity group, the Ollama catalog, and a custom-model input. */
+/** Shared model list. One instance serves both targets: the menu's tabs only change
+ *  the active model and the pick handler, so the catalog cannot drift between
+ *  them. It holds KNOWN_MODELS, the signed-in Antigravity group, the Ollama
+ *  catalog, and a custom-model input. */
 export function ModelList({
   activeModel,
   onPick,
@@ -1459,9 +1485,16 @@ export function ModelList({
   providerCatalogs,
   providerHints,
   onRefreshAntigravityModels,
+  panelProps,
 }: {
   activeModel: string;
   onPick: (model: string) => void;
+  /** Tab-panel attributes when the list backs the model menu's two tabs. */
+  panelProps?: {
+    id: string;
+    role: "tabpanel";
+    "aria-labelledby": string;
+  };
   ollamaModels?: string[];
   ollamaModelsError?: string;
   ollamaHiddenCount?: number;
@@ -1589,7 +1622,7 @@ export function ModelList({
   const activeCost = modelCost(activeModel, providerHints, rateNow);
 
   return (
-    <div className="popup-list model-menu-list">
+    <div className="popup-list model-menu-list" {...panelProps}>
       {HAS_DECLARED_PROVIDERS ? (
         enabledModels && enabledModels.length > 0 ? null : (
           <div className="model-menu-error">{t("composer.modelNoneEnabled")}</div>

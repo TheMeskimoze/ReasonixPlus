@@ -69,7 +69,7 @@ describe("Composer status row", () => {
     expect(hints?.textContent).toContain("send");
     expect(hints?.textContent).toContain("newline");
     expect(idle.querySelector(".composer-foot .band-hints")).toBeNull();
-    expect(idle.querySelector(".hint-row")).toBeNull();
+    expect(idle.querySelector(".composer-busy-row")).toBeNull();
     cleanup();
 
     // Queued with nothing running: the strip owns the hints instead of a second row.

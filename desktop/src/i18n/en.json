@@ -61,7 +61,6 @@
     "switchModel": "Switch model",
     "agentModel": "Agent model",
     "subagentModel": "Sub agent model",
-    "switchSubagentModel": "Switch subagent model",
     "switchEffort": "Switch reasoning effort",
     "modelDeepSeekGroup": "DeepSeek",
     "modelOpenAIGroup": "ChatGPT",
