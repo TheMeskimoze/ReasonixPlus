@@ -1440,8 +1440,9 @@ describe("card-head", () => {
 });
 
 describe("composer-menu-headers", () => {
-  /** Every composer dropdown: model, subagent model, reasoning effort, quick send. */
-  const MENU_TRIGGERS = [".model-pill", ".subagent-pill", ".effort-pill", ".quick-proceed-btn"];
+  /** The composer dropdowns that name themselves with a header: the subagent model,
+   *  the reasoning effort and quick send. The model pill's own menu has tabs instead. */
+  const HEADER_MENU_TRIGGERS = [".subagent-pill", ".effort-pill", ".quick-proceed-btn"];
 
   describe("Composer dropdown headers", () => {
     it("shows the menu label alone, with no glyph chip beside it", () => {
@@ -1451,7 +1452,7 @@ describe("composer-menu-headers", () => {
         />,
       );
 
-      for (const selector of MENU_TRIGGERS) {
+      for (const selector of HEADER_MENU_TRIGGERS) {
         const trigger = container.querySelector<HTMLButtonElement>(selector);
         expect(trigger, selector).not.toBeNull();
         fireEvent.click(trigger!);
@@ -1466,6 +1467,60 @@ describe("composer-menu-headers", () => {
         fireEvent.click(trigger!);
         expect(container.querySelector(".popup .ph"), selector).toBeNull();
       }
+    });
+
+    it("replaces the model menu's header with the two model tabs", () => {
+      const { container } = render(
+        <Composer {...makeComposerBaseProps({ subagentsEnabled: true })} />,
+      );
+      fireEvent.click(container.querySelector(".model-pill")!);
+
+      // No header: the tabs name what the list below edits.
+      expect(container.querySelector(".popup .ph")).toBeNull();
+      const tabs = Array.from(container.querySelectorAll(".model-menu-tab"));
+      expect(tabs.map((tab) => tab.textContent)).toEqual(["Agent model", "Sub agent model"]);
+      expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
+
+      fireEvent.click(tabs[1]!);
+      expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
+      expect(tabs[0]!.getAttribute("aria-selected")).toBe("false");
+    });
+
+    it("offers only the agent tab on a session without the subagent tool", () => {
+      const { container } = render(<Composer {...makeComposerBaseProps()} />);
+      fireEvent.click(container.querySelector(".model-pill")!);
+      const tabs = Array.from(container.querySelectorAll(".model-menu-tab"));
+      expect(tabs.map((tab) => tab.textContent)).toEqual(["Agent model"]);
+    });
+
+    it("picks the model for whichever tab is open", () => {
+      const onModelChange = vi.fn();
+      const onSubagentModelChange = vi.fn();
+      const { container } = render(
+        <Composer
+          {...makeComposerBaseProps({
+            subagentsEnabled: true,
+            enabledModels: ["ollama/gemma4"],
+            ollamaModels: ["gemma4"],
+            onModelChange,
+            onSubagentModelChange,
+          })}
+        />,
+      );
+      const row = () =>
+        Array.from(container.querySelectorAll(".popup-item")).find((el) =>
+          el.querySelector(".cmd")?.textContent?.includes("gemma4"),
+        )!;
+
+      fireEvent.click(container.querySelector(".model-pill")!);
+      fireEvent.click(row());
+      expect(onModelChange).toHaveBeenCalledWith("ollama/gemma4");
+      expect(onSubagentModelChange).not.toHaveBeenCalled();
+
+      fireEvent.click(container.querySelector(".model-pill")!);
+      fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+      fireEvent.click(row());
+      expect(onSubagentModelChange).toHaveBeenCalledWith("ollama/gemma4");
     });
 
     it("hides the subagent picker on a session minted without the subagent tool", () => {

@@ -162,9 +162,9 @@ export function StoredComposer({
   return <Composer {...props} draft={draft} setDraft={draftStore.setDraft} />;
 }
 
-/** One model picker pill. The main agent and the subagent render the same box, the
- *  same fit-to-width label and the same catalog menu; only the label, the corner
- *  notch letter and the handler behind the menu differ. */
+/** One model picker pill: the box, the fit-to-width label, the cost badge and the
+ *  trigger. Its dropdown content is supplied by the caller, because the main pill
+ *  offers both models behind tabs while the subagent pill lists only its own. */
 function ModelPickerPill({
   tag,
   className = "",
@@ -172,28 +172,25 @@ function ModelPickerPill({
   title,
   label,
   cost,
-  activeModel,
   openMenu,
   onToggle,
-  onPick,
   wrapRef,
-  modelListProps,
+  menu,
 }: {
   /** Corner notch letter naming this picker ("M" main agent, "S" subagent). */
   tag: string;
   className?: string;
   menuId: MenuId;
-  /** Tooltip and menu header share one string, so they cannot drift apart. */
+  /** The pill's tooltip. */
   title: string;
   label: string;
   /** What this model costs against the declared baseline, when its price is published. */
   cost?: ModelCost | null;
-  activeModel: string;
   openMenu: MenuId | null;
   onToggle: (id: MenuId) => void;
-  onPick: (model: string) => void;
   wrapRef: (el: HTMLDivElement | null) => void;
-  modelListProps: Omit<React.ComponentProps<typeof ModelList>, "activeModel" | "onPick">;
+  /** Popup content, rendered inside the shared menu shell. */
+  menu: React.ReactNode;
 }) {
   return (
     <div ref={wrapRef} className="model-pill-wrap">
@@ -208,13 +205,67 @@ function ModelPickerPill({
         <CostBadge cost={cost} />
         <I.chev size={10} />
       </button>
-      {openMenu === menuId ? (
-        <MenuPop width={420}>
-          <MenuHeader label={title} />
-          <ModelList activeModel={activeModel} onPick={onPick} {...modelListProps} />
-        </MenuPop>
-      ) : null}
+      {openMenu === menuId ? <MenuPop width={420}>{menu}</MenuPop> : null}
     </div>
+  );
+}
+
+/** The main pill's dropdown: one catalog, two targets. The agent model is always
+ *  offered; the subagent tab exists only for a session minted with subagents, which
+ *  is a capability frozen at chat creation. */
+function ModelPickerMenu({
+  tab,
+  onTabChange,
+  subagentsEnabled,
+  agentModel,
+  subagentModel,
+  onPickAgent,
+  onPickSubagent,
+  listProps,
+}: {
+  tab: "agent" | "subagent";
+  onTabChange: (tab: "agent" | "subagent") => void;
+  subagentsEnabled: boolean;
+  agentModel: string;
+  subagentModel: string;
+  onPickAgent: (model: string) => void;
+  onPickSubagent: (model: string) => void;
+  listProps: Omit<React.ComponentProps<typeof ModelList>, "activeModel" | "onPick">;
+}) {
+  const active = subagentsEnabled && tab === "subagent" ? "subagent" : "agent";
+  const pick = active === "subagent" ? onPickSubagent : onPickAgent;
+  return (
+    <>
+      <div className="model-menu-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          className="model-menu-tab"
+          data-on={active === "agent"}
+          aria-selected={active === "agent"}
+          onClick={() => onTabChange("agent")}
+        >
+          {t("composer.agentModel")}
+        </button>
+        {subagentsEnabled ? (
+          <button
+            type="button"
+            role="tab"
+            className="model-menu-tab"
+            data-on={active === "subagent"}
+            aria-selected={active === "subagent"}
+            onClick={() => onTabChange("subagent")}
+          >
+            {t("composer.subagentModel")}
+          </button>
+        ) : null}
+      </div>
+      <ModelList
+        activeModel={active === "subagent" ? subagentModel : agentModel}
+        onPick={pick}
+        {...listProps}
+      />
+    </>
   );
 }
 
@@ -410,6 +461,9 @@ export function Composer({
   // One popup at a time from a single source of truth: `openMenu` names the only
   // menu that can be open, so opening one closes the others by itself.
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
+  // Which target the model pill's dropdown is editing. Sticky across openings, so a
+  // session tuned on both models does not have to re-pick the tab every time.
+  const [modelTab, setModelTab] = useState<"agent" | "subagent">("agent");
   const menuWraps = useRef<Partial<Record<MenuId, HTMLDivElement | null>>>({});
   const toggleMenu = (id: MenuId) => setOpenMenu((cur) => (cur === id ? null : id));
   const closeMenu = () => setOpenMenu(null);
@@ -1185,15 +1239,27 @@ export function Composer({
               title={t("composer.switchModel")}
               label={modelDisplayLabel(modelLabel, providerHints)}
               cost={modelCost(modelLabel, providerHints, rateNow)}
-              activeModel={modelLabel}
               openMenu={openMenu}
               onToggle={toggleMenu}
-              onPick={(m) => {
-                onModelChange(m);
-                closeMenu();
-              }}
               wrapRef={anchor("model")}
-              modelListProps={modelListProps}
+              menu={
+                <ModelPickerMenu
+                  tab={modelTab}
+                  onTabChange={setModelTab}
+                  subagentsEnabled={subagentsEnabled}
+                  agentModel={modelLabel}
+                  subagentModel={subagentModelLabel}
+                  onPickAgent={(m) => {
+                    onModelChange(m);
+                    closeMenu();
+                  }}
+                  onPickSubagent={(m) => {
+                    onSubagentModelChange(m);
+                    closeMenu();
+                  }}
+                  listProps={modelListProps}
+                />
+              }
             />
             {subagentsEnabled ? (
               <ModelPickerPill
@@ -1203,15 +1269,22 @@ export function Composer({
                 title={t("composer.switchSubagentModel")}
                 label={modelDisplayLabel(subagentModelLabel, providerHints)}
                 cost={modelCost(subagentModelLabel, providerHints, rateNow)}
-                activeModel={subagentModelLabel}
                 openMenu={openMenu}
                 onToggle={toggleMenu}
-                onPick={(m) => {
-                  onSubagentModelChange(m);
-                  closeMenu();
-                }}
                 wrapRef={anchor("subagent")}
-                modelListProps={modelListProps}
+                menu={
+                  <>
+                    <MenuHeader label={t("composer.switchSubagentModel")} />
+                    <ModelList
+                      activeModel={subagentModelLabel}
+                      onPick={(m) => {
+                        onSubagentModelChange(m);
+                        closeMenu();
+                      }}
+                      {...modelListProps}
+                    />
+                  </>
+                }
               />
             ) : null}
             <div ref={anchor("effort")} className="model-pill-wrap">

@@ -5178,6 +5178,39 @@ html[data-platform="macos"] .startup-loading-overlay {
   color: var(--muted);
   border-bottom: 1px solid var(--border);
 }
+/* The model pill's dropdown has two targets instead of a header: the agent model
+   always, the subagent's only on a session minted with subagents. */
+.model-menu-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.model-menu-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.model-menu-tab:hover {
+  color: var(--fg);
+  background: var(--panel-2);
+}
+.model-menu-tab[data-on="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.model-menu-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 .popup-list {
   overflow-y: auto;
   overflow-x: auto;
