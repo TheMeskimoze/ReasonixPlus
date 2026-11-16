@@ -98,16 +98,25 @@ describe("desktop Composer model catalog", () => {
     expect(badges.filter((badge) => badge.classList.contains("cost"))).toHaveLength(1);
   });
 
-  it("shows the active model's own score on both agent pills", () => {
+  it("shows each model's own score, in its own tab", () => {
     const { container } = renderComposer({
       modelLabel: "ollama/deepseek-v4-pro",
       subagentModelLabel: "ollama/gemma4",
+      ollamaModels: ["deepseek-v4-pro", "gemma4"],
+      enabledModels: ["ollama/deepseek-v4-pro", "ollama/gemma4"],
     });
     expect(container.querySelector(".model-pill .badge.cost")?.textContent).toMatch(
       /^(2\.6|5\.2)x$/,
     );
+
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const activeBadge = () =>
+      container.querySelector('.popup-item[data-active="true"] .badge.cost')?.textContent ?? null;
+    expect(activeBadge()).toMatch(/^(2\.6|5\.2)x$/);
+
     // A flat id costs the same all day, so its multiple never moves.
-    expect(container.querySelector(".subagent-pill .badge.cost")?.textContent).toBe("2.4x");
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+    expect(activeBadge()).toBe("2.4x");
   });
 
   it("re-prices a peak-priced row when the window flips, without a reload", async () => {
@@ -197,7 +206,7 @@ describe("desktop Composer model catalog", () => {
     expect(ollamaGroup?.querySelector('button[title="Refresh"]')).toBeNull();
   });
 
-  it("renders a subagent model menu that shares the main-agent catalog (DRY)", () => {
+  it("renders a subagent tab that shares the main-agent catalog (DRY)", () => {
     const onModelChange = vi.fn();
     const onSubagentModelChange = vi.fn();
     const { container } = renderComposer({
@@ -207,19 +216,19 @@ describe("desktop Composer model catalog", () => {
       onSubagentModelChange,
     });
 
-    // Main-agent menu exposes the catalog.
+    // The agent tab exposes the catalog.
     fireEvent.click(container.querySelector(".model-pill")!);
-    const mainList = container.querySelector(".model-menu-list");
-    expect(mainList?.textContent).toContain("deepseek-v4-flash");
-    expect(mainList?.textContent).toContain("deepseek-v4-pro");
+    const agentList = container.querySelector(".model-menu-list");
+    expect(agentList?.textContent).toContain("deepseek-v4-flash");
+    expect(agentList?.textContent).toContain("deepseek-v4-pro");
 
-    // The subagent menu is its own button with the same catalog (DRY).
-    fireEvent.click(container.querySelector(".subagent-pill")!);
+    // One tab away, the same catalog serves the subagent (DRY).
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
     const subList = container.querySelector(".model-menu-list");
     expect(subList?.textContent).toContain("deepseek-v4-flash");
     expect(subList?.textContent).toContain("deepseek-v4-pro");
 
-    // Clicking a model in the subagent menu routes to onSubagentModelChange.
+    // A pick there routes to onSubagentModelChange, not to the chat's own model.
     const flash = Array.from(subList!.querySelectorAll(".popup-item")).find((el) =>
       el.textContent?.includes("deepseek-v4-flash"),
     );
@@ -228,7 +237,7 @@ describe("desktop Composer model catalog", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
-  it("routes each pill's pick to its own model, never the other", () => {
+  it("routes each tab's pick to its own model, never the other", () => {
     const onModelChange = vi.fn();
     const onSubagentModelChange = vi.fn();
     const { container } = renderComposer({
@@ -239,21 +248,22 @@ describe("desktop Composer model catalog", () => {
       onSubagentModelChange,
     });
 
-    const pick = (trigger: string) => {
-      fireEvent.click(container.querySelector(trigger)!);
+    const pick = (tab: number) => {
+      fireEvent.click(container.querySelector(".model-pill")!);
+      if (tab > 0) fireEvent.click(container.querySelectorAll(".model-menu-tab")[tab]!);
       const row = Array.from(container.querySelectorAll(".model-menu-list .popup-item")).find(
         (el) => el.textContent?.includes("deepseek-v4-pro"),
       );
       fireEvent.click(row!);
     };
 
-    // The main pill switches the chat's own model and leaves the subagent pin alone.
-    pick(".model-pill:not(.subagent-pill)");
+    // The agent tab switches the chat's own model and leaves the subagent pin alone.
+    pick(0);
     expect(onModelChange).toHaveBeenCalledWith("deepseek-v4-pro");
     expect(onSubagentModelChange).not.toHaveBeenCalled();
 
-    // The subagent pill switches only the child model.
-    pick(".subagent-pill");
+    // The subagent tab switches only the child model.
+    pick(1);
     expect(onSubagentModelChange).toHaveBeenCalledWith("deepseek-v4-pro");
     expect(onModelChange).toHaveBeenCalledTimes(1);
   });
@@ -314,14 +324,14 @@ describe("desktop Composer model catalog", () => {
       ollamaModels: ["llama3.1:latest", "qwen3:32b"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
-    const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
+    const agentText = container.querySelector(".model-menu-list")?.textContent ?? "";
     // Allow-list: only enabled ids appear...
-    expect(mainText).toContain("glm-4.5");
-    expect(mainText).toContain("qwen3:32b");
-    expect(mainText).not.toContain("ollama/llama3.1:latest");
-    expect(mainText).not.toContain("deepseek-v4-pro");
+    expect(agentText).toContain("glm-4.5");
+    expect(agentText).toContain("qwen3:32b");
+    expect(agentText).not.toContain("ollama/llama3.1:latest");
+    expect(agentText).not.toContain("deepseek-v4-pro");
 
-    fireEvent.click(container.querySelector(".subagent-pill")!);
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
     const subText = container.querySelector(".model-menu-list")?.textContent ?? "";
     expect(subText).not.toContain("deepseek-v4-pro");
   });
@@ -340,7 +350,7 @@ describe("desktop Composer model catalog", () => {
     expect(mainText).toContain("No models enabled. Enable them in Settings");
   });
 
-  it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
+  it("subagent tab shares the backend-generated Ollama and Gemini models with the agent", () => {
     const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
     const antigravityModels = ["gemini-3.6-flash", "gemini-3.7-flash", "claude-3-5-sonnet"];
     const { container } = renderComposer({
@@ -351,15 +361,15 @@ describe("desktop Composer model catalog", () => {
     });
 
     fireEvent.click(container.querySelector(".model-pill")!);
-    const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
+    const agentText = container.querySelector(".model-menu-list")?.textContent ?? "";
 
-    fireEvent.click(container.querySelector(".subagent-pill")!);
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
     const subText = container.querySelector(".model-menu-list")?.textContent ?? "";
 
-    // The subagent menu carries the SAME backend-fetched models as the main
-    // agent — Ollama catalog ids and the signed-in Antigravity/Gemini ids.
+    // The subagent tab carries the SAME backend-fetched models as the agent's:
+    // Ollama catalog ids and the signed-in Antigravity/Gemini ids.
     for (const id of [...ollamaModels, ...antigravityModels]) {
-      expect(mainText).toContain(id);
+      expect(agentText).toContain(id);
       expect(subText).toContain(id);
     }
     expect(subText).toContain("Google Antigravity");
@@ -419,14 +429,19 @@ describe("desktop Composer picker anchor", () => {
 });
 
 describe("desktop Composer provider tags", () => {
-  it("names the provider on the main and subagent model pills", () => {
+  it("names the provider on the pill and in the subagent tab", () => {
     const { container } = renderComposer({
       modelLabel: "deepseek-v4-flash",
       subagentModelLabel: "glm-5.3-flash",
     });
 
     expect(container.querySelector(".model-pill")?.textContent).toBe("DS · deepseek-v4-flash");
-    expect(container.querySelector(".subagent-pill")?.textContent).toBe("ZAI · glm-5.3-flash");
+
+    fireEvent.click(container.querySelector(".model-pill")!);
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+    expect(container.querySelector('.popup-item[data-active="true"] .cmd')?.textContent).toBe(
+      "ZAI · glm-5.3-flash",
+    );
   });
 
   it("tags an id only the live catalog lists", () => {

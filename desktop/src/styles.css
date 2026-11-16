@@ -2153,7 +2153,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: 0;
   overflow-y: auto;
   margin-right: var(--thread-gutter);
-  padding: 28px 0 40px;
+  padding: 28px 0 10px;
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
 }
@@ -4640,8 +4640,8 @@ html[data-platform="macos"] .startup-loading-overlay {
 .composer-wrap::before {
   content: "";
   position: absolute;
-  inset: -24px 0 auto 0;
-  height: 24px;
+  inset: -12px 0 auto 0;
+  height: 12px;
   background: linear-gradient(to top, var(--bg), transparent);
   pointer-events: none;
 }
@@ -4798,6 +4798,9 @@ html[data-platform="macos"] .startup-loading-overlay {
 .composer textarea::placeholder {
   color: var(--muted-2);
 }
+.composer textarea:focus {
+  outline: none;
+}
 /* Thinner than the shared 16px bar: this box is at most four rows tall. */
 .composer textarea::-webkit-scrollbar {
   width: 8px;
@@ -4856,7 +4859,7 @@ html[data-platform="macos"] .startup-loading-overlay {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.composer-foot .model-pill:hover {
+.composer-foot .model-pill:not(.mode-pill):hover {
   background: var(--panel-2);
 }
 /* Corner notch naming each picker: "M" main agent, "S" subagent, "E" effort. The
@@ -5112,48 +5115,6 @@ html[data-platform="macos"] .startup-loading-overlay {
   }
 }
 
-/* hint row above composer */
-.hint-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 6px 6px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--muted-2);
-}
-.hint-row .grow {
-  flex: 1;
-}
-.hint-row .hint-sep {
-  width: 1px;
-  height: 12px;
-  background: var(--border-strong);
-  flex-shrink: 0;
-}
-.hint-row kbd {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 14px;
-}
-.hint-row .shortcut kbd {
-  min-width: 0;
-  font-size: 14px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-}
-/* ModeSwitch inside hint-row — slightly smaller to sit inline with text */
-.hint-row .mode-switch {
-  font-size: 13px;
-}
-.hint-row .mode-switch .ms-seg {
-  padding: 2px 7px;
-  gap: 4px;
-}
-
 /* ---------- POPUP MENU (slash / at) ---------- */
 
 .popup {
@@ -5178,6 +5139,39 @@ html[data-platform="macos"] .startup-loading-overlay {
   color: var(--muted);
   border-bottom: 1px solid var(--border);
 }
+/* The model pill's dropdown has two targets instead of a header: the agent model
+   always, the subagent's only on a session minted with subagents. */
+.model-menu-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.model-menu-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.model-menu-tab:hover {
+  color: var(--fg);
+  background: var(--panel-2);
+}
+.model-menu-tab[data-on="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.model-menu-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 .popup-list {
   overflow-y: auto;
   overflow-x: auto;
@@ -5192,8 +5186,8 @@ html[data-platform="macos"] .startup-loading-overlay {
 .model-menu-list {
   max-height: 460px;
 }
-/* Compact the shared model rows (main-agent + subagent columns) so each
-   column stays narrow and the whole picker fits narrow windows. */
+/* Compact the shared model rows (agent and subagent tabs) so the list stays
+   compact and the whole picker fits narrow windows. */
 .model-menu-list .popup-item {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
@@ -6860,7 +6854,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   gap: 6px;
   row-gap: 2px;
   min-width: 0;
-  padding: 0 6px 4px;
+  padding: 0 6px 6px;
   font-family: inherit;
   font-size: 14px;
   color: var(--muted-2);
@@ -6888,6 +6882,39 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   color: var(--warning);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+/* The keys sit above the card, right-aligned in whichever band is up, and in a band of
+   their own when nothing else is: one home, always on show, never inside the card. */
+.band-hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--muted-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.band-hints > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The keys read at the row's own size, so the reminder is not the smallest thing
+   on screen: kbd matches the label instead of the 12px inline default. */
+.band-hints kbd {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel);
+}
+/* Matches the status row's metrics, so the hints do not move when a turn starts. */
+.composer-hints-row {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 6px;
+  font-size: 14px;
 }
 
 .composer-queued {
@@ -9763,54 +9790,30 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .composer-foot .send-btn {
   flex-shrink: 0;
 }
-
-/* Hint row above composer — scroll instead of overflowing */
-.hint-row {
-  flex-wrap: nowrap;
-  gap: 8px;
-  overflow: hidden;
+/* The edit gate pill keeps the segmented control's colours: one mode at a time,
+   tinted by which one is in force. The three share one recipe, a soft tint with the
+   tone's own text, and the tones are fixed hues so a theme cannot re-colour a mode. */
+.composer-foot .mode-pill {
+  border-color: transparent;
 }
-.hint-row > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+.composer-foot .mode-pill[data-k="follow"] {
+  background: var(--tone-warn-soft);
+  color: var(--tone-warn);
 }
-.hint-row > span:last-child {
-  flex-shrink: 0;
-  text-align: right;
+.composer-foot .mode-pill[data-k="read-only"] {
+  background: var(--tone-info-soft);
+  color: var(--tone-info);
 }
-
-/* Collapse composer-foot when the composer column itself is cramped —
-   container query so panel state, not viewport width, drives it. */
-@container composer (max-width: 620px) {
-  .composer-foot .cf-btn .label {
-    display: none;
-  }
-}
-@container composer (max-width: 520px) {
-  .hint-row > span:first-child {
-    display: none;
-  }
-}
-
-/* ============================================================
-   MODE SWITCH — Read only / Follow Rules / Never Ask
-   ============================================================ */
-.mode-switch {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  gap: 1px;
-  font-family: inherit;
-  flex-shrink: 0;
-}
-.mode-switch[data-mode="never-ask"] {
-  border-color: var(--tone-err);
-  box-shadow: 0 0 0 2px oklch(68% 0.2 25 / 0.18);
+.composer-foot .mode-pill[data-k="never-ask"] {
+  background: var(--tone-err-soft);
+  color: var(--tone-err);
+  /* A soft fill alone reads as one more tint, so the danger mode keeps a ring and a
+     glow that no other mode has. */
+  box-shadow: inset 0 0 0 2px oklch(68% 0.2 25 / 0.55), 0 0 10px oklch(68% 0.2 25 / 0.3);
   animation: yolo-pulse 1.8s ease-in-out infinite;
+}
+.composer-foot .mode-pill:hover {
+  filter: brightness(1.08);
 }
 @keyframes yolo-pulse {
   0%,
@@ -9821,46 +9824,18 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
     opacity: 1;
   }
 }
-.ms-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--muted);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.ms-seg:hover {
-  color: var(--fg);
-}
-.ms-seg[data-on="true"][data-k="follow"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.ms-seg[data-on="true"][data-k="read-only"] {
-  background: var(--tone-info-soft);
-  color: var(--tone-info);
-}
-.ms-seg[data-on="true"][data-k="never-ask"] {
-  background: var(--tone-err);
-  color: oklch(99% 0 0);
-}
-[data-theme="light"] .ms-seg[data-on="true"][data-k="never-ask"] {
-  color: oklch(100% 0 0);
-}
 
-.composer textarea:focus {
-  outline: none;
-}
-
-/* Hide mode labels when narrow; keep icons */
-@media (max-width: 1100px) {
-  .mode-switch .ms-seg > span {
+/* Collapse composer-foot when the composer column itself is cramped —
+   container query so panel state, not viewport width, drives it. */
+@container composer (max-width: 620px) {
+  .composer-foot .cf-btn .label {
     display: none;
   }
-  .mode-switch .ms-seg {
-    padding: 4px 7px;
+}
+/* The key hints are a reminder, not a control: they give up their space first. */
+@container composer (max-width: 520px) {
+  .composer-hints-row {
+    display: none;
   }
 }
 
