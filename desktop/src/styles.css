@@ -2153,7 +2153,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: 0;
   overflow-y: auto;
   margin-right: var(--thread-gutter);
-  padding: 28px 0 40px;
+  padding: 28px 0 16px;
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
 }
