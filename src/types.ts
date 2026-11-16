@@ -145,6 +145,9 @@ export interface ChatRequestOptions {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  /** Reports provider output growth (characters) on a collected stream. Absent on
+   *  non-streaming calls, where no incremental output exists. */
+  onDelta?: (chars: number) => void;
   signal?: AbortSignal;
   /** DeepSeek response_format — use { type: "json_object" } to force valid JSON. */
   responseFormat?: { type: "json_object" | "text" };

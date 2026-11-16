@@ -6,6 +6,7 @@ import {
   type RuleRecord,
   groupSkills,
   isWorkingPlanStatus,
+  mcpServerLabel,
   ruleRegexError,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
@@ -1924,7 +1925,7 @@ function CtxMcp({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) 
         return {
           key: spec.raw,
           icon: <I.wrench size={12} />,
-          name: spec.name ?? spec.summary,
+          name: mcpServerLabel(spec) || spec.summary,
           meta: `${spec.transport} · ${status}`,
           origin: spec.builtin ? "builtin" : spec.plugin ? "plugin" : "standalone",
           owner: spec.plugin,

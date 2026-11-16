@@ -1586,6 +1586,11 @@ export class DeepSeekClient {
     // Resolve the transport early so we can route to an internal streaming
     // collector when needed, matching what the main turn loop already does.
     const transport = await this.resolveTransport();
+    // A caller that asks for streamed collection (and a live output observer) gets
+    // the same collector the providers below already require.
+    if (opts.stream === true) {
+      return this.chatViaStream(opts);
+    }
     if (transport?.api === "responses") {
       return this.chatViaStream(opts);
     }
@@ -2420,6 +2425,11 @@ export class DeepSeekClient {
     let streamThoughtSignature: string | undefined;
 
     for await (const chunk of this.stream(opts)) {
+      const grew =
+        (chunk.contentDelta?.length ?? 0) +
+        (chunk.reasoningDelta?.length ?? 0) +
+        (chunk.toolCallDelta?.argumentsDelta?.length ?? 0);
+      if (grew > 0) opts.onDelta?.(grew);
       if (chunk.contentDelta) content += chunk.contentDelta;
       if (chunk.reasoningDelta) reasoning += chunk.reasoningDelta;
       if (chunk.thoughtSignature) streamThoughtSignature = chunk.thoughtSignature;

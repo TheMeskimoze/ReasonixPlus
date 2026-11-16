@@ -16,6 +16,7 @@ import { type ReasonixConfig, normalizeMcpConfig, readConfig, writeConfig } from
 import {
   DESKTOP_SERVER_NAME,
   desktopControlEntry,
+  desktopServerDisplayName,
   isDesktopControlSpec,
   isDesktopReadOnlyTool,
   resolveDesktopLauncher,
@@ -42,6 +43,7 @@ describe("desktop-control server identity", () => {
     expect(spec.disabled).toBe(true);
     expect(isDesktopControlSpec(spec)).toBe(true);
     expect(isManagedMcpSpec(spec)).toBe(true);
+    expect(desktopServerDisplayName(spec)).toBe("Computer Use");
     // The Settings remove guard reads the spec built from `specToRaw`, which drops the
     // config-only fields; identity must survive that round trip.
     expect(isManagedMcpSpec(parseMcpSpec(specToRaw(spec)))).toBe(true);
@@ -53,6 +55,7 @@ describe("desktop-control server identity", () => {
     })[0]!;
     expect(isDesktopControlSpec(spec)).toBe(false);
     expect(isManagedMcpSpec(spec)).toBe(false);
+    expect(desktopServerDisplayName(spec)).toBeUndefined();
   });
 
   it("resolves a launcher for this checkout", () => {
@@ -230,6 +233,7 @@ describe("chats that froze their MCP set before the server existed", () => {
       capabilityRows(home).servers.find((row) => row.name === DESKTOP_SERVER_NAME),
     ).toMatchObject({
       name: DESKTOP_SERVER_NAME,
+      displayName: "Computer Use",
       enabled: false,
       builtin: true,
     });

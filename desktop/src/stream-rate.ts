@@ -7,7 +7,9 @@
  *  and decays to 0 the moment the provider stops sending (a thinking pause, a
  *  tool-execution gap, or a stalled stream). A provider that hides obfuscated
  *  reasoning simply streams less text — the readout tracks whatever bytes do
- *  reach the client. */
+ *  reach the client. Tool-call arguments and compaction summaries arrive through
+ *  the same window as character samples, so silent model work still reads as
+ *  throughput. */
 
 const CHARS_PER_TOKEN = 4;
 /** Sliding window over which received characters are averaged. */
@@ -22,7 +24,7 @@ export class StreamRateTracker {
 
   /** Record `chars` provider-output characters received at `now`. */
   record(chars: number, now: number = Date.now()): void {
-    if (chars <= 0) return;
+    if (!Number.isFinite(chars) || chars <= 0) return;
     this.samples.push({ t: now, chars });
   }
 

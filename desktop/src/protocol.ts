@@ -80,6 +80,7 @@ import type {
   OllamaModelsEvent,
   OpencodeModelsEvent,
   OutgoingCommand,
+  OutputRateEvent,
   PathAccessRequiredEvent,
   PersistedNotice,
   PlanClearedEvent,
@@ -295,6 +296,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ReadyEvent
   | ProtocolErrorEvent
   | { type: "$notice"; text: string; severity: NoticeSeverity }
+  | OutputRateEvent
   | ToastEvent
   | TurnCompleteEvent
   | TurnStartedEvent

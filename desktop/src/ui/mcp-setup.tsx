@@ -1,4 +1,4 @@
-import { groupSkills } from "@reasonix/core-utils";
+import { groupSkills, mcpServerLabel } from "@reasonix/core-utils";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { I } from "../icons";
 import type {
@@ -194,7 +194,8 @@ function CapabilityPicker({
     {
       label: "MCP servers",
       rows: servers.map((server) => ({
-        name: server.name,
+        identity: server.name,
+        name: mcpServerLabel(server),
         on: selected.has(server.name),
         onToggle: () => onToggleServer(server.name),
       })),

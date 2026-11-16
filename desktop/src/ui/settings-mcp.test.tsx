@@ -504,6 +504,57 @@ describe("PageMCP — playwright connection status", () => {
     expect(remove.compareDocumentPosition(enable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it("lists a server's tools behind its Tools disclosure", () => {
+    renderCard([
+      spec({
+        raw: "demo=node demo.js",
+        name: "demo",
+        summary: "stdio · node demo.js",
+        toolCount: 2,
+        tools: ["read_page", "search_docs", "read_page"],
+      }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Tools (2)" }));
+    expect(screen.getByText("read_page")).toBeTruthy();
+    expect(screen.getByText("search_docs")).toBeTruthy();
+  });
+
+  it("says a connected server exposes no tools when the list is empty", () => {
+    renderCard([
+      spec({ raw: "demo=node demo.js", name: "demo", toolCount: 0, tools: [] }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Tools (0)" }));
+    expect(screen.getByText("This server exposes no tools.")).toBeTruthy();
+  });
+
+  it("explains why a server has no tool list yet", () => {
+    renderCard([
+      spec({
+        raw: "demo=node demo.js",
+        name: "demo",
+        status: "configured",
+        toolCount: undefined,
+      }),
+    ]);
+    expect(screen.getByText(/No tool list yet/)).toBeTruthy();
+  });
+
+  it("shows a managed server's display name instead of its config id", () => {
+    renderCard([
+      spec({
+        raw: "desktop=node desktop-mcp.js",
+        name: "desktop",
+        displayName: "Computer Use",
+        summary: "stdio · desktop-mcp.js",
+        builtin: true,
+        toolCount: 2,
+        tools: ["computer_use", "screen_capture"],
+      }),
+    ]);
+    expect(screen.getByText(/Computer Use/)).toBeTruthy();
+    expect(screen.queryByText("desktop")).toBeNull();
+  });
+
   it("shows live connection state with the tool count when bridged", () => {
     renderCard([spec()]);
     expect(screen.getByText(/server connected · 24 tools live/)).toBeTruthy();

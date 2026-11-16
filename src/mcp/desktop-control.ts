@@ -11,6 +11,9 @@ import type { McpServerSpec } from "./spec.js";
 /** Config name and toggle handle. A chat enables the tools by enabling this server. */
 export const DESKTOP_SERVER_NAME = "desktop";
 
+/** User-facing name for the bundled server. The config id and tool prefix stay `desktop`. */
+const DESKTOP_SERVER_LABEL = "Computer Use";
+
 export const COMPUTER_USE_TOOL = "computer_use";
 export const SCREEN_CAPTURE_TOOL = "screen_capture";
 
@@ -46,6 +49,12 @@ export function isDesktopControlSpec(spec: McpServerSpec): boolean {
   return (
     spec.transport === "stdio" && spec.name === DESKTOP_SERVER_NAME && isDesktopEntryArgs(spec.args)
   );
+}
+
+/** The label Settings and the chat picker show for the bundled server, or undefined for
+ *  any other spec. */
+export function desktopServerDisplayName(spec: McpServerSpec): string | undefined {
+  return isDesktopControlSpec(spec) ? DESKTOP_SERVER_LABEL : undefined;
 }
 
 /** True when a stored config entry is ours: no URL of its own, and either the launcher we

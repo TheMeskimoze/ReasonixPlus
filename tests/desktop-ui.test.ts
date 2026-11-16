@@ -4,6 +4,7 @@
 import {
   experientialUsageView,
   derivePrefix as fromCoreUtils,
+  mcpServerLabel,
   openrouterKeyView,
   parseProviderRegistry,
   syntheticUsageView,
@@ -17,6 +18,7 @@ import {
 } from "../desktop/src/ui/composer-sizing";
 import {
   type EmittableEvent,
+  OutputGrowth,
   buildDesktopDiagnostic,
   buildLoadedMessages,
   compactTabContext,
@@ -76,6 +78,29 @@ import { derivePrefix as fromCliPath } from "../src/tools/shell/parse.js";
 import type { SubagentEvent } from "../src/tools/subagent.js";
 import { cssRule, cssRules, sourceFile, stylesCss } from "./support/css.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
+
+describe("desktop-mcp-server-label", () => {
+  it("prefers a display name and falls back to the config id", () => {
+    expect(mcpServerLabel({ name: "desktop", displayName: "Computer Use" })).toBe("Computer Use");
+    expect(mcpServerLabel({ name: "github" })).toBe("github");
+    expect(mcpServerLabel({ name: null })).toBe("");
+  });
+});
+
+describe("desktop-output-growth", () => {
+  it("counts each stream's growth once and adopts a lower restart total", () => {
+    const growth = new OutputGrowth();
+    expect(growth.take("call", 100)).toBe(100);
+    expect(growth.take("call", 140)).toBe(40);
+    expect(growth.take("call", 140)).toBe(0);
+    // A lower total means a new stream on the same key: adopt it, then count growth.
+    expect(growth.take("call", 10)).toBe(0);
+    expect(growth.take("call", 25)).toBe(15);
+    expect(growth.take("call", 0)).toBe(0);
+    expect(growth.take("call", 5)).toBe(5);
+    expect(growth.take("call", Number.NaN)).toBe(0);
+  });
+});
 
 describe("desktop-abort-draft", () => {
   describe("desktop abort draft restore", () => {

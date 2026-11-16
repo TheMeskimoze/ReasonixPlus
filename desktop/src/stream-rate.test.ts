@@ -39,10 +39,12 @@ describe("StreamRateTracker", () => {
     expect(t.tokensPerSecond(100)).toBe(0);
   });
 
-  it("ignores non-positive character counts", () => {
+  it("ignores non-finite and non-positive character counts", () => {
     const t = new StreamRateTracker();
     t.record(0, 0);
     t.record(-5, 0);
+    t.record(Number.NaN, 0);
+    t.record(Number.POSITIVE_INFINITY, 0);
     expect(t.tokensPerSecond(0)).toBe(0);
   });
 });

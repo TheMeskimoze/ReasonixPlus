@@ -36,7 +36,7 @@ import {
   playwrightWriteLocationNote,
 } from "../../mcp/playwright-tooling.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
-import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
+import { type BridgeEnv, type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
 import type { SharedClientRegistry } from "../../mcp/shared-browser.js";
 import type { McpServerSpec } from "../../mcp/spec.js";
 import {
@@ -124,6 +124,9 @@ export interface McpRuntime {
   failures(): McpFailure[];
   /** Tools a server listed that the bridge refused (name owned by another origin) or deferred (spec budget). */
   toolSkips(): Array<{ server: string; name: string; reason: string }>;
+  /** Bare MCP tool names the bridge registered per live spec, sorted. Drives the Settings
+   *  tool list. */
+  toolNames(): Array<{ spec: string; names: string[] }>;
   /** Call a server tool directly without registering it in the model-facing tool registry. */
   callServerTool(
     serverName: string,
@@ -156,6 +159,17 @@ function runtimeFingerprint(spec: McpServerSpec): string {
     stableRecord(getMcpServerEnv(spec)),
     stableRecord(getMcpServerHeaders(spec)),
   ]);
+}
+
+/** Registered (wire) name to real bare MCP tool name. Prefers the mapping the bridge
+ *  recorded; falls back to stripping the `server_` namespace prefix. */
+function bareToolName(env: BridgeEnv, registeredName: string): string {
+  const mapped = env.bareNames?.get(registeredName);
+  if (mapped !== undefined) return mapped;
+  const { prefix } = env;
+  return prefix && registeredName.startsWith(prefix)
+    ? registeredName.slice(prefix.length)
+    : registeredName;
 }
 
 /** Per-session MCP enablement, absolute — a server is disabled iff named.
@@ -588,6 +602,15 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       .map((s) => records.get(s)?.summary)
       .filter((s): s is McpServerSummary => Boolean(s));
   }
+  function toolNames(): Array<{ spec: string; names: string[] }> {
+    return insertionOrder.flatMap((raw) => {
+      const record = records.get(raw);
+      if (!record) return [];
+      const env = record.summary.bridgeEnv;
+      const names = record.registeredNames.map((name) => bareToolName(env, name));
+      return [{ spec: raw, names: [...new Set(names)].sort() }];
+    });
+  }
   async function closeAll(): Promise<void> {
     for (const r of records.values()) {
       if (r.sharedKey && ctx.browserRegistry) {
@@ -634,6 +657,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     summaries,
     failures,
     toolSkips,
+    toolNames,
     callServerTool,
     addSpec,
     removeSpec,

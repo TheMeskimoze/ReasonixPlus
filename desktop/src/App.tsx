@@ -7420,9 +7420,16 @@ export function App() {
               return;
             }
 
+            if (ev.type === "$output_rate" && tabId) {
+              // Output that never reaches the transcript (compaction summaries and
+              // tool-call arguments) still counts toward the live rate.
+              if (ev.chars > 0) rateTrackerFor(tabId).record(ev.chars);
+              return;
+            }
+
             if (ev.type === "model.delta" && tabId) {
-              // Feed every provider-output channel into the live rate tracker
-              // (content, reasoning, and tool-call arguments all consume tokens).
+              // Streamed text and reasoning feed the live rate tracker directly;
+              // tool-call arguments arrive separately as `$output_rate`.
               rateTrackerFor(tabId).record(ev.text.length);
               if (ev.channel === "content" || ev.channel === "reasoning") {
                 const bucket = pendingDeltasRef.current.get(tabId) ?? [];
