@@ -9806,7 +9806,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   color: var(--tone-err);
   /* A soft fill alone reads as one more tint, so the danger mode keeps a ring and a
      glow that no other mode has. */
-  box-shadow: 0 0 0 2px oklch(68% 0.2 25 / 0.55), 0 0 10px oklch(68% 0.2 25 / 0.3);
+  box-shadow: inset 0 0 0 2px oklch(68% 0.2 25 / 0.55), 0 0 10px oklch(68% 0.2 25 / 0.3);
   animation: yolo-pulse 1.8s ease-in-out infinite;
 }
 .composer-foot .mode-pill:hover {
