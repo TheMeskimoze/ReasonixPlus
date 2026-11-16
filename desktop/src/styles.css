@@ -6851,7 +6851,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   gap: 6px;
   row-gap: 2px;
   min-width: 0;
-  padding: 0 6px 4px;
+  padding: 0 6px 6px;
   font-family: inherit;
   font-size: 14px;
   color: var(--muted-2);
@@ -6910,7 +6910,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .composer-hints-row {
   display: flex;
   align-items: center;
-  padding: 0 6px 4px;
+  padding: 0 6px 6px;
   font-size: 14px;
 }
 
