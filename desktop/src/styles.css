@@ -2153,7 +2153,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: 0;
   overflow-y: auto;
   margin-right: var(--thread-gutter);
-  padding: 28px 0 20px;
+  padding: 28px 0 10px;
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
 }
@@ -6895,6 +6895,16 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+/* The keys read at the row's own size, so the reminder is not the smallest thing
+   on screen: kbd matches the label instead of the 12px inline default. */
+.band-hints kbd {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel);
 }
 /* Matches the status row's metrics, so the hints do not move when a turn starts. */
 .composer-hints-row {
