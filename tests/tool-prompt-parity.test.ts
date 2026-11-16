@@ -11,7 +11,6 @@ import { registerAllBuiltins } from "./support/full-toolset.js";
 /** Tools whose usage is carried by the spec alone. Adding a name here is a deliberate choice, not a default. */
 const PROMPT_SILENT_TOOLS = [
   "activate_plan",
-  "computer_use",
   "copy_file",
   "create_directory",
   "delete_directory",
@@ -31,7 +30,6 @@ const PROMPT_SILENT_TOOLS = [
   "read_file",
   "recall_memory",
   "remember_rule",
-  "screen_capture",
   "see_image",
   "stop_job",
   "web_fetch",

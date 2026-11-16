@@ -397,6 +397,11 @@ import { createLogger } from "../../logging.js";
 import { isContextOverflowError } from "../../loop/errors.js";
 import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
 import {
+  DESKTOP_SERVER_NAME,
+  desktopControlEntry,
+  isDesktopConfigEntry,
+} from "../../mcp/desktop-control.js";
+import {
   GMAIL_MAIL_SERVER_NAME,
   GMAIL_MCP_URL,
   GMAIL_OAUTH_REDIRECT_URI,
@@ -439,6 +444,7 @@ import {
   normalizeSessionNameList,
   normalizeWorkspace,
   patchSessionMeta,
+  patchSessionMetaQuietly,
   patchSessionWorkspaceIfMissing,
   prunePendingMcpSessions,
   resolveSessionModelPrefs,
@@ -4162,9 +4168,12 @@ function configuredMcpSpecs(
 }
 
 /** The capability state a clone of this chat starts from: the chat's own frozen set, or
- *  the Settings default when it has answered nothing yet. */
-function chatCapabilitySeed(tab: Tab): ChatCapabilitySeed {
-  const freeze = sessionFreeze(tab.currentSession);
+ *  the Settings default when it has answered nothing yet. A pre-seed chat gets the
+ *  desktop server forced off here too, or its clone would pre-fill it as enabled. */
+export function chatCapabilitySeed(
+  tab: Pick<Tab, "rootDir" | "currentSession" | "subagents">,
+): ChatCapabilitySeed {
+  const freeze = correctedSessionFreeze(tab.currentSession);
   return {
     mcp: freeze.mcp ?? sessionMcpFromConfig(tab.rootDir),
     plugins: freeze.plugins,
@@ -4179,6 +4188,8 @@ interface SessionFreeze {
   mcp: SessionMcpState | undefined;
   plugins: string[];
   skills: string[];
+  /** Creation stamp from the same meta read, so callers need no second load. */
+  createdAt?: number;
 }
 
 function sessionFreeze(name: string | undefined): SessionFreeze {
@@ -4188,7 +4199,18 @@ function sessionFreeze(name: string | undefined): SessionFreeze {
     mcp: meta.mcp === undefined ? undefined : (normalizeSessionMcpState(meta.mcp) ?? {}),
     plugins: normalizeSessionNameList(meta.plugins) ?? [],
     skills: normalizeSessionNameList(meta.skills) ?? [],
+    createdAt: meta.createdAt,
   };
+}
+
+/** The chat's frozen set with any app-managed server that postdates it forced off. One
+ *  reader for both the runtime overlay and the Duplicate pre-fill, so they cannot disagree. */
+function correctedSessionFreeze(name: string | undefined): SessionFreeze {
+  const freeze = sessionFreeze(name);
+  if (name && freeze.mcp !== undefined) {
+    keepDesktopServerOff(name, freeze.mcp, freeze.createdAt);
+  }
+  return freeze;
 }
 
 /** Plugin slugs this chat may use — frozen by its session-start confirm. A chat with no
@@ -4248,13 +4270,34 @@ function pluginServerExclusions(slugs: readonly string[]): string[] {
   return [...pluginServerOwners()].filter(([, owner]) => !chosen.has(owner)).map(([name]) => name);
 }
 
+/** A chat that froze its MCP set before the desktop server existed reads "not listed" as
+ *  enabled. Append it once, without refreshing the session's activity stamp. */
+function keepDesktopServerOff(
+  session: string,
+  frozen: SessionMcpState,
+  createdAt: number | undefined,
+): void {
+  const disabled = frozen.disabledServers ?? [];
+  if (disabled.includes(DESKTOP_SERVER_NAME)) return;
+  const seededAt = readConfig().desktopServerSeededAt;
+  if (seededAt === undefined) return;
+  if ((createdAt ?? 0) > seededAt) return;
+  const next = { disabledServers: [...disabled, DESKTOP_SERVER_NAME].sort() };
+  frozen.disabledServers = next.disabledServers;
+  try {
+    patchSessionMetaQuietly(session, { mcp: next });
+  } catch (err) {
+    process.stderr.write(`reasonix: desktop MCP correction failed: ${messageOf(err)}\n`);
+  }
+}
+
 /** Session overlay for the MCP runtime: the chat's frozen server set plus every server
  *  owned by a plugin it did not enable. `undefined` (legacy session, no plugins) =
  *  mirror the Settings default. */
 export function sessionMcpOverrides(
   tab: Pick<Tab, "rootDir" | "currentSession">,
 ): McpSpecOverrides | undefined {
-  const freeze = sessionFreeze(tab.currentSession);
+  const freeze = correctedSessionFreeze(tab.currentSession);
   const excluded = pluginServerExclusions(freeze.plugins);
   if (freeze.mcp === undefined && excluded.length === 0) return undefined;
   const base =
@@ -6873,6 +6916,37 @@ export function installDesktopCrashGuards(
   });
 }
 
+/** Seed the desktop-control server as a DISABLED entry, so Settings and the new-chat
+ *  picker offer it without any chat gaining it by upgrading; an existing entry keeps the
+ *  user's toggle and is re-pinned. Returns whether the config was written. */
+export function ensureDesktopControlServer(cfg = readConfig(), configPath?: string): boolean {
+  const seeded = desktopControlEntry();
+  if (!seeded) return false;
+  const existing = cfg.mcpServers?.[DESKTOP_SERVER_NAME];
+  if (existing && !isDesktopConfigEntry(existing)) return false;
+  const next: McpServerConfig = {
+    ...existing,
+    transport: "stdio",
+    command: seeded.command,
+    args: seeded.args,
+  };
+  // A new entry, or a leftover with no launcher of its own, carries no user toggle: seed
+  // the default. An entry the user already switched keeps their choice either way.
+  const needsDefaultToggle = existing?.disabled === undefined && !existing?.command;
+  if (needsDefaultToggle) next.disabled = seeded.disabled === true;
+  const needsStamp = cfg.desktopServerSeededAt === undefined;
+  const changed =
+    needsStamp ||
+    !existing ||
+    existing.command !== next.command ||
+    JSON.stringify(existing.args ?? []) !== JSON.stringify(next.args);
+  if (!changed) return false;
+  if (needsStamp) cfg.desktopServerSeededAt = Date.now();
+  cfg.mcpServers = { ...(cfg.mcpServers ?? {}), [DESKTOP_SERVER_NAME]: next };
+  writeConfig(cfg, configPath);
+  return true;
+}
+
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   markPhase("desktop_command_entered");
   const log = createLogger("desktop");
@@ -6910,6 +6984,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (pruned.length > 0) log.info(`pruned ${pruned.length} never-configured session(s)`);
   } catch (err) {
     process.stderr.write(`reasonix: pending-MCP session prune failed — ${messageOf(err)}\n`);
+  }
+
+  // The bundled desktop-control server (computer use + screen capture) exists from the
+  // first boot but stays off until a chat enables it.
+  try {
+    if (ensureDesktopControlServer()) {
+      log.info(`seeded the bundled ${DESKTOP_SERVER_NAME} MCP server (disabled)`);
+    }
+  } catch (err) {
+    process.stderr.write(`reasonix: desktop MCP seed failed: ${messageOf(err)}\n`);
   }
 
   const tabs = new Map<string, Tab>();

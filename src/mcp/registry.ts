@@ -1,16 +1,19 @@
 import {
+  MAX_IMAGE_BYTES,
+  formatBytes,
   messageOf,
   sliceAlignedToCodepoint,
   sliceSuffixAlignedToCodepoint,
 } from "@reasonix/core-utils";
 import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
+import { normalizeImageToDataUrls } from "../image-format.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { WIRE_TOOL_NAME_MAX, sanitizeWireToolName, toolNameDisambiguator } from "../tool-name.js";
 import { ToolRegistry } from "../tools.js";
 import type { ToolCallContext } from "../tools.js";
 import { fitsSpecBudgetBytes, resolveMcpServerSpecBytes, specBytes } from "../tools/spec-budget.js";
-import type { JSONSchema } from "../types.js";
+import type { JSONSchema, UserContentPart } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
 import { derefJsonSchema } from "./schema-deref.js";
@@ -20,7 +23,7 @@ import {
   condenseMcpSchema,
   pruneMcpToolSchema,
 } from "./schema-prune.js";
-import type { CallToolResult, McpContentBlock, McpTool } from "./types.js";
+import type { CallToolResult, McpContentBlock, McpContentBlockImage, McpTool } from "./types.js";
 
 export interface BridgeOptions {
   /** Prefix for tool names — disambiguates collisions when bridging multiple servers. */
@@ -92,6 +95,10 @@ export interface BridgeOptions {
    *  Lets a bridge surface facts the server omits (e.g. the absolute on-disk path
    *  of a file a Playwright tool wrote relative to the server cwd). */
   transformResult?: (toolName: string, text: string, args: Record<string, unknown>) => string;
+  /** Return image content blocks as image_url parts so a vision model receives the
+   *  pixels; the tool result becomes a content-parts array instead of a string.
+   *  Default false: image blocks stay a placeholder inside the flattened text. */
+  imageBlocks?: boolean;
 }
 
 /** Mutable holder so an MCP reconnect can swap the underlying client without re-bridging tools. */
@@ -144,6 +151,8 @@ export interface BridgeEnv {
   beforeCall?: BridgeOptions["beforeCall"];
   transformArgs?: BridgeOptions["transformArgs"];
   transformResult?: BridgeOptions["transformResult"];
+  /** See BridgeOptions.imageBlocks: opt-in relay of image blocks as image_url parts. */
+  imageBlocks?: boolean;
   /** Registered (wire) name → real MCP tool name, for the per-tool toggle list
    *  once the wire name is sanitized (`sanitizeWireToolName`). In-process only. */
   bareNames?: Map<string, string>;
@@ -250,10 +259,13 @@ function registerCanonicalMcpTool(stableTool: McpTool, env: BridgeEnv): string {
             durationMs,
             details: { server: env.serverName, tool: registeredName, ok: true },
           });
-          const flat = flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+          const output = env.imageBlocks
+            ? await mcpResultToToolResult(toolResult, { maxChars: env.maxResultChars })
+            : flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+          if (Array.isArray(output)) return output;
           const text = env.transformResult
-            ? env.transformResult(stableTool.name, flat, params)
-            : flat;
+            ? env.transformResult(stableTool.name, output, params)
+            : output;
           if (env.toolingNotice && !env.toolingNoticeSeen) {
             env.toolingNoticeSeen = true;
             return `${text}\n\n${env.toolingNotice}`;
@@ -351,6 +363,7 @@ export async function bridgeMcpTools(
     beforeCall: opts.beforeCall,
     transformArgs: opts.transformArgs,
     transformResult: opts.transformResult,
+    imageBlocks: opts.imageBlocks,
     readOnlyTool: opts.readOnlyTool,
     origin: opts.origin,
     bareNames: new Map(),
@@ -466,10 +479,71 @@ export interface FlattenOptions {
 
 export function flattenMcpResult(result: CallToolResult, opts: FlattenOptions = {}): string {
   validateResultShape(result);
+  return flattenValidatedMcpResult(result, opts);
+}
+
+/** Flatten a result whose shape the caller already validated. */
+function flattenValidatedMcpResult(result: CallToolResult, opts: FlattenOptions = {}): string {
   const parts = result.content.map(blockToString);
   const joined = parts.join("\n").trim();
   const prefixed = result.isError ? `ERROR: ${joined || "(no error message from server)"}` : joined;
-  return opts.maxChars ? truncateForModel(prefixed, opts.maxChars) : prefixed;
+  return cappedText(prefixed, opts);
+}
+
+function cappedText(text: string, opts: FlattenOptions): string {
+  return opts.maxChars ? truncateForModel(text, opts.maxChars) : text;
+}
+
+/** Bridge result honouring image blocks: the text comes through as usual and each image
+ *  block is normalized into image_url parts so a vision model receives the pixels. When
+ *  nothing normalizes, the text returns with a note saying why. */
+export async function mcpResultToToolResult(
+  result: CallToolResult,
+  opts: FlattenOptions = {},
+): Promise<string | UserContentPart[]> {
+  validateResultShape(result);
+  const images = result.content.filter(
+    (block): block is McpContentBlockImage => block.type === "image",
+  );
+  if (images.length === 0 || result.isError) return flattenValidatedMcpResult(result, opts);
+
+  // Encoded size check first: decoding an over-cap payload costs memory for nothing.
+  const maxBase64Chars = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+  const notes: string[] = [];
+  const parts: UserContentPart[] = [];
+  for (const image of images) {
+    if (image.data.length > maxBase64Chars) {
+      notes.push(`[image not attached: over the ${formatBytes(MAX_IMAGE_BYTES)} image cap]`);
+      continue;
+    }
+    let normalized: Awaited<ReturnType<typeof normalizeImageToDataUrls>>;
+    try {
+      normalized = await normalizeImageToDataUrls(Buffer.from(image.data, "base64"));
+    } catch (err) {
+      notes.push(`[image not attached: ${messageOf(err)}]`);
+      continue;
+    }
+    if (!normalized.ok) {
+      notes.push(`[image not attached: ${normalized.message}]`);
+      continue;
+    }
+    for (const url of normalized.dataUrls) {
+      parts.push({ type: "image_url", image_url: { url, detail: "low" } });
+    }
+  }
+  // Nothing normalized: return the text plus why the pixels were dropped.
+  if (parts.length === 0) {
+    const text = flattenValidatedMcpResult(result);
+    return cappedText([text, ...notes].filter(Boolean).join("\n"), opts);
+  }
+
+  const text = result.content
+    .filter((block): block is Extract<McpContentBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+  const header = [text, ...notes].filter(Boolean).join("\n") || "Image attached.";
+  return [{ type: "text", text: cappedText(header, opts) }, ...parts];
 }
 
 /** Runtime schema check — MCP server responses cross a network boundary and the TypeScript types are compile-time only. */

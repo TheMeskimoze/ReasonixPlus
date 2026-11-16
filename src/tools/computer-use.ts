@@ -3,8 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { messageOf } from "@reasonix/core-utils";
-import type { ToolCallContext, ToolRegistry } from "../tools.js";
-import { type MonitorInfo, findMonitor } from "./screen-capture.js";
+import { type MonitorInfo, defaultListMonitors, findMonitor } from "./screen-capture.js";
 import {
   PS_WIN_FOCUS_TYPE,
   psMatchWindowStatements,
@@ -25,9 +24,6 @@ export interface ComputerUseOptions {
     app?: string;
   }) => Promise<void>;
 }
-
-const DESCRIPTION =
-  "Perform one atomic computer-use action on an explicitly selected monitor. For click, the host positions the pointer and presses/releases the button in the same native operation, so do not call a separate mouse-move tool first. Coordinates are relative to the selected monitor and must be inside it. For focus, bring the named window to the foreground and maximize it on the selected monitor.";
 
 function selectMonitor(monitors: MonitorInfo[], query: unknown): MonitorInfo {
   if (query === undefined || query === null || query === "") {
@@ -82,60 +78,27 @@ async function nativeAction(action: {
   });
 }
 
-export function registerComputerUseTool(
-  registry: ToolRegistry,
+/** Run one atomic action. Throws with the caller-facing message on every failure path. */
+export async function runComputerUse(
+  args: Record<string, unknown>,
   opts: ComputerUseOptions = {},
-): ToolRegistry {
-  registry.register({
-    name: "computer_use",
-    description: DESCRIPTION,
-    parameters: {
-      type: "object",
-      required: ["action", "monitor"],
-      properties: {
-        action: { type: "string", enum: ["click", "focus"] },
-        monitor: { type: "integer", description: "Required monitor index." },
-        x: { type: "integer", description: "Click X relative to the monitor." },
-        y: { type: "integer", description: "Click Y relative to the monitor." },
-        app: { type: "string", description: "Window title or process name for focus." },
-      },
-    },
-    fn: async (args: Record<string, unknown>, _ctx?: ToolCallContext): Promise<string> => {
-      const monitors = await (
-        opts.listMonitors ??
-        (async () => {
-          const { defaultListMonitors } = await import("./screen-capture.js");
-          return defaultListMonitors();
-        })
-      )();
-      let monitor: MonitorInfo;
-      try {
-        monitor = selectMonitor(monitors, args.monitor);
-      } catch (err) {
-        return messageOf(err);
-      }
-      const action =
-        args.action === "click" ? "click" : args.action === "focus" ? "focus" : undefined;
-      if (!action) return "computer_use: action must be 'click' or 'focus'.";
-      const selected: {
-        kind: "click" | "focus";
-        monitor: MonitorInfo;
-        point?: Point;
-        app?: string;
-      } =
-        action === "click"
-          ? { kind: action, monitor, point: point(args, monitor) }
-          : { kind: action, monitor, app: String(args.app ?? "").trim() };
-      if (action === "focus" && !selected.app) return "computer_use: app is required for focus.";
-      try {
-        await (opts.actionRunner ?? nativeAction)(selected);
-      } catch (err) {
-        return `computer_use: ${messageOf(err)}`;
-      }
-      return action === "click"
-        ? `computer_use: clicked monitor ${monitor.index} at (${(selected as { point: Point }).point.x}, ${(selected as { point: Point }).point.y}) atomically.`
-        : `computer_use: focused and maximized '${(selected as { app: string }).app}' on monitor ${monitor.index}.`;
-    },
-  });
-  return registry;
+): Promise<string> {
+  const monitors = await (opts.listMonitors ?? defaultListMonitors)();
+  const monitor = selectMonitor(monitors, args.monitor);
+  const action = args.action === "click" ? "click" : args.action === "focus" ? "focus" : undefined;
+  if (!action) throw new Error("computer_use: action must be 'click' or 'focus'.");
+  const selected: { kind: "click" | "focus"; monitor: MonitorInfo; point?: Point; app?: string } =
+    action === "click"
+      ? { kind: action, monitor, point: point(args, monitor) }
+      : { kind: action, monitor, app: String(args.app ?? "").trim() };
+  if (action === "focus" && !selected.app)
+    throw new Error("computer_use: app is required for focus.");
+  try {
+    await (opts.actionRunner ?? nativeAction)(selected);
+  } catch (err) {
+    throw new Error(`computer_use: ${messageOf(err)}`);
+  }
+  return action === "click"
+    ? `computer_use: clicked monitor ${monitor.index} at (${(selected as { point: Point }).point.x}, ${(selected as { point: Point }).point.y}) atomically.`
+    : `computer_use: focused and maximized '${(selected as { app: string }).app}' on monitor ${monitor.index}.`;
 }

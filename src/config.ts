@@ -921,6 +921,9 @@ export interface ReasonixConfig {
   /** Sign-ins for HTTP MCP servers, keyed by server name. Separate from `mcpServers` so
    *  the plugin store can rewrite an entry without taking the token with it. */
   mcpOAuth?: Record<string, McpOAuthCreds>;
+  /** Epoch-ms the bundled desktop-control MCP server was first seeded. Chats that froze
+   *  their MCP set before this stamp get the server forced off; later chats own it. */
+  desktopServerSeededAt?: number;
   /** Installed agent plugins, keyed by slug — one record per `~/.reasonix/plugins/<slug>`. */
   plugins?: Record<string, PluginRecord>;
   /** Installed standalone skills, keyed by store id — one record per `~/.reasonix/skills/<id>`.

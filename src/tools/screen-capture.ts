@@ -1,13 +1,10 @@
-/** screen_capture: captures screen or rectangular region from a chosen monitor
- *  and directly feeds the capture to the see_image tool for vision analysis. */
+/** Screen capture implementation: monitor and crop geometry plus the per-platform runners. */
 
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { messageOf } from "@reasonix/core-utils";
-import type { ToolCallContext, ToolRegistry } from "../tools.js";
-import type { UserContentPart } from "../types.js";
 import { pruneScreenshots, screenshotDir } from "./screenshot-dir.js";
 import {
   PS_WIN_FOCUS_TYPE,
@@ -46,7 +43,7 @@ export interface FocusResult {
 }
 
 export interface ScreenCaptureToolOptions {
-  /** Project root for resolving relative paths. Defaults to ctx.rootDir. */
+  /** Project root for resolving relative paths and the default screenshot folder. */
   rootDir?: string;
   /** Optional custom capture runner (useful for mocking in tests). */
   captureRunner?: (options: {
@@ -59,9 +56,6 @@ export interface ScreenCaptureToolOptions {
   /** Optional custom monitor lister (useful for mocking in tests). */
   listMonitors?: () => Promise<MonitorInfo[]>;
 }
-
-const DESCRIPTION =
-  "Capture one monitor, with optional top-left and bottom-right crop coordinates relative to that monitor, never the virtual desktop. When an app/window is given it is focused first and the capture follows that window's own display, so no monitor index has to be guessed; pass `monitor` only to target a display explicitly when no app is given. Directly feeds the capture to see_image.";
 
 /** Common DPI-awareness preamble for Windows PowerShell operations. */
 const WIN_DPI_PREAMBLE = [
@@ -629,190 +623,126 @@ export function resolveOutputPath(
   return targetPath;
 }
 
-export function registerScreenCaptureTool(
-  registry: ToolRegistry,
+export interface ScreenCaptureOutcome {
+  /** Absolute path of the written PNG. */
+  path: string;
+  monitor: MonitorInfo;
+  area: CaptureArea;
+  /** App focused before the capture, when one was requested. */
+  app?: string;
+}
+
+/** One-line description of a finished capture, shared by every caller. */
+export function describeCapture(outcome: ScreenCaptureOutcome): string {
+  const area = `[${outcome.area.x}, ${outcome.area.y}] to [${outcome.area.x + outcome.area.width}, ${outcome.area.y + outcome.area.height}]`;
+  const app = outcome.app ? `app "${outcome.app}", ` : "";
+  return `Screen capture (${app}monitor ${outcome.monitor.index} [${outcome.monitor.name}], area ${area})`;
+}
+
+/** Capture one monitor (optionally cropped, optionally after focusing an app) to a PNG.
+ *  Throws with the caller-facing message on every failure path. */
+export async function captureScreen(
+  args: Record<string, unknown>,
   opts: ScreenCaptureToolOptions = {},
-): ToolRegistry {
-  registry.register({
-    name: "screen_capture",
-    description: DESCRIPTION,
-    readOnly: true,
-    parameters: {
-      type: "object",
-      properties: {
-        app: {
-          type: "string",
-          description:
-            "Optional: Application name, process name, or window title substring to bring to the foreground before capturing the screenshot.",
-        },
-        monitor: {
-          type: "integer",
-          description:
-            "Optional: monitor index (0 for primary/first monitor, 1 for second, etc.), used only when no app is given. When an app/window is focused the capture follows that window's own display. Coordinates are relative to the selected monitor.",
-        },
-        top_left_x: {
-          type: "number",
-          description:
-            "Optional: Top-left corner X coordinate in pixels relative to the monitor's top-left corner.",
-        },
-        top_left_y: {
-          type: "number",
-          description:
-            "Optional: Top-left corner Y coordinate in pixels relative to the monitor's top-left corner.",
-        },
-        bottom_right_x: {
-          type: "number",
-          description:
-            "Optional: Bottom-right corner X coordinate in pixels relative to the monitor's top-left corner.",
-        },
-        bottom_right_y: {
-          type: "number",
-          description:
-            "Optional: Bottom-right corner Y coordinate in pixels relative to the monitor's top-left corner.",
-        },
-        path: {
-          type: "string",
-          description:
-            "Optional PNG destination path. Relative paths resolve under the workspace; absolute paths are accepted. If omitted, saves to .reasonix/screenshots/.",
-        },
-      },
-    },
-    fn: async (
-      args: Record<string, unknown>,
-      ctx?: ToolCallContext,
-    ): Promise<string | UserContentPart[]> => {
-      if (!registry.has("see_image")) {
-        return "screen_capture: see_image tool is not registered in the tool registry.";
-      }
+): Promise<ScreenCaptureOutcome> {
+  const lister = opts.listMonitors ?? defaultListMonitors;
+  let monitors: MonitorInfo[];
+  try {
+    monitors = await lister();
+  } catch (err) {
+    throw new Error(`screen_capture: failed to query monitors (${messageOf(err)})`);
+  }
 
-      const lister = opts.listMonitors ?? defaultListMonitors;
-      let monitors: MonitorInfo[];
-      try {
-        monitors = await lister();
-      } catch (err) {
-        return `screen_capture: failed to query monitors (${messageOf(err)})`;
-      }
+  // Resolve an optional target app and focus it first: the window's monitor
+  // (which may be a secondary display) drives monitor selection below.
+  const rawApp = args.app ?? args.window ?? args.window_title ?? args.focus_app;
+  const targetApp =
+    (typeof rawApp === "string" && rawApp.trim().length > 0) || typeof rawApp === "number"
+      ? String(rawApp).trim()
+      : undefined;
 
-      // Resolve an optional target app and focus it first: the window's monitor
-      // (which may be a secondary display) drives monitor selection below.
-      const rawApp = args.app ?? args.window ?? args.window_title ?? args.focus_app;
-      const targetApp =
-        (typeof rawApp === "string" && rawApp.trim().length > 0) || typeof rawApp === "number"
-          ? String(rawApp).trim()
-          : undefined;
+  let focusResult: FocusResult | undefined;
+  if (targetApp) {
+    const focuser = opts.focusRunner ?? defaultFocusRunner;
+    try {
+      focusResult = await focuser(targetApp);
+    } catch (err) {
+      throw new Error(messageOf(err));
+    }
+  }
 
-      let focusResult: FocusResult | undefined;
-      if (targetApp) {
-        const focuser = opts.focusRunner ?? defaultFocusRunner;
-        try {
-          focusResult = await focuser(targetApp);
-        } catch (err) {
-          return messageOf(err);
-        }
-      }
+  // Pick the capture display. A focused app is authoritative: the capture follows the
+  // window's own display, so the caller never has to guess (or match) a monitor index.
+  // An explicit `monitor` is consulted only when there is no focused app to derive from
+  // - it never overrides the app onto a different, wrong screen.
+  const hasExplicitMonitor =
+    args.monitor !== undefined && args.monitor !== null && args.monitor !== "";
 
-      // Pick the capture display. A focused app is authoritative: the capture follows the
-      // window's own display, so the caller never has to guess (or match) a monitor index.
-      // An explicit `monitor` is consulted only when there is no focused app to derive from
-      // - it never overrides the app onto a different, wrong screen.
-      const hasExplicitMonitor =
-        args.monitor !== undefined && args.monitor !== null && args.monitor !== "";
+  const focusedMonitorName = focusResult?.monitorName;
+  const focusedMonitor = focusedMonitorName
+    ? monitors.find(
+        (m) =>
+          m.id.toLowerCase() === focusedMonitorName.toLowerCase() ||
+          m.name.toLowerCase() === focusedMonitorName.toLowerCase(),
+      )
+    : undefined;
 
-      const focusedMonitorName = focusResult?.monitorName;
-      const focusedMonitor = focusedMonitorName
-        ? monitors.find(
-            (m) =>
-              m.id.toLowerCase() === focusedMonitorName.toLowerCase() ||
-              m.name.toLowerCase() === focusedMonitorName.toLowerCase(),
-          )
-        : undefined;
+  let selectedMonitor: MonitorInfo | undefined;
+  if (focusedMonitor) {
+    selectedMonitor = focusedMonitor;
+  } else if (hasExplicitMonitor) {
+    try {
+      selectedMonitor = selectMonitor(monitors, args.monitor);
+    } catch (err) {
+      throw new Error(messageOf(err));
+    }
+  }
 
-      let selectedMonitor: MonitorInfo | undefined;
-      if (focusedMonitor) {
-        selectedMonitor = focusedMonitor;
-      } else if (hasExplicitMonitor) {
-        try {
-          selectedMonitor = selectMonitor(monitors, args.monitor);
-        } catch (err) {
-          return messageOf(err);
-        }
-      }
+  if (!selectedMonitor) {
+    throw new Error(
+      targetApp
+        ? `screen_capture: could not determine the display for '${targetApp}'; pass an explicit monitor.`
+        : "screen_capture: monitor is required when no app is specified; capture is always constrained to one monitor.",
+    );
+  }
 
-      if (!selectedMonitor) {
-        return targetApp
-          ? `screen_capture: could not determine the display for '${targetApp}'; pass an explicit monitor.`
-          : "screen_capture: monitor is required when no app is specified; capture is always constrained to one monitor.";
-      }
+  let topLeft: { x: number; y: number } | undefined;
+  let bottomRight: { x: number; y: number } | undefined;
+  try {
+    const x1 = parseCoordinate(args.top_left_x ?? args.x1 ?? args.left, "top_left_x");
+    const y1 = parseCoordinate(args.top_left_y ?? args.y1 ?? args.top, "top_left_y");
+    topLeft =
+      x1 !== undefined && y1 !== undefined
+        ? { x: x1, y: y1 }
+        : parseCornerPair(args.top_left ?? args.topLeft, "top_left");
 
-      // Parse coordinates
-      let topLeft: { x: number; y: number } | undefined;
-      let bottomRight: { x: number; y: number } | undefined;
-      try {
-        const x1 = parseCoordinate(args.top_left_x ?? args.x1 ?? args.left, "top_left_x");
-        const y1 = parseCoordinate(args.top_left_y ?? args.y1 ?? args.top, "top_left_y");
-        topLeft =
-          x1 !== undefined && y1 !== undefined
-            ? { x: x1, y: y1 }
-            : parseCornerPair(args.top_left ?? args.topLeft, "top_left");
+    const x2 = parseCoordinate(args.bottom_right_x ?? args.x2 ?? args.right, "bottom_right_x");
+    const y2 = parseCoordinate(args.bottom_right_y ?? args.y2 ?? args.bottom, "bottom_right_y");
+    bottomRight =
+      x2 !== undefined && y2 !== undefined
+        ? { x: x2, y: y2 }
+        : parseCornerPair(args.bottom_right ?? args.bottomRight, "bottom_right");
+  } catch (err) {
+    throw new Error(messageOf(err));
+  }
 
-        const x2 = parseCoordinate(args.bottom_right_x ?? args.x2 ?? args.right, "bottom_right_x");
-        const y2 = parseCoordinate(args.bottom_right_y ?? args.y2 ?? args.bottom, "bottom_right_y");
-        bottomRight =
-          x2 !== undefined && y2 !== undefined
-            ? { x: x2, y: y2 }
-            : parseCornerPair(args.bottom_right ?? args.bottomRight, "bottom_right");
-      } catch (err) {
-        return messageOf(err);
-      }
+  let cropArea: CaptureArea;
+  try {
+    cropArea = calculateCaptureArea(selectedMonitor, topLeft, bottomRight);
+  } catch (err) {
+    throw new Error(messageOf(err));
+  }
 
-      let cropArea: CaptureArea;
-      try {
-        cropArea = calculateCaptureArea(selectedMonitor, topLeft, bottomRight);
-      } catch (err) {
-        return messageOf(err);
-      }
+  const customPath =
+    typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : undefined;
+  const outputPath = resolveOutputPath(customPath, opts.rootDir);
 
-      // Determine output path
-      const customPath =
-        typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : undefined;
-      const rootDir = ctx?.rootDir ?? opts.rootDir;
-      const outputPath = resolveOutputPath(customPath, rootDir);
+  const runner = opts.captureRunner ?? defaultCaptureRunner;
+  try {
+    await runner({ monitor: selectedMonitor, crop: cropArea, outputPath });
+  } catch (err) {
+    throw new Error(`screen_capture: capture failed (${messageOf(err)})`);
+  }
 
-      // Execute capture
-      const runner = opts.captureRunner ?? defaultCaptureRunner;
-      try {
-        await runner({
-          monitor: selectedMonitor,
-          crop: cropArea,
-          outputPath,
-        });
-      } catch (err) {
-        return `screen_capture: capture failed (${messageOf(err)})`;
-      }
-
-      // Feed directly to see_image
-      const seeImageResult = await registry.dispatch(
-        "see_image",
-        JSON.stringify({ path: outputPath }),
-        ctx,
-      );
-
-      // Enhance text part in see_image result with capture metadata
-      if (Array.isArray(seeImageResult)) {
-        const parts = [...seeImageResult] as UserContentPart[];
-        const textPart = parts.find((p): p is { type: "text"; text: string } => p.type === "text");
-        const areaDesc = `[${cropArea.x}, ${cropArea.y}] to [${cropArea.x + cropArea.width}, ${cropArea.y + cropArea.height}]`;
-        const appDesc = targetApp ? `app "${targetApp}", ` : "";
-        const metaPrefix = `Screen capture (${appDesc}monitor ${selectedMonitor.index} [${selectedMonitor.name}], area ${areaDesc}): `;
-        if (textPart) {
-          textPart.text = `${metaPrefix}${textPart.text}`;
-        }
-        return parts;
-      }
-
-      return seeImageResult;
-    },
-  });
-
-  return registry;
+  return { path: outputPath, monitor: selectedMonitor, area: cropArea, app: targetApp };
 }

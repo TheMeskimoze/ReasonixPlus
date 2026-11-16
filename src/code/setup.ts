@@ -23,7 +23,6 @@ import { registerCapabilityTools } from "../tools/capabilities.js";
 import type { CapabilityChange, CapabilityKind } from "../tools/capability-rows.js";
 import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
-import { registerComputerUseTool } from "../tools/computer-use.js";
 import { registerFilesystemTools } from "../tools/filesystem.js";
 import { registerImageGenTool } from "../tools/image-gen.js";
 import { JobRegistry } from "../tools/jobs.js";
@@ -31,7 +30,6 @@ import { registerMemoryTools } from "../tools/memory.js";
 import { registerPlanTool } from "../tools/plan.js";
 import { registerRulesTools } from "../tools/rules.js";
 import { registerScaffoldTools } from "../tools/scaffold.js";
-import { registerScreenCaptureTool } from "../tools/screen-capture.js";
 import { registerSeeImageTool } from "../tools/see-image.js";
 import { registerShellTools } from "../tools/shell.js";
 import {
@@ -156,8 +154,6 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   // after a model has emitted a see_image call but before dispatch starts, so
   // capability changes must never unregister an in-flight call's target.
   registerSeeImageTool(tools, { rootDir: opts.rootDir });
-  registerScreenCaptureTool(tools, { rootDir: opts.rootDir });
-  registerComputerUseTool(tools);
   // One options object feeds both capability modules: they read the same config, the same
   // live specs and the same host callback, and must never disagree about them.
   const capabilityOpts = {

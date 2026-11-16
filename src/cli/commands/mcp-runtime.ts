@@ -5,6 +5,11 @@ import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
+import {
+  isDesktopControlSpec,
+  isDesktopReadOnlyTool,
+  withDesktopControlRuntime,
+} from "../../mcp/desktop-control.js";
 import { withPlaywrightWorkspaceProfile } from "../../mcp/extension.js";
 import { isGmailMailSpec, resolveGmailToken } from "../../mcp/gmail-mail.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
@@ -249,10 +254,12 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const workspaceDir = ctx.getWorkspaceDir?.();
       // Managed servers bridge with the surface this build ships, not with whatever an
       // older install left in config: playwright re-pins its connection flags, outlook
-      // rewrites its `--enabled-tools` allow-list.
-      const spec = isPlaywrightSpec(configuredSpec)
-        ? withPlaywrightWorkspaceProfile(configuredSpec, workspaceDir)
-        : withOutlookMailSurface(configuredSpec);
+      // rewrites its `--enabled-tools` allow-list, desktop re-pins its bundle path.
+      const spec = withDesktopControlRuntime(
+        isPlaywrightSpec(configuredSpec)
+          ? withPlaywrightWorkspaceProfile(configuredSpec, workspaceDir)
+          : withOutlookMailSurface(configuredSpec),
+      );
       if (spec.disabled) {
         sink({ state: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
@@ -313,6 +320,12 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         host,
         ready: bridgeReady,
         hiddenTools,
+        // The desktop server returns captures as image blocks: relay the pixels instead
+        // of the placeholder text every other server still gets, and keep capture usable
+        // in read-only mode.
+        ...(isDesktopControlSpec(spec)
+          ? { imageBlocks: true, readOnlyTool: isDesktopReadOnlyTool }
+          : {}),
         ...(isOutlookMailSpec(spec)
           ? {
               beforeCall: (toolName, args, toolContext) =>

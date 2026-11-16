@@ -1028,6 +1028,14 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
   return next;
 }
 
+/** Rewrite meta without refreshing `updatedAt`: for corrections that must not move the
+ *  session to the top of the sidebar. A missing session is not re-created. */
+export function patchSessionMetaQuietly(name: string, patch: Partial<SessionMeta>): void {
+  const cur = loadSessionMeta(name);
+  const next: SessionMeta = { ...cur, ...patch, createdAt: creationStampFor(cur, name) };
+  if (writeSessionMeta(name, next)) sessionDirectoryIndex.markStale(name);
+}
+
 export interface ModelPrefs {
   model: string;
   reasoningEffort: ReasoningEffort;

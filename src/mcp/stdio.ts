@@ -1,6 +1,8 @@
 /** MCP stdio = newline-delimited JSON-RPC; transport iface lets tests fake it without spawning. */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { killProcessTree } from "../tools/process-tree.js";
 import { BaseMcpTransport } from "./base-transport.js";
 import { syntheticRpcError } from "./transport-utils.js";
@@ -41,7 +43,7 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
     // child_process.spawn without shell:true can't resolve them, which
     // breaks `--mcp "npx -y some-server"` — the most common MCP setup.
     // Default shell:true on win32 and leave POSIX alone.
-    const shell = opts.shell ?? process.platform === "win32";
+    const shell = opts.shell ?? defaultShellForCommand(opts.command);
 
     if (shell) {
       // Node's shell:true + args[] triggers DEP0190 because it concatenates
@@ -184,6 +186,21 @@ export function formatServerExitReason(finalCode: number, detail: string): strin
   }
 
   return `server process exited with code ${finalCode}: ${detail}`;
+}
+
+/** A shell is needed only for PATH/PATHEXT resolution. An absolute, existing file is
+ *  spawned directly: `cmd.exe` splits `C:\Program Files\...\node.exe` at the space. */
+export function defaultShellForCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== "win32") return false;
+  if (!isAbsolute(command)) return true;
+  try {
+    return !statSync(command).isFile();
+  } catch {
+    return true;
+  }
 }
 
 export function quoteArg(s: string, windows: boolean): string {

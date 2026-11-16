@@ -12,7 +12,9 @@ export default defineConfig([
     noExternal: ["@reasonix/core-utils"],
   },
   {
-    entry: ["src/cli/index.ts"],
+    // `desktop-mcp` is the bundled stdio MCP server the daemon spawns beside
+    // itself (`dist/cli/desktop-mcp.js`), so it ships with the same inlining rules.
+    entry: { index: "src/cli/index.ts", "desktop-mcp": "src/mcp/servers/desktop-mcp.ts" },
     format: ["esm"],
     dts: false,
     clean: false,

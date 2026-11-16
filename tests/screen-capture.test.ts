@@ -1,20 +1,34 @@
+/** screen_capture behaviour, exercised through the desktop MCP tool handler with the
+ *  native capture/focus seams injected. */
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Jimp } from "jimp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ToolRegistry } from "../src/tools.js";
+import { callDesktopTool } from "../src/mcp/servers/desktop/tools.js";
+import type { CallToolResult } from "../src/mcp/types.js";
 import {
   type CaptureArea,
   type FocusResult,
   type MonitorInfo,
   calculateCaptureArea,
-  registerScreenCaptureTool,
   resolveOutputPath,
   selectMonitor,
 } from "../src/tools/screen-capture.js";
-import { registerSeeImageTool } from "../src/tools/see-image.js";
-import type { UserContentPart } from "../src/types.js";
+
+function textOf(result: CallToolResult): string {
+  return result.content
+    .filter((block) => block.type === "text")
+    .map((block) => (block as { text: string }).text)
+    .join("\n");
+}
+
+function imagesOf(result: CallToolResult): Array<{ data: string; mimeType: string }> {
+  return result.content.filter(
+    (block): block is { type: "image"; data: string; mimeType: string } => block.type === "image",
+  );
+}
 
 describe("screen_capture", () => {
   let root: string;
@@ -59,65 +73,42 @@ describe("screen_capture", () => {
     return await img.getBuffer("image/png");
   }
 
-  function setupRegistry(
+  function shoot(
+    args: Record<string, unknown>,
     opts: {
-      includeSeeImage?: boolean;
       focusRunner?: (app: string) => Promise<FocusResult | undefined>;
+      includeImage?: boolean;
     } = {},
-  ): ToolRegistry {
-    const registry = new ToolRegistry();
-    if (opts.includeSeeImage !== false) {
-      registerSeeImageTool(registry, { rootDir: root });
-    }
-    registerScreenCaptureTool(registry, {
+  ): Promise<CallToolResult> {
+    return callDesktopTool("screen_capture", args, {
       rootDir: root,
-      listMonitors: async () => mockMonitors,
-      focusRunner:
-        opts.focusRunner ??
-        (async (app) => {
-          focusedApps.push(app);
-          return undefined;
-        }),
-      captureRunner: async (opt) => {
-        capturedOptions.push(opt);
-        const buf = await mockPngBuffer();
-        writeFileSync(opt.outputPath, buf);
+      includeImage: opts.includeImage ?? true,
+      screen: {
+        listMonitors: async () => mockMonitors,
+        focusRunner:
+          opts.focusRunner ??
+          (async (app) => {
+            focusedApps.push(app);
+            return undefined;
+          }),
+        captureRunner: async (opt) => {
+          capturedOptions.push(opt);
+          writeFileSync(opt.outputPath, await mockPngBuffer());
+        },
       },
     });
-    return registry;
   }
 
-  it("registers tool with correct name and schema", () => {
-    const reg = setupRegistry();
-    expect(reg.has("screen_capture")).toBe(true);
-    const def = reg.get("screen_capture");
-    expect(def).toBeDefined();
-    expect(def?.name).toBe("screen_capture");
-    const props = (def?.parameters as { properties: Record<string, unknown> }).properties;
-    expect(props).toHaveProperty("app");
-    expect(props).toHaveProperty("monitor");
-    expect(props).toHaveProperty("top_left_x");
-    expect(props).toHaveProperty("top_left_y");
-    expect(props).toHaveProperty("bottom_right_x");
-    expect(props).toHaveProperty("bottom_right_y");
-  });
+  it("captures the explicitly selected primary monitor and returns the PNG", async () => {
+    const result = await shoot({ monitor: 0 });
 
-  it("captures the explicitly selected primary monitor and directly feeds to see_image", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ monitor: 0 }), {
-      rootDir: root,
-    });
-
-    expect(Array.isArray(result)).toBe(true);
-    const parts = result as UserContentPart[];
-    const textPart = parts.find((p) => p.type === "text") as { text: string } | undefined;
-    expect(textPart?.text).toContain("Screen capture (monitor 0 [\\\\.\\DISPLAY1]");
-    expect(textPart?.text).toContain("Image loaded at");
-    const imagePart = parts.find((p) => p.type === "image_url") as
-      | { image_url: { url: string } }
-      | undefined;
-    // Screenshots are opaque, so the pixels re-encode to JPEG for the request.
-    expect(imagePart?.image_url.url.startsWith("data:image/jpeg;base64,")).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result)).toContain("Screen capture (monitor 0 [\\\\.\\DISPLAY1]");
+    expect(textOf(result)).toContain("Pixels attached below");
+    const images = imagesOf(result);
+    expect(images).toHaveLength(1);
+    expect(images[0]?.mimeType).toBe("image/png");
+    expect(Buffer.from(images[0]!.data, "base64").subarray(1, 4).toString("ascii")).toBe("PNG");
 
     expect(capturedOptions).toHaveLength(1);
     expect(capturedOptions[0]?.monitor.index).toBe(0);
@@ -126,12 +117,9 @@ describe("screen_capture", () => {
   });
 
   it("captures a specific monitor by index", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ monitor: 1 }), {
-      rootDir: root,
-    });
+    const result = await shoot({ monitor: 1 });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions).toHaveLength(1);
     expect(capturedOptions[0]?.monitor.index).toBe(1);
     expect(capturedOptions[0]?.crop.width).toBe(2560);
@@ -140,20 +128,15 @@ describe("screen_capture", () => {
   });
 
   it("captures a specific rectangular region using top_left and bottom_right parameters", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: 100,
-        top_left_y: 150,
-        bottom_right_x: 500,
-        bottom_right_y: 450,
-      }),
-      { rootDir: root },
-    );
+    const result = await shoot({
+      monitor: 0,
+      top_left_x: 100,
+      top_left_y: 150,
+      bottom_right_x: 500,
+      bottom_right_y: 450,
+    });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions).toHaveLength(1);
     const opt = capturedOptions[0]!;
     expect(opt.crop.x).toBe(100);
@@ -165,20 +148,15 @@ describe("screen_capture", () => {
   });
 
   it("normalizes inverted corner coordinates", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: 500,
-        top_left_y: 450,
-        bottom_right_x: 100,
-        bottom_right_y: 150,
-      }),
-      { rootDir: root },
-    );
+    const result = await shoot({
+      monitor: 0,
+      top_left_x: 500,
+      top_left_y: 450,
+      bottom_right_x: 100,
+      bottom_right_y: 150,
+    });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions).toHaveLength(1);
     const opt = capturedOptions[0]!;
     expect(opt.crop.x).toBe(100);
@@ -188,18 +166,13 @@ describe("screen_capture", () => {
   });
 
   it("supports array pair coordinates [x, y]", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 1,
-        top_left: [200, 250],
-        bottom_right: [600, 650],
-      }),
-      { rootDir: root },
-    );
+    const result = await shoot({
+      monitor: 1,
+      top_left: [200, 250],
+      bottom_right: [600, 650],
+    });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions).toHaveLength(1);
     const opt = capturedOptions[0]!;
     expect(opt.monitor.index).toBe(1);
@@ -211,216 +184,151 @@ describe("screen_capture", () => {
   });
 
   it("fails fast with loud error on invalid monitor selection", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ monitor: 99 }), {
-      rootDir: root,
-    });
+    const result = await shoot({ monitor: 99 });
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("screen_capture: invalid monitor '99'");
-    expect(result).toContain("Available monitors");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("screen_capture: invalid monitor '99'");
+    expect(textOf(result)).toContain("Available monitors");
   });
 
   it("fails fast with loud error when only one corner is provided", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({ monitor: 0, top_left_x: 100, top_left_y: 100 }),
-      { rootDir: root },
-    );
+    const result = await shoot({ monitor: 0, top_left_x: 100, top_left_y: 100 });
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("both top-left and bottom-right corners must be specified");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("both top-left and bottom-right corners must be specified");
   });
 
   it("fails fast with loud error on zero area crop region", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: 100,
-        top_left_y: 100,
-        bottom_right_x: 100,
-        bottom_right_y: 100,
-      }),
-      { rootDir: root },
-    );
+    const result = await shoot({
+      monitor: 0,
+      top_left_x: 100,
+      top_left_y: 100,
+      bottom_right_x: 100,
+      bottom_right_y: 100,
+    });
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("invalid capture region: width and height must be positive");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("invalid capture region: width and height must be positive");
   });
 
   it("fails fast with loud error when region is entirely outside monitor bounds", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: 2000,
-        top_left_y: 2000,
-        bottom_right_x: 2500,
-        bottom_right_y: 2500,
-      }),
-      { rootDir: root },
-    );
-
-    expect(typeof result).toBe("string");
-    expect(result).toContain("is outside monitor bounds (1920x1080)");
-  });
-
-  it("fails loud if see_image tool is not registered", async () => {
-    const reg = setupRegistry({ includeSeeImage: false });
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ monitor: 0 }), {
-      rootDir: root,
+    const result = await shoot({
+      monitor: 0,
+      top_left_x: 2000,
+      top_left_y: 2000,
+      bottom_right_x: 2500,
+      bottom_right_y: 2500,
     });
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("see_image tool is not registered");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("is outside monitor bounds (1920x1080)");
   });
 
   it("saves screenshot to custom path when provided", async () => {
-    const reg = setupRegistry();
     const customDest = join(root, "custom-shot.png");
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({ monitor: 0, path: customDest }),
-      {
-        rootDir: root,
-      },
-    );
+    const result = await shoot({ monitor: 0, path: customDest });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result)).toContain(customDest);
     expect(capturedOptions).toHaveLength(1);
     expect(capturedOptions[0]?.outputPath).toBe(customDest);
   });
 
-  it("brings specified app to foreground before capture and records in metadata", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({ app: "Blender", monitor: 0 }),
-      {
-        rootDir: root,
-      },
-    );
+  it("creates the parent folder of a nested custom path", async () => {
+    const customDest = join(root, "shots", "nested", "custom.png");
+    mkdirSync(join(root, "shots", "nested"), { recursive: true });
+    const result = await shoot({ monitor: 0, path: customDest });
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(capturedOptions[0]?.outputPath).toBe(customDest);
+  });
+
+  it("brings specified app to foreground before capture and records in metadata", async () => {
+    const result = await shoot({ app: "Blender", monitor: 0 });
+
+    expect(result.isError).toBeUndefined();
     expect(focusedApps).toEqual(["Blender"]);
-    const textPart = (result as UserContentPart[]).find((p) => p.type === "text") as
-      | { text: string }
-      | undefined;
-    expect(textPart?.text).toContain('app "Blender"');
+    expect(textOf(result)).toContain('app "Blender"');
     expect(capturedOptions).toHaveLength(1);
   });
 
   it("follows the focused app's own display instead of a conflicting monitor index", async () => {
-    const reg = setupRegistry({
-      focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }),
-    });
-
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({ app: "Blender", monitor: 0 }),
-      {
-        rootDir: root,
-      },
+    const result = await shoot(
+      { app: "Blender", monitor: 0 },
+      { focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }) },
     );
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions).toHaveLength(1);
     expect(capturedOptions[0]?.monitor.index).toBe(1);
   });
 
   it("derives the display from the focused app when no monitor is passed", async () => {
-    const reg = setupRegistry({
-      focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }),
-    });
+    const result = await shoot(
+      { app: "Blender" },
+      { focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }) },
+    );
 
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ app: "Blender" }), {
-      rootDir: root,
-    });
-
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions[0]?.monitor.index).toBe(1);
   });
 
   it("requires a monitor when no app is given to derive one from", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch("screen_capture", JSON.stringify({}), {
-      rootDir: root,
-    });
+    const result = await shoot({});
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("monitor is required when no app is specified");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("monitor is required when no app is specified");
     expect(capturedOptions).toHaveLength(0);
   });
 
   it("does not infer a monitor from an unresolved focused app", async () => {
-    const reg = setupRegistry({
-      focusRunner: async () => ({ monitorName: "NO_SUCH_DISPLAY" }),
-    });
-
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({ app: "Blender", monitor: 0 }),
-      {
-        rootDir: root,
-      },
+    const result = await shoot(
+      { app: "Blender", monitor: 0 },
+      { focusRunner: async () => ({ monitorName: "NO_SUCH_DISPLAY" }) },
     );
 
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.isError).toBeUndefined();
     expect(capturedOptions[0]?.monitor.index).toBe(0);
   });
 
   it("supports window and window_title aliases for focusing", async () => {
-    const reg = setupRegistry();
-    await reg.dispatch("screen_capture", JSON.stringify({ window: "UnrealEditor", monitor: 0 }), {
-      rootDir: root,
-    });
+    await shoot({ window: "UnrealEditor", monitor: 0 });
     expect(focusedApps).toContain("UnrealEditor");
 
-    await reg.dispatch("screen_capture", JSON.stringify({ window_title: "Obsidian", monitor: 0 }), {
-      rootDir: root,
-    });
+    await shoot({ window_title: "Obsidian", monitor: 0 });
     expect(focusedApps).toContain("Obsidian");
   });
 
   it("fails fast and loud without capturing if app is not found", async () => {
-    const reg = setupRegistry({
-      focusRunner: async (app) => {
-        throw new Error(
-          `screen_capture: no running application or window matching '${app}' found.`,
-        );
+    const result = await shoot(
+      { app: "MissingApp" },
+      {
+        focusRunner: async (app) => {
+          throw new Error(
+            `screen_capture: no running application or window matching '${app}' found.`,
+          );
+        },
       },
-    });
+    );
 
-    const result = await reg.dispatch("screen_capture", JSON.stringify({ app: "MissingApp" }), {
-      rootDir: root,
-    });
-
-    expect(typeof result).toBe("string");
-    expect(result).toContain("no running application or window matching 'MissingApp' found");
-    // Ensure capture was aborted and never ran
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain(
+      "no running application or window matching 'MissingApp' found",
+    );
     expect(capturedOptions).toHaveLength(0);
   });
 
   it("fails fast with loud error on non-numeric coordinate values", async () => {
-    const reg = setupRegistry();
-    const result = await reg.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: "not-a-number",
-        top_left_y: 100,
-        bottom_right_x: 200,
-        bottom_right_y: 200,
-      }),
-      { rootDir: root },
-    );
+    const result = await shoot({
+      monitor: 0,
+      top_left_x: "not-a-number",
+      top_left_y: 100,
+      bottom_right_x: 200,
+      bottom_right_y: 200,
+    });
 
-    expect(typeof result).toBe("string");
-    expect(result).toContain("parameter 'top_left_x' must be a valid number");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("parameter 'top_left_x' must be a valid number");
   });
 
   it("pure calculateCaptureArea computes coordinates, clamps bounds, and validates area", () => {
@@ -483,7 +391,7 @@ describe("screen_capture", () => {
     expect(() => selectMonitor(mockMonitors, "MISSING_DISPLAY")).toThrow("Available monitors: #0:");
   });
 
-  it("pure resolveOutputPath produces project-rooted screenshots and cleans up old captures", () => {
+  it("pure resolveOutputPath produces project-rooted screenshots", () => {
     const out1 = resolveOutputPath(undefined, root);
     expect(out1.startsWith(join(root, ".reasonix", "screenshots"))).toBe(true);
 
@@ -491,59 +399,34 @@ describe("screen_capture", () => {
     expect(custom).toBe(join(root, "my-capture.png"));
   });
 
-  it("captures a selected monitor and feeds the result to see_image", async () => {
-    const registry = setupRegistry();
-    const result = await registry.dispatch(
-      "screen_capture",
-      JSON.stringify({
-        monitor: 0,
-        top_left_x: 0,
-        top_left_y: 0,
-        bottom_right_x: 50,
-        bottom_right_y: 50,
-      }),
-      { rootDir: root },
-    );
-
-    expect(Array.isArray(result)).toBe(true);
-    const parts = result as UserContentPart[];
-    expect(parts.some((p) => p.type === "image_url")).toBe(true);
-    expect(capturedOptions).toHaveLength(1);
-  });
-
   it("focuses an app and reports a missing app without host process calls", async () => {
-    const registry = setupRegistry({
-      focusRunner: async (app) => {
-        focusedApps.push(app);
-        if (app.toLowerCase().includes("fake")) {
-          throw new Error(
-            "no running application or window matching 'completelyfakenonexistentapp12345' found",
-          );
-        }
-        return { monitorName: mockMonitors[0]?.name };
-      },
-    });
+    const focusRunner = async (app: string): Promise<FocusResult | undefined> => {
+      focusedApps.push(app);
+      if (app.toLowerCase().includes("fake")) {
+        throw new Error(
+          "no running application or window matching 'completelyfakenonexistentapp12345' found",
+        );
+      }
+      return { monitorName: mockMonitors[0]?.name };
+    };
 
-    const okResult = await registry.dispatch(
-      "screen_capture",
-      JSON.stringify({
+    const okResult = await shoot(
+      {
         app: "explorer",
         monitor: 0,
         top_left_x: 0,
         top_left_y: 0,
         bottom_right_x: 50,
         bottom_right_y: 50,
-      }),
-      { rootDir: root },
+      },
+      { focusRunner },
     );
-    expect(Array.isArray(okResult)).toBe(true);
-    const failResult = await registry.dispatch(
-      "screen_capture",
-      JSON.stringify({ app: "CompletelyFakeNonExistentApp12345" }),
-      { rootDir: root },
-    );
-    expect(typeof failResult).toBe("string");
-    expect((failResult as string).toLowerCase()).toContain(
+    expect(okResult.isError).toBeUndefined();
+    expect(imagesOf(okResult)).toHaveLength(1);
+
+    const failResult = await shoot({ app: "CompletelyFakeNonExistentApp12345" }, { focusRunner });
+    expect(failResult.isError).toBe(true);
+    expect(textOf(failResult).toLowerCase()).toContain(
       "no running application or window matching 'completelyfakenonexistentapp12345' found",
     );
     expect(focusedApps).toEqual(["explorer", "CompletelyFakeNonExistentApp12345"]);
