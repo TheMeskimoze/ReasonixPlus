@@ -7,7 +7,7 @@ import { useCallback, useReducer, useRef } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { baseAppState } from "../../../tests/support/app-state.js";
 import { TabBar, reduce } from "../App";
-import type { IncomingEvent, SkillSetupEntry } from "../protocol";
+import type { IncomingEvent, McpSetupServer, SkillSetupEntry } from "../protocol";
 import { ZoomableImage } from "./image-preview";
 import { CapabilityDialog } from "./mcp-setup";
 import { TabMenu, getTabsToClear } from "./tab-menu";
@@ -859,7 +859,7 @@ describe("image-preview", () => {
 describe("mcp-setup", () => {
   afterEach(cleanup);
 
-  const servers = [
+  const servers: McpSetupServer[] = [
     { name: "playwright", enabled: true, builtin: true },
     { name: "blender", enabled: false, builtin: false },
   ];
@@ -937,6 +937,15 @@ describe("mcp-setup", () => {
       expect([...answer.servers].sort()).toEqual(["blender", "playwright"]);
       expect(answer.plugins).toEqual(["notfair"]);
       expect(answer.subagents).toBe(false);
+    });
+
+    it("shows a server's display name while confirming its config name", () => {
+      const { onConfirm } = renderDialog({
+        list: [{ name: "desktop", displayName: "Computer Use", enabled: true, builtin: true }],
+      });
+      expect(screen.getByText("Computer Use")).toBeTruthy();
+      fireEvent.click(screen.getByText("Confirm and start"));
+      expect(answerOf(onConfirm).servers).toEqual(["desktop"]);
     });
 
     it("drops a plugin the user switched off from the confirmed set", () => {

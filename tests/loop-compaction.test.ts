@@ -89,6 +89,30 @@ describe("CacheFirstLoop.compactNow (manual, LLM path)", () => {
     expect(warning?.compactionSummary).toContain("improved summary of older work");
   });
 
+  it("reports summarizer output to the auxiliary throughput observer", async () => {
+    const seen: number[] = [];
+    const client = makeFakeClient([
+      { content: "candidate summary" },
+      { content: "improved summary" },
+    ]).client;
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      onAuxiliaryOutput: (chars) => seen.push(chars),
+    });
+    seedLogTo(loop, 30_000, "rate");
+    loop.log.append({ role: "user", content: "latest ask" });
+    loop.log.append({ role: "assistant", content: "latest answer" });
+
+    const outcome = await loop.compactNow({ trigger: "manual" });
+
+    expect(outcome.status).toBe("done");
+    expect(seen.reduce((sum, chars) => sum + chars, 0)).toBe(
+      "candidate summary".length + "improved summary".length,
+    );
+  });
+
   it("falls back to the deterministic fold when the summarizer returns nothing", async () => {
     const client = makeFakeClient([{ content: "" }, { content: "" }]).client;
     const loop = new CacheFirstLoop({

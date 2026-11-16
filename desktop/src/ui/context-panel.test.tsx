@@ -475,6 +475,23 @@ describe("ContextPanel MCP tab count", () => {
     expect(tab?.getAttribute("data-active")).toBe("true");
   });
 
+  it("shows a managed server's display name", () => {
+    renderPanel({}, null, [
+      {
+        raw: "desktop=node desktop-mcp.js",
+        name: "desktop",
+        displayName: "Computer Use",
+        transport: "stdio",
+        summary: "desktop server",
+        status: "connected",
+        toolCount: 2,
+      },
+    ]);
+    fireEvent.click(screen.getByText("MCP"));
+    expect(screen.getByText("Computer Use")).toBeTruthy();
+    expect(screen.queryByText("desktop")).toBeNull();
+  });
+
   it("counts connected session-enabled servers independently of their tool counts", () => {
     const spec = (name: string, patch: Partial<McpSpecInfo>): McpSpecInfo => ({
       raw: name,

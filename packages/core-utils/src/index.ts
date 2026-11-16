@@ -309,6 +309,7 @@ export type {
   TurnCompleteEvent,
   TurnOutcome,
   TurnStartedEvent,
+  OutputRateEvent,
   TabStatusEvent,
   DesktopDiagnosticLevel,
   DesktopDiagnosticEvent,
@@ -455,6 +456,7 @@ export {
   createQuickSendId,
   enforceQuickSendShorthand,
   isQuickSend,
+  mcpServerLabel,
   resolveActiveQuickSend,
   resolveFeedbackCueAudio,
 } from "./desktop-protocol.js";

@@ -233,6 +233,9 @@ export interface CacheFirstLoopOptions {
   tools?: ToolRegistry;
   model?: string;
   stream?: boolean;
+  /** Reports output characters from auxiliary model calls (compaction summaries) so a
+   *  UI throughput meter covers work that never streams to the transcript. */
+  onAuxiliaryOutput?: (chars: number) => void;
   reasoningEffort?: ReasoningEffort;
   /** Per-turn output token cap passed as `max_tokens`. Undefined = no cap (server default). */
   maxOutputTokens?: number;
@@ -453,6 +456,8 @@ export class CacheFirstLoop {
   private _turnSelfCorrected = false;
   /** True when nobody can type "continue" to this loop — see CacheFirstLoopOptions.unattended. */
   private readonly _unattended: boolean;
+  /** Optional throughput observer for the compaction summarizer. */
+  private readonly _onAuxiliaryOutput?: (chars: number) => void;
   private readonly _planContext: boolean;
   /** Plan-state signature already injected this turn — see takePlanContext(). */
   private _injectedPlanSig: string | null = null;
@@ -515,6 +520,7 @@ export class CacheFirstLoop {
     this.maxResultTokens = opts.maxResultTokens ?? DEFAULT_MAX_RESULT_TOKENS;
     this.keepImages = opts.keepImages ?? KEEP_LAST_IMAGES;
     this._unattended = opts.unattended === true;
+    this._onAuxiliaryOutput = opts.onAuxiliaryOutput;
     this._planContext = opts.planContext !== false;
     this._repetitionGuardEnabled = Boolean(opts.repetitionGuardEnabled);
     this.ctxMaxOverride = opts.ctxMaxOverride;
@@ -1432,6 +1438,7 @@ export class CacheFirstLoop {
     plan: CompactionPlan,
     signal: AbortSignal,
   ): Promise<CompactionResult | null> {
+    const onDelta = this._onAuxiliaryOutput;
     const chat = (messages: ChatMessage[]) =>
       this.client.chat({
         model: this.model,
@@ -1442,6 +1449,9 @@ export class CacheFirstLoop {
         // of reasoning tokens and buys nothing.
         reasoningEffort: "low",
         maxTokens: SUMMARIZER_OUTPUT_HEADROOM,
+        // Streaming only when someone observes it: a CLI summarizer keeps the cheaper
+        // non-streaming request.
+        ...(onDelta ? { stream: true, onDelta } : {}),
       });
     try {
       const resp = await chat(buildCompactionRequest(plan));

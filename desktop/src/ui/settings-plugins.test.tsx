@@ -92,6 +92,25 @@ describe("PagePlugins", () => {
     expect(screen.getByText(/github\.com\/nowork-studio\/notfair-plugin/)).toBeTruthy();
   });
 
+  it("lists a plugin server's tools behind its Tools disclosure", () => {
+    renderPage([
+      plugin({
+        servers: [
+          {
+            name: "notfair",
+            transport: "streamable-http",
+            status: "connected",
+            toolCount: 2,
+            tools: ["ads_audit", "seo_scan"],
+          },
+        ],
+      }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Tools (2)" }));
+    expect(screen.getByText("ads_audit")).toBeTruthy();
+    expect(screen.getByText("seo_scan")).toBeTruthy();
+  });
+
   it("insets the skills and server lists on their own darker surface", () => {
     const { container } = renderPage([plugin()]);
     const panels = [...container.querySelectorAll(".plugin-subpanel")];

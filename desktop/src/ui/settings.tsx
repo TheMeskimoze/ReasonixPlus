@@ -7,6 +7,7 @@ import {
   type SkillGroup,
   groupSkills,
   isSkillCollection,
+  mcpServerLabel,
   messageOf,
   modelDisplayLabel,
   modelWireName,
@@ -3282,6 +3283,62 @@ function ServerAuthRow({
   );
 }
 
+/** One server's tools, folded behind their count: a server can bridge dozens, and the
+ *  card already answers whether it is connected. */
+function McpToolList({ tools }: { tools: string[] }) {
+  const [open, setOpen] = useState(false);
+  const names = [...new Set(tools.map((tool) => tool.trim()).filter((tool) => tool !== ""))].sort();
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        className="btn ghost"
+        style={{ fontSize: 11, paddingLeft: 0 }}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <I.chevR size={12} style={{ transform: open ? "rotate(90deg)" : "none" }} />
+        {t("settings.mcpToolsLabel", { count: names.length })}
+      </button>
+      {open ? (
+        names.length === 0 ? (
+          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+            {t("settings.mcpToolsEmpty")}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: 6,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+              minWidth: 0,
+            }}
+          >
+            {names.map((tool) => (
+              <code
+                key={tool}
+                style={{
+                  maxWidth: "100%",
+                  overflowWrap: "anywhere",
+                  fontSize: 11,
+                  background: "var(--panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "1px 6px",
+                  color: "var(--fg-2)",
+                }}
+              >
+                {tool}
+              </code>
+            ))}
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 export function PageMCP({
   specs,
   bridged,
@@ -3782,7 +3839,7 @@ export function PageMCP({
               headActions={headActions}
               title={
                 <>
-                  {s.name ?? "(anonymous)"}
+                  {mcpServerLabel(s) || "(anonymous)"}
                   {s.builtin ? <TitleNote>· {t("settings.mcpBuiltinBadge")}</TitleNote> : null}
                 </>
               }
@@ -3806,6 +3863,13 @@ export function PageMCP({
                   {t("settings.parseError", { error: s.parseError })}
                 </div>
               ) : null}
+              {s.tools ? (
+                <McpToolList tools={s.tools} />
+              ) : (
+                <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+                  {t("settings.mcpToolsUnavailable")}
+                </div>
+              )}
               {s.name === "playwright" ? playwrightSettings : null}
               {s.name !== null && /mail/i.test(s.name) ? (
                 <div style={{ marginTop: 12 }}>{mailSettings}</div>
@@ -4024,7 +4088,7 @@ function PluginCard({
             return (
               <div key={server.name}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <code style={{ fontSize: 11 }}>{server.name}</code>
+                  <code style={{ fontSize: 11 }}>{mcpServerLabel(server)}</code>
                   <span style={{ fontSize: 11, color: "var(--muted)" }}>{server.transport}</span>
                   <span className="grow" />
                   <span style={{ fontSize: 11, color: status.color }}>{status.text}</span>
@@ -4038,6 +4102,7 @@ function PluginCard({
                   onCancel={() => onCancelServerSignIn(server.name)}
                   onDisconnect={() => onDisconnectServer(server.name)}
                 />
+                {server.tools ? <McpToolList tools={server.tools} /> : null}
               </div>
             );
           })}

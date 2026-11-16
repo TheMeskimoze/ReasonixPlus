@@ -194,6 +194,14 @@ export type TabStatusEvent = {
   switching: boolean;
 };
 
+/** One live throughput sample for output that never reaches the transcript:
+ *  compaction summaries and tool-call arguments. */
+export interface OutputRateEvent {
+  type: "$output_rate";
+  /** Provider output characters since the previous sample. */
+  chars: number;
+}
+
 /** Common envelope for kernel events forwarded directly to desktop clients. */
 export interface KernelWireEventBase {
   id: number;
@@ -636,15 +644,36 @@ export type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" 
 /** Browser sign-in state of one HTTP/SSE MCP server, read from the token store. */
 export type McpAuthState = "none" | "connected" | "expired";
 
-export interface McpSpecInfo {
-  raw: string;
-  name: string | null;
+/** Fields shared by a configured server row and a plugin-shipped one. */
+export interface McpServerBaseInfo {
+  /** User-facing server name when it differs from the config id. The id stays the
+   *  identity for toggles, config and tool prefixes. */
+  displayName?: string;
   transport: "stdio" | "sse" | "streamable-http";
-  summary: string;
-  parseError?: string;
   status: McpSpecStatus;
   statusReason?: string;
   toolCount?: number;
+  /** Bare MCP tool names the live bridge registered, sorted. Absent while the server
+   *  is not bridged. */
+  tools?: string[];
+  /** Sign-in state of an HTTP/SSE server, read from the token store. Absent for stdio. */
+  auth?: McpAuthState;
+}
+
+/** The label a server row shows: the daemon's display name when the config id is not
+ *  user-facing, else the id itself. Empty only for an anonymous spec. */
+export function mcpServerLabel(server: {
+  name: string | null;
+  displayName?: string;
+}): string {
+  return server.displayName ?? server.name ?? "";
+}
+
+export interface McpSpecInfo extends McpServerBaseInfo {
+  raw: string;
+  name: string | null;
+  summary: string;
+  parseError?: string;
   /** Server-level DEFAULT from config (Settings) — true while disabled, even before first bridge. */
   disabled?: boolean;
   /** THIS session's server-level disable, frozen at chat creation. Absent = follow the default. */
@@ -655,8 +684,6 @@ export interface McpSpecInfo {
   /** Slug of the plugin that bundles this server. Absent = standalone entry, so the
    *  list can tell the two apart and point the user at the plugin that owns it. */
   plugin?: string;
-  /** Sign-in state of an HTTP/SSE server, read from the token store. Absent for stdio. */
-  auth?: McpAuthState;
 }
 
 export interface McpSpecsEvent {
@@ -678,16 +705,10 @@ export interface PluginSkillInfo {
 }
 
 /** One MCP server a plugin declared, with its live bridge state. */
-export interface PluginServerInfo {
+export interface PluginServerInfo extends McpServerBaseInfo {
   name: string;
-  transport: McpSpecInfo["transport"];
-  status: McpSpecStatus;
-  statusReason?: string;
-  toolCount?: number;
   /** True while this chat did not enable the plugin, or the server entry itself is off. */
   disabled?: boolean;
-  /** Sign-in state of an HTTP/SSE server, read from the token store. Absent for stdio. */
-  auth?: McpAuthState;
 }
 
 /** One installed agent plugin (Codex `.codex-plugin` layout). */
@@ -757,6 +778,8 @@ export interface SkillsEvent {
  *  session's frozen set for a duplicate. */
 export interface McpSetupServer {
   name: string;
+  /** Label the picker shows; `name` remains the value the confirm freezes. */
+  displayName?: string;
   enabled: boolean;
   builtin: boolean;
 }

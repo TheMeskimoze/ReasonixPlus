@@ -74,6 +74,7 @@ import type {
   OllamaModelsEvent,
   OpencodeModelsEvent,
   OpencodeQuota,
+  OutputRateEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanHistoryItem,
@@ -399,6 +400,7 @@ import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
 import {
   DESKTOP_SERVER_NAME,
   desktopControlEntry,
+  desktopServerDisplayName,
   isDesktopConfigEntry,
 } from "../../mcp/desktop-control.js";
 import {
@@ -640,6 +642,7 @@ export type EmittableEvent =
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$notice"; text: string; severity: NoticeSeverity }
+  | OutputRateEvent
   | ToastEvent
   | TurnCompleteEvent
   | TurnStartedEvent
@@ -1414,12 +1417,47 @@ function republishPlans(tab: Tab): void {
   for (const target of workspaceTabs?.(tab.rootDir) ?? [tab]) refreshPlanSummary(target);
 }
 
+/** Turns one stream's cumulative output count into the growth since its last sample.
+ *  A repeated total counts zero; a lower total marks a fresh stream and is adopted
+ *  without a sample. */
+export class OutputGrowth {
+  private totals = new Map<string, number>();
+
+  take(key: string, total: number): number {
+    if (!Number.isFinite(total) || total < 0) return 0;
+    if (total === 0) {
+      this.totals.set(key, 0);
+      return 0;
+    }
+    const previous = this.totals.get(key) ?? 0;
+    if (total <= previous) {
+      if (total < previous) this.totals.set(key, total);
+      return 0;
+    }
+    this.totals.set(key, total);
+    return total - previous;
+  }
+}
+
+/** Send one live throughput sample to a tab; zero samples are not events. */
+function emitOutputRate(tab: { id: string }, chars: number): void {
+  if (Number.isFinite(chars) && chars > 0) {
+    emit({ type: "$output_rate", chars }, tab.id);
+  }
+}
+
 function emit(ev: EmittableEvent, tabId?: string): void {
   writeEvent(ev, tabId);
-  // Model deltas are streamed at token/chunk frequency. They are already
-  // observable in the WebView transcript; duplicating every chunk as a
-  // diagnostic doubles synchronous stdout writes and can starve the loop.
-  if (ev.type === "$diagnostic" || ev.type === "model.delta" || ev.type === "tool.output") return;
+  // High-frequency stream output (model deltas, output-rate samples, tool output) is
+  // already observable in the WebView; duplicating it as a diagnostic doubles
+  // synchronous stdout writes and can starve the loop.
+  if (
+    ev.type === "$diagnostic" ||
+    ev.type === "$output_rate" ||
+    ev.type === "model.delta" ||
+    ev.type === "tool.output"
+  )
+    return;
   emitDiagnostic(
     "wire.emit",
     { eventType: ev.type, ...wireEventDetails(ev) },
@@ -4075,12 +4113,18 @@ export interface ChatSeedTurn {
  *  the seed's absolute MCP state or, when the seed pins nothing, the Settings default.
  *  ONE projection, so what New chat and Duplicate offer is what their confirm freezes. */
 export function capabilityPrefill(
-  configured: readonly { name: string; disabled?: boolean; builtin?: boolean }[],
+  configured: readonly {
+    name: string;
+    disabled?: boolean;
+    builtin?: boolean;
+    displayName?: string;
+  }[],
   seed?: ChatCapabilitySeed,
 ): McpSetupServer[] {
   const disabled = new Set(seed?.mcp?.disabledServers ?? []);
   return configured.map((spec) => ({
     name: spec.name,
+    ...(spec.displayName ? { displayName: spec.displayName } : {}),
     enabled: seed?.mcp === undefined ? spec.disabled !== true : !disabled.has(spec.name),
     builtin: spec.builtin === true,
   }));
@@ -4159,12 +4203,16 @@ export function capabilityRows(
  *  default enablement plus whether the server is a managed built-in. */
 function configuredMcpSpecs(
   rootDir: string,
-): { name: string; disabled: boolean; builtin: boolean }[] {
-  return namedMcpSpecs(rootDir).map((spec) => ({
-    name: spec.name,
-    disabled: spec.disabled === true,
-    builtin: isManagedMcpSpec(spec),
-  }));
+): { name: string; disabled: boolean; builtin: boolean; displayName?: string }[] {
+  return namedMcpSpecs(rootDir).map((spec) => {
+    const displayName = desktopServerDisplayName(spec);
+    return {
+      name: spec.name,
+      disabled: spec.disabled === true,
+      builtin: isManagedMcpSpec(spec),
+      ...(displayName ? { displayName } : {}),
+    };
+  });
 }
 
 /** The capability state a clone of this chat starts from: the chat's own frozen set, or
@@ -4454,6 +4502,8 @@ function emitMcpSpecs(tab: Tab): void {
     base.disabled = spec.disabled === true;
     // Reasonix+ managed servers are built-in: disableable but not removable.
     base.builtin = isManagedMcpSpec(spec);
+    const displayName = desktopServerDisplayName(spec);
+    if (displayName) base.displayName = displayName;
     const auth = serverAuthState(spec);
     if (auth) base.auth = auth;
     const sessionDisabled = disabledForSession
@@ -4462,11 +4512,20 @@ function emitMcpSpecs(tab: Tab): void {
     if (sessionDisabled) base.sessionDisabled = true;
     const live =
       tab.mcpStatuses.get(raw) ?? (spec.name ? tab.mcpStatuses.get(spec.name) : undefined);
+    const liveTools = sessionDisabled ? undefined : live?.tools;
     let merged: McpSpecInfo = live
-      ? { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount }
+      ? {
+          ...base,
+          status: live.kind,
+          statusReason: live.reason,
+          toolCount: live.toolCount,
+          ...(liveTools ? { tools: liveTools } : {}),
+        }
       : base;
     // A session-disabled server never reports live "connected" — the reload path stops it.
-    if (sessionDisabled) merged = { ...merged, status: "disabled" };
+    if (sessionDisabled) {
+      merged = { ...merged, status: "disabled", toolCount: undefined, tools: undefined };
+    }
     return merged;
   });
   const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
@@ -4493,10 +4552,12 @@ export function pluginServerInfos(
       const raw = specToRaw(spec);
       const disabled = !active || spec.disabled === true;
       const auth = serverAuthState(spec);
+      const displayName = desktopServerDisplayName(spec);
       // A disabled server is not bridged, so it reports no live tool count.
       if (disabled) {
         return {
           name: spec.name,
+          ...(displayName ? { displayName } : {}),
           transport: spec.transport,
           status: "disabled" as McpSpecStatus,
           disabled: true,
@@ -4506,10 +4567,12 @@ export function pluginServerInfos(
       const live = tab.mcpStatuses.get(raw) ?? tab.mcpStatuses.get(spec.name);
       return {
         name: spec.name,
+        ...(displayName ? { displayName } : {}),
         transport: spec.transport,
         status: live?.kind ?? "configured",
         ...(live?.reason ? { statusReason: live.reason } : {}),
         ...(live?.toolCount !== undefined ? { toolCount: live.toolCount } : {}),
+        ...(live?.tools ? { tools: live.tools } : {}),
         ...(auth ? { auth } : {}),
       };
     });
@@ -5932,7 +5995,10 @@ interface Tab {
   /** Pause-gate ids waiting on this tab — abort uses these to free stranded plan_checkpoint / plan_revision / shell-confirm callers. */
   pendingGateIds: Set<number>;
   mcpRuntime: McpRuntime | null;
-  mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
+  mcpStatuses: Map<
+    string,
+    { kind: McpSpecStatus; reason?: string; toolCount?: number; tools?: string[] }
+  >;
   mcpBridgePromise: Promise<void> | null;
   /** Fresh chat: true until the user confirms this chat's capabilities — its enabled MCP
    *  servers and its subagent flag. Withholds `$ready` (composer disabled) and defers the
@@ -6599,6 +6665,9 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     repetitionGuardEnabled: loadRepetitionGuardEnabled(),
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
+    // The sidebar's tok/s meter is frontend-owned; the daemon only reports the
+    // summarizer's output growth, which never reaches the transcript stream.
+    onAuxiliaryOutput: (chars) => emitOutputRate(tab, chars),
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
@@ -7514,15 +7583,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (event.state === "handshake") {
         tab.mcpStatuses.set(target, { kind: "handshake" });
         if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "handshake" });
-      } else if (event.state === "connected") {
-        tab.mcpStatuses.set(target, { kind: "connected", toolCount: event.tools });
-        if (targetSpec.name)
-          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: event.tools });
-      } else if (event.state === "tools-ready") {
-        // Per-tool toggle applied on a live server — status stays "connected", count refreshes.
-        tab.mcpStatuses.set(target, { kind: "connected", toolCount: event.tools });
-        if (targetSpec.name)
-          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: event.tools });
+      } else if (event.state === "connected" || event.state === "tools-ready") {
+        // The bridge records its tool names before announcing readiness, so the
+        // settings list can be filled from the live record here.
+        const tools = runtime.toolNames().find((entry) => entry.spec === target)?.names;
+        const live = {
+          kind: "connected" as const,
+          toolCount: event.tools,
+          ...(tools ? { tools } : {}),
+        };
+        tab.mcpStatuses.set(target, live);
+        if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, live);
       } else if (event.state === "failed") {
         tab.mcpStatuses.set(target, { kind: "failed", reason: event.reason });
         if (targetSpec.name)
@@ -8045,6 +8116,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         let lastStopReason = "";
         let modelFailure = false;
         let modelStalled = false;
+        // Tool-call arguments are provider output too, but they stream as cumulative
+        // lengths rather than transcript deltas. The growth feeds the live rate meter.
+        const toolArgGrowth = new OutputGrowth();
+        let streamIteration = 0;
         /** Aborted means the user stopped it: never a model failure, however the
          *  signal reached us (the tab's aborter, or a Stop that raced this attempt). */
         const turnAborted = (): boolean => aborted || turnStoppedByUser(tab);
@@ -8075,6 +8150,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               sawAssistantFinal = true;
               if (ev.content?.trim()) sawFinalText = true;
               if (ev.content) lastAssistantText = ev.content;
+              streamIteration += 1;
             }
             if (ev.role === "done" && ev.content?.trim()) sawFinalText = true;
             if (ev.role === "error") {
@@ -8092,6 +8168,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               if (ev.cause === "empty-response" || ev.cause === "thinking-only") {
                 modelStalled = true;
               }
+            }
+            if (
+              ev.role === "tool_call_delta" &&
+              ev.toolCallArgsChars !== undefined &&
+              ev.toolCallIndex !== undefined
+            ) {
+              emitOutputRate(
+                tab,
+                toolArgGrowth.take(`${streamIteration}:${ev.toolCallIndex}`, ev.toolCallArgsChars),
+              );
             }
             for (const kev of rt.eventizer.consume(ev, rt.ctx)) emitKernelEvent(kev, tab.id);
             if (ev.role === "assistant_final" || ev.role === "tool") {

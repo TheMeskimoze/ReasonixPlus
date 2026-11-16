@@ -244,6 +244,13 @@ describe("MCP runtime — server toggle application", () => {
     expect(runtime.summaries()[0]!.toolCount).toBe(2);
   });
 
+  it("reports each bridged server's bare tool names in sorted order", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg());
+    const { runtime } = buildRuntime();
+    await runtime.reloadFromConfig();
+    expect(runtime.toolNames()).toEqual([{ spec: runtime.specs()[0]!, names: ["a", "b"] }]);
+  });
+
   it("stops a live server when config disables it, then restores it on re-enable", async () => {
     mocks.readConfigMock.mockReturnValue(demoCfg());
     const { tools, runtime } = buildRuntime();
