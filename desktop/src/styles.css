@@ -2153,7 +2153,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: 0;
   overflow-y: auto;
   margin-right: var(--thread-gutter);
-  padding: 28px 0 16px;
+  padding: 28px 0 20px;
   scroll-padding-bottom: 24px;
   overflow-anchor: none;
 }
@@ -6879,6 +6879,22 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   color: var(--warning);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+/* The key hints ride whichever band is up, naming the keys that band's state uses.
+   They take the free space at its right edge, so they cost no row of their own. */
+.band-hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--muted-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.band-hints > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .composer-queued {

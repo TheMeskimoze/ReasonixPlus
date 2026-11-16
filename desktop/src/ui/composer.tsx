@@ -55,6 +55,7 @@ import { FitText } from "./fit-text";
 import { activationHandler } from "./keyboard";
 import { StuckLabel, TimerSpan } from "./live";
 import { menuPopLeft } from "./menu-pop";
+import { Shortcut } from "./shortcut";
 import { StopButton, usePendingStop } from "./stop-button";
 export type { EditMode, ReasoningEffort };
 
@@ -123,6 +124,29 @@ const MODE_INFO: ModeEntry[] = [
     hint: "editMode.neverAskHint",
   },
 ];
+
+/** The keys the band above the card acts on, right-aligned in that band: naming them
+ *  there costs no row of its own, and the pair only shows while the band is up. */
+function BandHints({ busy }: { busy: boolean }) {
+  return (
+    <span className="band-hints">
+      <span>
+        <Shortcut keys={["enter"]} /> {t(busy ? "composer.queue" : "composer.send")}
+      </span>
+      <span>
+        {busy ? (
+          <>
+            <Shortcut keys={["esc"]} /> {t("composer.interrupt")}
+          </>
+        ) : (
+          <>
+            <Shortcut keys={["shift", "enter"]} /> {t("composer.newline")}
+          </>
+        )}
+      </span>
+    </span>
+  );
+}
 
 /** The edit gate as one pill: only the active mode shows, and the three sit behind a
  *  menu. It keeps the segmented control's colours, so the state still reads at a
@@ -1107,6 +1131,7 @@ export function Composer({
                 </span>
               );
             })}
+            {statusText ? null : <BandHints busy={false} />}
           </div>
         ) : null}
 
@@ -1124,6 +1149,7 @@ export function Composer({
                 )}
               />
             ) : null}
+            <BandHints busy />
           </div>
         ) : null}
 

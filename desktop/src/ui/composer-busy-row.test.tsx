@@ -49,17 +49,29 @@ describe("Composer status row", () => {
     expect(container.querySelector(".composer-foot .composer-busy-stuck")).toBeNull();
   });
 
-  it("leaves the key hints to Settings instead of the composer", () => {
-    // The strip above the card is gone: send and newline are documented once, on
-    // Settings > Shortcuts, so the composer carries no second copy of them.
-    for (const overrides of [
-      {},
-      { busy: true, busyLabel: "Reasoning…" },
-    ] as Parameters<typeof makeComposerBaseProps>[0][]) {
-      const container = renderStatus(overrides);
-      expect(container.querySelector(".hint-row")).toBeNull();
-      expect(container.querySelector(".composer .shortcut")).toBeNull();
-      expect(container.querySelector(".composer-inner > .shortcut")).toBeNull();
-    }
+  it("names the busy keys at the right edge of the status row", () => {
+    const container = renderStatus({ busy: true, busyLabel: "Reasoning…" });
+
+    const hints = container.querySelector(".composer-busy-row .band-hints");
+    expect(hints?.textContent).toContain("queue");
+    expect(hints?.textContent).toContain("stop");
+    expect(hints?.textContent).not.toContain("newline");
+    // Last child: the label, timer and stuck hint keep the left side.
+    expect(hints?.parentElement?.lastElementChild).toBe(hints);
+  });
+
+  it("names the idle keys in the queued strip, and nowhere without a band", () => {
+    const queued = renderStatus({ queuedSends: ["one"] });
+    const hints = queued.querySelector(".composer-queued .band-hints");
+    expect(hints?.textContent).toContain("send");
+    expect(hints?.textContent).toContain("newline");
+    // While a turn runs the busy row owns the hints, so the queue never repeats them.
+    expect(queued.querySelector(".composer-busy-row")).toBeNull();
+    cleanup();
+
+    const idle = renderStatus();
+    expect(idle.querySelector(".band-hints")).toBeNull();
+    expect(idle.querySelector(".hint-row")).toBeNull();
+    expect(idle.querySelector(".composer .shortcut")).toBeNull();
   });
 });
