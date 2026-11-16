@@ -461,11 +461,14 @@ export function Composer({
   // One popup at a time from a single source of truth: `openMenu` names the only
   // menu that can be open, so opening one closes the others by itself.
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
-  // Which target the model pill's dropdown is editing. Sticky across openings, so a
-  // session tuned on both models does not have to re-pick the tab every time.
+  // Which target the model pill's dropdown is editing. Every opening starts on the
+  // agent model, so the tab never depends on what was last changed.
   const [modelTab, setModelTab] = useState<"agent" | "subagent">("agent");
   const menuWraps = useRef<Partial<Record<MenuId, HTMLDivElement | null>>>({});
-  const toggleMenu = (id: MenuId) => setOpenMenu((cur) => (cur === id ? null : id));
+  const toggleMenu = (id: MenuId) => {
+    if (id === "model") setModelTab("agent");
+    setOpenMenu((cur) => (cur === id ? null : id));
+  };
   const closeMenu = () => setOpenMenu(null);
   // Every model list the picker shows comes from an endpoint we query, so opening the
   // picker re-queries them: the lists are current without a refresh button. Each source
@@ -1220,19 +1223,6 @@ export function Composer({
           ) : null}
 
           <div className="composer-foot">
-            <button
-              type="button"
-              className="cf-btn"
-              title={t("composer.insertFile")}
-              onClick={() => void attachFile()}
-            >
-              <span className="ico">
-                <I.paperclip size={14} />
-              </span>
-            </button>
-
-            <span className="grow" />
-
             <ModelPickerPill
               tag="M"
               menuId="model"
@@ -1261,32 +1251,6 @@ export function Composer({
                 />
               }
             />
-            {subagentsEnabled ? (
-              <ModelPickerPill
-                tag="S"
-                className="subagent-pill"
-                menuId="subagent"
-                title={t("composer.switchSubagentModel")}
-                label={modelDisplayLabel(subagentModelLabel, providerHints)}
-                cost={modelCost(subagentModelLabel, providerHints, rateNow)}
-                openMenu={openMenu}
-                onToggle={toggleMenu}
-                wrapRef={anchor("subagent")}
-                menu={
-                  <>
-                    <MenuHeader label={t("composer.switchSubagentModel")} />
-                    <ModelList
-                      activeModel={subagentModelLabel}
-                      onPick={(m) => {
-                        onSubagentModelChange(m);
-                        closeMenu();
-                      }}
-                      {...modelListProps}
-                    />
-                  </>
-                }
-              />
-            ) : null}
             <div ref={anchor("effort")} className="model-pill-wrap">
               <button
                 type="button"
@@ -1321,6 +1285,17 @@ export function Composer({
                 </MenuPop>
               ) : null}
             </div>
+            <span className="grow" />
+            <button
+              type="button"
+              className="cf-btn"
+              title={t("composer.insertFile")}
+              onClick={() => void attachFile()}
+            >
+              <span className="ico">
+                <I.paperclip size={14} />
+              </span>
+            </button>
             <div ref={anchor("quick")} className="quick-send-wrap">
               <button
                 type="button"

@@ -1440,9 +1440,9 @@ describe("card-head", () => {
 });
 
 describe("composer-menu-headers", () => {
-  /** The composer dropdowns that name themselves with a header: the subagent model,
-   *  the reasoning effort and quick send. The model pill's own menu has tabs instead. */
-  const HEADER_MENU_TRIGGERS = [".subagent-pill", ".effort-pill", ".quick-proceed-btn"];
+  /** The composer dropdowns that name themselves with a header: the reasoning effort
+   *  and quick send. The model pill's own menu has tabs instead. */
+  const HEADER_MENU_TRIGGERS = [".effort-pill", ".quick-proceed-btn"];
 
   describe("Composer dropdown headers", () => {
     it("shows the menu label alone, with no glyph chip beside it", () => {
@@ -1523,26 +1523,25 @@ describe("composer-menu-headers", () => {
       expect(onSubagentModelChange).toHaveBeenCalledWith("ollama/gemma4");
     });
 
-    it("hides the subagent picker on a session minted without the subagent tool", () => {
-      // The capability is frozen at chat creation, so the pill is absent rather than
-      // disabled: a disabled picker would imply a switch the session cannot have.
+    it("keeps a single model pill on a session minted without the subagent tool", () => {
+      // The capability is frozen at chat creation, and one pill serves both models
+      // through its tabs, so the session has nothing else to offer.
       const { container } = render(<Composer {...makeComposerBaseProps()} />);
-      expect(container.querySelector(".subagent-pill")).toBeNull();
-      expect(container.querySelector(".model-pill:not(.subagent-pill)")).not.toBeNull();
+      expect(container.querySelectorAll(".model-pill:not(.effort-pill)")).toHaveLength(1);
     });
 
-    it("drops the open subagent menu when the session loses the capability", () => {
-      // A session switch can take the pill away mid-interaction; the click that
-      // reopened a chat with the tool must not find the old popup already showing.
+    it("drops the subagent tab when the session loses the capability", () => {
+      // A session switch can take the capability away mid-interaction; the tab must
+      // go with it, and the list must not be left pointed at a model it cannot use.
       const props = makeComposerBaseProps({ subagentsEnabled: true });
       const { container, rerender } = render(<Composer {...props} />);
-      fireEvent.click(container.querySelector(".subagent-pill")!);
-      expect(container.querySelector(".popup")).not.toBeNull();
+      fireEvent.click(container.querySelector(".model-pill")!);
+      fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+      expect(container.querySelectorAll(".model-menu-tab")).toHaveLength(2);
 
       rerender(<Composer {...makeComposerBaseProps()} />);
-      expect(container.querySelector(".subagent-pill")).toBeNull();
-      rerender(<Composer {...props} />);
-      expect(container.querySelector(".popup")).toBeNull();
+      expect(container.querySelectorAll(".model-menu-tab")).toHaveLength(1);
+      expect(container.querySelector('.popup-item[data-active="true"]')).not.toBeNull();
     });
   });
 });
@@ -1561,7 +1560,7 @@ describe("composer-pill-space", () => {
     it("gives the label the whole pill, keeping the chevron as the only glyph", () => {
       const { container } = renderPills();
 
-      for (const selector of [".model-pill", ".subagent-pill", ".effort-pill"]) {
+      for (const selector of [".model-pill", ".effort-pill"]) {
         const pill = container.querySelector(selector);
         expect(pill, selector).not.toBeNull();
         expect(pill?.querySelectorAll("svg").length, selector).toBe(1);
@@ -1569,41 +1568,41 @@ describe("composer-pill-space", () => {
       }
     });
 
-    it("hugs both agent pills against the effort picker, with the slack before them", () => {
-      // The pills are laid out at their own text width, flush against the fixed
-      // controls on the right; the spacer before them is what holds them there.
+    it("parks the two pickers left of the slack, with the tools after it", () => {
+      // The pills sit at the left edge; the spacer holds everything else against the
+      // right, where the attach control leads into quick send.
       const { container } = renderPills();
 
       const foot = container.querySelector(".composer-foot")!;
       const kids = Array.from(foot.children);
+      /** The foot's own child that holds `selector`, whatever nesting it sits in. */
+      const footChild = (selector: string) => {
+        let el: Element | null = container.querySelector(selector);
+        while (el && el.parentElement !== foot) el = el.parentElement;
+        return el ? kids.indexOf(el) : -1;
+      };
       const spacer = kids.findIndex((el) => el.classList.contains("grow"));
-      const wrapIndex = (selector: string) =>
-        kids.indexOf(container.querySelector(selector)!.parentElement!);
 
       expect(spacer, "spacer").toBeGreaterThan(-1);
-      expect(wrapIndex(".model-pill:not(.subagent-pill)"), "main").toBeGreaterThan(spacer);
-      expect(wrapIndex(".subagent-pill"), "subagent").toBeGreaterThan(spacer);
-      // Main, then subagent, then the effort picker: no gap between the three.
-      expect(wrapIndex(".subagent-pill") - wrapIndex(".model-pill:not(.subagent-pill)")).toBe(1);
-      expect(wrapIndex(".effort-pill") - wrapIndex(".subagent-pill")).toBe(1);
+      expect(footChild(".model-pill"), "main").toBe(0);
+      expect(footChild(".effort-pill"), "effort").toBe(1);
+      // The attach control follows the slack, immediately before quick send.
+      expect(footChild(".cf-btn"), "attach").toBeGreaterThan(spacer);
+      expect(footChild(".quick-send-wrap") - footChild(".cf-btn"), "quick send").toBe(1);
     });
 
     it("tags each picker with its own letter, outside the label text", () => {
       const { container } = renderPills({
         modelLabel: "deepseek-v4-flash",
-        subagentModelLabel: "glm-5.3-flash",
         supportedEfforts: ["low", "high"],
       });
 
-      const main = container.querySelector(".model-pill:not(.subagent-pill):not(.effort-pill)");
-      const sub = container.querySelector(".subagent-pill");
+      const main = container.querySelector(".model-pill:not(.effort-pill)");
       const effort = container.querySelector(".effort-pill");
       expect(main?.getAttribute("data-pill-tag")).toBe("M");
-      expect(sub?.getAttribute("data-pill-tag")).toBe("S");
       expect(effort?.getAttribute("data-pill-tag")).toBe("E");
       // The notch is drawn from that attribute, so it stays out of the label text.
       expect(main?.textContent).toBe("DS · deepseek-v4-flash");
-      expect(sub?.textContent).toBe("ZAI · glm-5.3-flash");
     });
 
     it("keeps a long model id whole as the label and as its hover title", () => {
