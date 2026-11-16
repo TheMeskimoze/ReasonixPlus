@@ -4637,6 +4637,14 @@ html[data-platform="macos"] .startup-loading-overlay {
   border-top: 1px solid var(--border);
   position: relative;
 }
+.composer-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -12px 0 auto 0;
+  height: 12px;
+  background: linear-gradient(to top, var(--bg), transparent);
+  pointer-events: none;
+}
 .composer-inner {
   /* The thread's content width: the same cap minus its two row paddings, and
      never wider than the wrap's content minus the extra gutter. Both terms are
