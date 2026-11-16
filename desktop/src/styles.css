@@ -4856,7 +4856,7 @@ html[data-platform="macos"] .startup-loading-overlay {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.composer-foot .model-pill:hover {
+.composer-foot .model-pill:not(.mode-pill):hover {
   background: var(--panel-2);
 }
 /* Corner notch naming each picker: "M" main agent, "S" subagent, "E" effort. The
@@ -5112,47 +5112,7 @@ html[data-platform="macos"] .startup-loading-overlay {
   }
 }
 
-/* hint row above composer */
-.hint-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 6px 6px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--muted-2);
-}
-.hint-row .grow {
-  flex: 1;
-}
-.hint-row .hint-sep {
-  width: 1px;
-  height: 12px;
-  background: var(--border-strong);
-  flex-shrink: 0;
-}
-.hint-row kbd {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 14px;
-}
-.hint-row .shortcut kbd {
-  min-width: 0;
-  font-size: 14px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-}
-/* ModeSwitch inside hint-row — slightly smaller to sit inline with text */
-.hint-row .mode-switch {
-  font-size: 13px;
-}
-.hint-row .mode-switch .ms-seg {
-  padding: 2px 7px;
-  gap: 4px;
-}
+
 
 /* ---------- POPUP MENU (slash / at) ---------- */
 
@@ -9796,54 +9756,30 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .composer-foot .send-btn {
   flex-shrink: 0;
 }
-
-/* Hint row above composer — scroll instead of overflowing */
-.hint-row {
-  flex-wrap: nowrap;
-  gap: 8px;
-  overflow: hidden;
+/* The edit gate pill keeps the segmented control's colours: one mode at a time,
+   tinted by which one is in force. */
+.composer-foot .mode-pill[data-k="follow"] {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
 }
-.hint-row > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+.composer-foot .mode-pill[data-k="read-only"] {
+  background: var(--tone-info-soft);
+  border-color: transparent;
+  color: var(--tone-info);
 }
-.hint-row > span:last-child {
-  flex-shrink: 0;
-  text-align: right;
-}
-
-/* Collapse composer-foot when the composer column itself is cramped —
-   container query so panel state, not viewport width, drives it. */
-@container composer (max-width: 620px) {
-  .composer-foot .cf-btn .label {
-    display: none;
-  }
-}
-@container composer (max-width: 520px) {
-  .hint-row > span:first-child {
-    display: none;
-  }
-}
-
-/* ============================================================
-   MODE SWITCH — Read only / Follow Rules / Never Ask
-   ============================================================ */
-.mode-switch {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  gap: 1px;
-  font-family: inherit;
-  flex-shrink: 0;
-}
-.mode-switch[data-mode="never-ask"] {
+.composer-foot .mode-pill[data-k="never-ask"] {
+  background: var(--tone-err);
   border-color: var(--tone-err);
+  color: oklch(99% 0 0);
   box-shadow: 0 0 0 2px oklch(68% 0.2 25 / 0.18);
   animation: yolo-pulse 1.8s ease-in-out infinite;
+}
+[data-theme="light"] .composer-foot .mode-pill[data-k="never-ask"] {
+  color: oklch(100% 0 0);
+}
+.composer-foot .mode-pill:hover {
+  filter: brightness(1.08);
 }
 @keyframes yolo-pulse {
   0%,
@@ -9854,48 +9790,16 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
     opacity: 1;
   }
 }
-.ms-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--muted);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.ms-seg:hover {
-  color: var(--fg);
-}
-.ms-seg[data-on="true"][data-k="follow"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.ms-seg[data-on="true"][data-k="read-only"] {
-  background: var(--tone-info-soft);
-  color: var(--tone-info);
-}
-.ms-seg[data-on="true"][data-k="never-ask"] {
-  background: var(--tone-err);
-  color: oklch(99% 0 0);
-}
-[data-theme="light"] .ms-seg[data-on="true"][data-k="never-ask"] {
-  color: oklch(100% 0 0);
-}
 
-.composer textarea:focus {
-  outline: none;
-}
-
-/* Hide mode labels when narrow; keep icons */
-@media (max-width: 1100px) {
-  .mode-switch .ms-seg > span {
+/* Collapse composer-foot when the composer column itself is cramped —
+   container query so panel state, not viewport width, drives it. */
+@container composer (max-width: 620px) {
+  .composer-foot .cf-btn .label {
     display: none;
   }
-  .mode-switch .ms-seg {
-    padding: 4px 7px;
-  }
 }
+
+
 
 /* ============================================================
    Workspace switcher popover

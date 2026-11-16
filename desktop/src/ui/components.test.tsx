@@ -1527,7 +1527,9 @@ describe("composer-menu-headers", () => {
       // The capability is frozen at chat creation, and one pill serves both models
       // through its tabs, so the session has nothing else to offer.
       const { container } = render(<Composer {...makeComposerBaseProps()} />);
-      expect(container.querySelectorAll(".model-pill:not(.effort-pill)")).toHaveLength(1);
+      expect(container.querySelectorAll(".model-pill:not(.effort-pill):not(.mode-pill)")).toHaveLength(
+        1,
+      );
     });
 
     it("drops the subagent tab when the session loses the capability", () => {

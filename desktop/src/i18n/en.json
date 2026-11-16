@@ -449,6 +449,8 @@
     "quickSendMoveDownAria": "Move quick send down: {shorthand}",
     "quickSendRemoveAria": "Remove quick send: {shorthand}",
     "quickSendNoCustom": "No custom quick sends.",
+    "shortcutSend": "Send the message",
+    "shortcutNewline": "New line in the message",
     "shortcutNewChat": "New chat",
     "shortcutNewTab": "New tab",
     "shortcutCloseTab": "Close tab",

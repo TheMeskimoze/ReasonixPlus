@@ -4290,6 +4290,8 @@ function SkillCard({
 
 function PageShortcuts() {
   const rows: { nm: string; keys: ShortcutKey[] }[] = [
+    { nm: t("settings.shortcutSend"), keys: ["enter"] },
+    { nm: t("settings.shortcutNewline"), keys: ["shift", "enter"] },
     { nm: t("settings.shortcutNewChat"), keys: ["mod", "N"] },
     { nm: t("settings.shortcutNewTab"), keys: ["mod", "T"] },
     { nm: t("settings.shortcutCloseTab"), keys: ["mod", "W"] },

@@ -55,7 +55,6 @@ import { FitText } from "./fit-text";
 import { activationHandler } from "./keyboard";
 import { StuckLabel, TimerSpan } from "./live";
 import { menuPopLeft } from "./menu-pop";
-import { Shortcut } from "./shortcut";
 import { StopButton, usePendingStop } from "./stop-button";
 export type { EditMode, ReasoningEffort };
 
@@ -64,7 +63,7 @@ export type QueuedSendItem = string | QueuedSend;
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
 /** The composer's mutually-exclusive dropdowns — at most one is open at a time. */
-type MenuId = "model" | "subagent" | "effort" | "quick";
+type MenuId = "model" | "subagent" | "effort" | "mode" | "quick";
 
 const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -125,29 +124,54 @@ const MODE_INFO: ModeEntry[] = [
   },
 ];
 
-export function ModeSwitch({
+/** The edit gate as one pill: only the active mode shows, and the three sit behind a
+ *  menu. It keeps the segmented control's colours, so the state still reads at a
+ *  glance without three segments taking the composer's width. */
+function ModePill({
   mode,
-  onChange,
+  open,
+  onToggle,
+  onSelect,
+  wrapRef,
 }: {
   mode: EditMode;
-  onChange: (m: EditMode) => void;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (mode: EditMode) => void;
+  wrapRef: (el: HTMLDivElement | null) => void;
 }) {
+  const current = MODE_INFO.find((m) => m.k === mode) ?? MODE_INFO[1]!;
   return (
-    <div className="mode-switch" data-mode={mode}>
-      {MODE_INFO.map((m) => (
-        <button
-          key={m.k}
-          type="button"
-          className="ms-seg"
-          data-on={mode === m.k}
-          data-k={m.k}
-          onClick={() => onChange(m.k)}
-          title={t(m.hint)}
-        >
-          {m.icon}
-          <span>{t(m.label)}</span>
-        </button>
-      ))}
+    <div ref={wrapRef} className="model-pill-wrap">
+      <button
+        type="button"
+        className="model-pill mode-pill"
+        data-k={mode}
+        onClick={onToggle}
+        title={t(current.hint)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {current.icon}
+        <span>{t(current.label)}</span>
+        <I.chev size={10} />
+      </button>
+      {open ? (
+        <MenuPop width={320}>
+          <MenuHeader label={t("editMode.label")} />
+          <div className="popup-list">
+            {MODE_INFO.map((m) => (
+              <MenuRow
+                key={m.k}
+                label={t(m.label)}
+                desc={t(m.hint)}
+                active={m.k === mode}
+                onPick={() => onSelect(m.k)}
+              />
+            ))}
+          </div>
+        </MenuPop>
+      ) : null}
     </div>
   );
 }
@@ -1103,25 +1127,6 @@ export function Composer({
           </div>
         ) : null}
 
-        <div className="hint-row">
-          <span className="grow" />
-          <ModeSwitch mode={editMode} onChange={onEditModeChange} />
-          <span className="hint-sep" />
-          <span>
-            {statusText ? (
-              <>
-                <Shortcut keys={["enter"]} /> {t("composer.queue")} &nbsp;·&nbsp;{" "}
-                <Shortcut keys={["esc"]} /> {t("composer.interrupt")}
-              </>
-            ) : (
-              <>
-                <Shortcut keys={["enter"]} /> {t("composer.send")} &nbsp;{" "}
-                <Shortcut keys={["shift", "enter"]} /> {t("composer.newline")}
-              </>
-            )}
-          </span>
-        </div>
-
         <div className="composer">
           {onToggleExpanded ? (
             <button
@@ -1285,6 +1290,16 @@ export function Composer({
                 </MenuPop>
               ) : null}
             </div>
+            <ModePill
+              mode={editMode}
+              open={openMenu === "mode"}
+              onToggle={() => toggleMenu("mode")}
+              onSelect={(m) => {
+                onEditModeChange(m);
+                closeMenu();
+              }}
+              wrapRef={anchor("mode")}
+            />
             <span className="grow" />
             <button
               type="button"

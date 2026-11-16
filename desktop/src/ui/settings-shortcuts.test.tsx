@@ -136,6 +136,18 @@ describe("settings Shortcuts page", () => {
     );
   });
 
+  it("names the composer's own send and newline keys", () => {
+    // These used to sit under the composer; this page is now their only home.
+    const { container } = render(<SettingsModal {...baseProps} initialPage="shortcuts" />);
+
+    expect(bindings(container)).toEqual(
+      expect.arrayContaining([
+        { label: "Send the message", keys: ["Enter"] },
+        { label: "New line in the message", keys: ["Shift", "Enter"] },
+      ]),
+    );
+  });
+
   it("is its own page in the nav", () => {
     render(<SettingsModal {...baseProps} />);
 
