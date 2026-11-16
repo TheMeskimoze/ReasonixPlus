@@ -9788,11 +9788,12 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   flex-shrink: 0;
 }
 /* The edit gate pill keeps the segmented control's colours: one mode at a time,
-   tinted by which one is in force. */
+   tinted by which one is in force. The three share one recipe, a soft tint with the
+   tone's own text, and the tones are fixed hues so a theme cannot re-colour a mode. */
 .composer-foot .mode-pill[data-k="follow"] {
-  background: var(--accent-soft);
+  background: var(--tone-warn-soft);
   border-color: transparent;
-  color: var(--accent);
+  color: var(--tone-warn);
 }
 .composer-foot .mode-pill[data-k="read-only"] {
   background: var(--tone-info-soft);
@@ -9800,14 +9801,11 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   color: var(--tone-info);
 }
 .composer-foot .mode-pill[data-k="never-ask"] {
-  background: var(--tone-err);
-  border-color: var(--tone-err);
-  color: oklch(99% 0 0);
+  background: var(--tone-err-soft);
+  border-color: transparent;
+  color: var(--tone-err);
   box-shadow: 0 0 0 2px oklch(68% 0.2 25 / 0.18);
   animation: yolo-pulse 1.8s ease-in-out infinite;
-}
-[data-theme="light"] .composer-foot .mode-pill[data-k="never-ask"] {
-  color: oklch(100% 0 0);
 }
 .composer-foot .mode-pill:hover {
   filter: brightness(1.08);
