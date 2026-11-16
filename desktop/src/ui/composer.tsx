@@ -125,9 +125,9 @@ const MODE_INFO: ModeEntry[] = [
   },
 ];
 
-/** The keys the band above the card acts on, right-aligned in that band: naming them
- *  there costs no row of its own, and the pair only shows while the band is up. */
-function BandHints({ busy }: { busy: boolean }) {
+/** The keys the composer answers to. Always on show above the card, right-aligned in
+ *  whichever band is up, and in a band of their own when nothing else is. */
+function KeyHints({ busy }: { busy: boolean }) {
   return (
     <span className="band-hints">
       <span>
@@ -1131,7 +1131,7 @@ export function Composer({
                 </span>
               );
             })}
-            {statusText ? null : <BandHints busy={false} />}
+            {statusText ? null : <KeyHints busy={false} />}
           </div>
         ) : null}
 
@@ -1149,7 +1149,13 @@ export function Composer({
                 )}
               />
             ) : null}
-            <BandHints busy />
+            <KeyHints busy />
+          </div>
+        ) : null}
+
+        {!statusText && !(queuedSends && queuedSends.length > 0) ? (
+          <div className="composer-hints-row">
+            <KeyHints busy={false} />
           </div>
         ) : null}
 

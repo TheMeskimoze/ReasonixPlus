@@ -6880,8 +6880,8 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
-/* The key hints ride whichever band is up, naming the keys that band's state uses.
-   They take the free space at its right edge, so they cost no row of their own. */
+/* The keys sit above the card, right-aligned in whichever band is up, and in a band of
+   their own when nothing else is: one home, always on show, never inside the card. */
 .band-hints {
   display: inline-flex;
   align-items: center;
@@ -6895,6 +6895,13 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+/* Matches the status row's metrics, so the hints do not move when a turn starts. */
+.composer-hints-row {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 4px;
+  font-size: 14px;
 }
 
 .composer-queued {
@@ -9809,6 +9816,12 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
    container query so panel state, not viewport width, drives it. */
 @container composer (max-width: 620px) {
   .composer-foot .cf-btn .label {
+    display: none;
+  }
+}
+/* The key hints are a reminder, not a control: they give up their space first. */
+@container composer (max-width: 520px) {
+  .composer-hints-row {
     display: none;
   }
 }

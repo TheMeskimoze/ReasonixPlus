@@ -49,7 +49,7 @@ describe("Composer status row", () => {
     expect(container.querySelector(".composer-foot .composer-busy-stuck")).toBeNull();
   });
 
-  it("names the busy keys at the right edge of the status row", () => {
+  it("keeps the busy keys at the right of the status row", () => {
     const container = renderStatus({ busy: true, busyLabel: "Reasoning…" });
 
     const hints = container.querySelector(".composer-busy-row .band-hints");
@@ -58,20 +58,23 @@ describe("Composer status row", () => {
     expect(hints?.textContent).not.toContain("newline");
     // Last child: the label, timer and stuck hint keep the left side.
     expect(hints?.parentElement?.lastElementChild).toBe(hints);
+    // One home: the idle row steps aside while a turn runs.
+    expect(container.querySelector(".composer-hints-row")).toBeNull();
+    expect(container.querySelector(".composer-foot .band-hints")).toBeNull();
   });
 
-  it("names the idle keys in the queued strip, and nowhere without a band", () => {
-    const queued = renderStatus({ queuedSends: ["one"] });
-    const hints = queued.querySelector(".composer-queued .band-hints");
+  it("always shows a hint row above the card when nothing else is up", () => {
+    const idle = renderStatus();
+    const hints = idle.querySelector(".composer-hints-row .band-hints");
     expect(hints?.textContent).toContain("send");
     expect(hints?.textContent).toContain("newline");
-    // While a turn runs the busy row owns the hints, so the queue never repeats them.
-    expect(queued.querySelector(".composer-busy-row")).toBeNull();
+    expect(idle.querySelector(".composer-foot .band-hints")).toBeNull();
+    expect(idle.querySelector(".hint-row")).toBeNull();
     cleanup();
 
-    const idle = renderStatus();
-    expect(idle.querySelector(".band-hints")).toBeNull();
-    expect(idle.querySelector(".hint-row")).toBeNull();
-    expect(idle.querySelector(".composer .shortcut")).toBeNull();
+    // Queued with nothing running: the strip owns the hints instead of a second row.
+    const queued = renderStatus({ queuedSends: ["one"] });
+    expect(queued.querySelector(".composer-queued .band-hints")?.textContent).toContain("newline");
+    expect(queued.querySelector(".composer-hints-row")).toBeNull();
   });
 });
