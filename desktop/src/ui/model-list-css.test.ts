@@ -24,8 +24,8 @@ describe("model list CSS", () => {
   });
 
   it("names every menu's first row at the header metrics", () => {
-    // The model menu's target switch takes the header's own text size and padding, so
-    // all four composer menus open with the same title band.
+    // The model menu's target switch takes the header's own text size, padding and
+    // colour, so all four composer menus open with the same title band.
     const header = cssRules(".popup .ph").join("\n");
     const tabs = cssRules(".model-menu-tabs").join("\n");
     const tab = cssRules(".model-menu-tab").join("\n");
@@ -33,7 +33,12 @@ describe("model list CSS", () => {
     expect(tab).toContain("padding: 8px 0");
     expect(tabs).toContain("padding: 0 12px");
     expect(header).toContain("padding: 8px 12px");
-    // The row is the menu's title, not a tab bar: no chip-shaped hover.
+    expect(header).toContain("color: var(--muted)");
+    expect(tab).toContain("color: var(--muted)");
+    // A title band, not a tab bar: the open target brightens nothing and draws no
+    // accent under its text, and the one line under the band is the header's own.
+    expect(cssRules('.model-menu-tab[data-on="true"]')).toEqual([]);
+    expect(tab).not.toContain("border-bottom");
     expect(cssRules(".model-menu-tab:hover").join("\n")).not.toContain("border-radius");
   });
 

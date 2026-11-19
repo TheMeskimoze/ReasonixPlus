@@ -5141,7 +5141,8 @@ html[data-platform="macos"] .startup-loading-overlay {
 }
 /* The model pill's dropdown has two targets instead of a header: the agent model
    always, the subagent's only on a session minted with subagents. The row reads at
-   the header's metrics, so all four composer menus name themselves the same way. */
+   the header's metrics and colour, so all four composer menus name themselves the
+   same way: one muted title band, one hairline under it, no selected accent. */
 .model-menu-tabs {
   display: flex;
   gap: 16px;
@@ -5151,20 +5152,15 @@ html[data-platform="macos"] .startup-loading-overlay {
 .model-menu-tab {
   padding: 8px 0;
   border: none;
-  border-bottom: 2px solid transparent;
   background: none;
   color: var(--muted);
   font: inherit;
   font-size: 14px;
   cursor: pointer;
-  transition: color 120ms, border-color 120ms;
+  transition: color 120ms;
 }
 .model-menu-tab:hover {
   color: var(--fg);
-}
-.model-menu-tab[data-on="true"] {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
 }
 .model-menu-tab:focus-visible {
   outline: none;

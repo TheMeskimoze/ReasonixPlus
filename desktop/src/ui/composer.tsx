@@ -308,7 +308,6 @@ function ModelPickerMenu({
           role="tab"
           id={tabId("agent")}
           className="model-menu-tab"
-          data-on={!isSubagent}
           data-model-tab="agent"
           aria-selected={!isSubagent}
           aria-controls={panelId}
@@ -324,7 +323,6 @@ function ModelPickerMenu({
             role="tab"
             id={tabId("subagent")}
             className="model-menu-tab"
-            data-on={isSubagent}
             data-model-tab="subagent"
             aria-selected={isSubagent}
             aria-controls={panelId}
