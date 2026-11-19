@@ -1,32 +1,19 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 // @vitest-environment jsdom
 // Mounts the full App against a mocked Tauri bridge and drives the daemon's
 // session events, so the "no sessions" main-area state is exercised end to end.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../desktop/src/App";
-
-const WS = "C:\\ws";
-const handlers = new Map<string, (e: { payload: unknown }) => void>();
-/** Every command the app pushed to the daemon, in order. */
-const sent: Record<string, unknown>[] = [];
-
-async function feed(ev: Record<string, unknown>, tabId?: string) {
-  const h = handlers.get("rpc:event");
-  if (!h) throw new Error("rpc:event handler not registered yet");
-  const line = JSON.stringify(tabId ? { ...ev, tabId } : ev);
-  await act(async () => {
-    h({ payload: { data: line } });
-  });
-}
-
-const settle = (ms = 40) =>
-  act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
+import {
+  WS,
+  feed,
+  mockDesktopHost,
+  resetDesktopHost,
+  sent,
+  appSettings as settings,
+  settle,
+} from "./support/desktop-harness";
 
 /** The id the app sent with its most recent `cmd`, which is what the daemon answers. */
 function lastRequestId(cmd: "session_delete" | "session_clear" | "new_chat"): string {
@@ -54,20 +41,7 @@ async function startupWithSessionA() {
     },
     "t1",
   );
-  await feed(
-    {
-      type: "$settings",
-      reasoningEffort: "medium",
-      editMode: "follow",
-      quickSendId: "proceed",
-      quickSends: [],
-      workspaceDir: WS,
-      recentWorkspaces: [WS],
-      model: "deepseek-v4-flash",
-      version: "0.50.1",
-    },
-    "t1",
-  );
+  await feed(settings(WS), "t1");
   await feed({ type: "$ready" }, "t1");
   await feed(
     {
@@ -104,54 +78,10 @@ async function startupWithSessionA() {
 
 describe("desktop — no-session main-area state", () => {
   beforeEach(() => {
-    handlers.clear();
-    sent.length = 0;
-    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-    (Element.prototype as unknown as { scrollTo: () => void }).scrollTo = () => {};
-    if (!window.matchMedia) {
-      (window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-        matches: false,
-        addEventListener() {},
-        removeEventListener() {},
-        addListener() {},
-        removeListener() {},
-      });
-    }
-    (listen as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string, cb: (e: { payload: unknown }) => void) => {
-        handlers.set(name, cb);
-        return () => handlers.delete(name);
-      },
-    );
-    (invoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (cmd: string, args?: { line?: string }) => {
-        if (cmd === "rpc_send" && args?.line) sent.push(JSON.parse(args.line));
-        return undefined;
-      },
-    );
-    (getCurrentWindow as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isMaximized: vi.fn(async () => false),
-      isFocused: vi.fn(async () => true),
-      isVisible: vi.fn(async () => true),
-      isMinimized: vi.fn(async () => false),
-      listen: vi.fn(async () => () => {}),
-      close: vi.fn(),
-      minimize: vi.fn(),
-      toggleMaximize: vi.fn(),
-      maximize: vi.fn(),
-      unmaximize: vi.fn(),
-      setTitle: vi.fn(),
-      onCloseRequested: vi.fn(async () => () => {}),
-      onResized: vi.fn(async () => () => {}),
-    });
+    mockDesktopHost();
   });
   afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+    resetDesktopHost();
   });
 
   it("keeps the thread while a session exists (no false prompt)", async () => {
@@ -498,5 +428,44 @@ describe("desktop — no-session main-area state", () => {
     );
     await settle(40);
     expect(screen.queryByText("Creating session…")).toBeNull();
+  });
+
+  it("clears only the idle sessions, keeping the one whose agent is running", async () => {
+    render(<App />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await startupWithSessionA();
+    // A second, idle row beside A, which gets a turn in flight below.
+    await feed(
+      {
+        type: "$sessions",
+        epoch: "e1",
+        revision: 2,
+        items: [
+          { name: "B", title: "Session B", messageCount: 0, mtime: new Date(2).toISOString() },
+          { name: "A", title: "Session A", messageCount: 2, mtime: new Date(1).toISOString() },
+        ],
+      },
+      "t1",
+    );
+    await feed({ type: "$turn_started" }, "t1");
+    await settle(30);
+
+    // The confirm counts with the same split the request carries: A is not offered.
+    await act(async () => {
+      screen.getByRole("button", { name: "Clear all sessions" }).click();
+    });
+    expect(screen.getByText("1 session(s) for this workspace")).toBeTruthy();
+    expect(screen.getByText("1 running session(s) will be kept")).toBeTruthy();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete all" }).click();
+    });
+    await settle(30);
+
+    const clear = sent.filter((c) => c.cmd === "session_clear").pop();
+    expect(clear).toBeDefined();
+    expect(clear).toMatchObject({ names: ["B"], keep: ["A"] });
   });
 });

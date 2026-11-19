@@ -616,6 +616,8 @@
       "clearAll": "Clear all tabs",
       "clearRight": "Clear tabs to the right",
       "clearLeft": "Clear tabs to the left",
+      "clearIdleOnly": "Only idle tabs clear. Stop the running agent first.",
+      "keptRunning": "Kept {n} running tab(s): stop their agents, then clear.",
       "scrollLeft": "Scroll tabs left",
       "scrollRight": "Scroll tabs right",
       "running": "Agent running"

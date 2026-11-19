@@ -10,7 +10,8 @@ export interface TabCapCandidate {
   id: string;
   /** Monotonic focus stamp, higher = more recent. Absent means never focused. */
   focusedAt?: number;
-  /** True while an agent has a turn in flight: never evicted. */
+  /** True while the tab holds live work (see the daemon's `channelHoldsLiveWork`: a turn
+   *  in flight, a winding-down turn body, or a manual fold): never evicted. */
   running: boolean;
 }
 

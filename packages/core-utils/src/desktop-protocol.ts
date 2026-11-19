@@ -1995,8 +1995,10 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mention_picked"; path: string }
   /** Open a workspace tab, or add a fresh session when that workspace is open. */
   | { cmd: "tab_open"; workspaceDir?: string }
-  /** Close the addressed channel's entire visual workspace tab and all agents in it. */
-  | { cmd: "tab_close" }
+  /** Close the addressed channel. `keepRunning` refuses the close while that tab holds
+   *  live work, so a bulk clear never takes a turn the user is waiting on; a plain close
+   *  (the pill's own control, Ctrl+W) leaves it unset. */
+  | { cmd: "tab_close"; keepRunning?: boolean }
   | { cmd: "tab_activate"; tabId: string }
   | { cmd: "workspace_recent_remove"; path: string }
   | { cmd: "mcp_specs_get" }

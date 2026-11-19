@@ -4862,9 +4862,9 @@ html[data-platform="macos"] .startup-loading-overlay {
 .composer-foot .model-pill:not(.mode-pill):hover {
   background: var(--panel-2);
 }
-/* Corner notch naming each picker: "M" main agent, "S" subagent, "E" effort. The
-   letter rides `data-pill-tag`, so it never joins the button's label text or its
-   accessible name. */
+/* Corner notch naming each picker: "M" main agent, "S" subagent, "E" effort, "G" edit
+   gate. The letter rides `data-pill-tag`, so it never joins the button's label text or
+   its accessible name. */
 .composer-foot .model-pill[data-pill-tag] {
   position: relative;
   /* Room for the notch's diagonal so it never paints over the chevron. */
@@ -5140,29 +5140,27 @@ html[data-platform="macos"] .startup-loading-overlay {
   border-bottom: 1px solid var(--border);
 }
 /* The model pill's dropdown has two targets instead of a header: the agent model
-   always, the subagent's only on a session minted with subagents. */
+   always, the subagent's only on a session minted with subagents. The row reads at
+   the header's metrics, so all four composer menus name themselves the same way. */
 .model-menu-tabs {
   display: flex;
-  gap: 2px;
-  padding: 6px 6px 0;
+  gap: 16px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border);
 }
 .model-menu-tab {
-  flex: 1;
-  padding: 6px 10px;
+  padding: 8px 0;
   border: none;
   border-bottom: 2px solid transparent;
-  border-radius: 6px 6px 0 0;
   background: none;
   color: var(--muted);
   font: inherit;
   font-size: 14px;
   cursor: pointer;
-  transition: color 120ms, border-color 120ms, background 120ms;
+  transition: color 120ms, border-color 120ms;
 }
 .model-menu-tab:hover {
   color: var(--fg);
-  background: var(--panel-2);
 }
 .model-menu-tab[data-on="true"] {
   color: var(--fg);
@@ -5175,44 +5173,21 @@ html[data-platform="macos"] .startup-loading-overlay {
 .popup-list {
   overflow-y: auto;
   overflow-x: auto;
+  /* The list is the popup's only growing child, so it may scroll inside the cap
+     instead of pushing the card past it. */
+  min-height: 0;
   padding: 4px;
-}
-/* model picker — the Ollama group alone can run to hundreds of ids, so the
-   menu list gets a bounded height and scrolls instead of overflowing. */
-.model-menu-list {
-  max-height: 460px;
-}
-
-.model-menu-list {
-  max-height: 460px;
-}
-/* Compact the shared model rows (agent and subagent tabs) so the list stays
-   compact and the whole picker fits narrow windows. */
-.model-menu-list .popup-item {
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  padding: 5px 6px;
-  font-size: 13px;
-}
-.model-menu-list .popup-item .cmd {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .effort-menu-list {
   overflow-x: hidden;
 }
 .effort-menu-list .popup-item {
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  font-size: clamp(11px, 2vw, 14px);
 }
 .effort-menu-list .nm {
   min-width: 0;
 }
 .effort-menu-list .desc {
-  font-size: clamp(10px, 1.7vw, 12px);
   overflow-wrap: anywhere;
 }
 /* Side padding matches the rows' so a group title sits over its models. */
@@ -5220,7 +5195,7 @@ html[data-platform="macos"] .startup-loading-overlay {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 6px 2px;
+  padding: 6px 8px 2px;
   font-size: 11px;
   color: var(--muted);
   text-transform: uppercase;

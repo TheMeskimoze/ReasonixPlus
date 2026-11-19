@@ -1,11 +1,18 @@
 import { keepStable, sameNumberMap } from "./stable-identity";
 import { normalizeWorkspacePath } from "./workspace-path";
 
+/** True when this tab's agent is working. The single source of the "is this tab
+ *  running?" rule: the pill's running dot, the clear that must spare it, and the
+ *  sidebar dot all read this, so no two surfaces can disagree about one tab. */
+export function tabRunning(t: { busy?: boolean }): boolean {
+  return t.busy === true;
+}
+
 /** The session name of a tab whose agent is actively running, or undefined.
- *  The single source of the "is this tab running?" rule that both the sidebar
- *  dot and its live tokens/second readout derive from. */
+ *  Derived from `tabRunning` so the sidebar dot and its live tokens/second readout
+ *  name exactly the tabs the ribbon dots. */
 export function runningTabSession(t: { session?: string; busy?: boolean }): string | undefined {
-  return t.busy && t.session ? t.session : undefined;
+  return tabRunning(t) && t.session ? t.session : undefined;
 }
 
 /** Splits the workspace-wide live tokens/second map into one slice per workspace.

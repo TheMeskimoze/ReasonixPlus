@@ -10,7 +10,7 @@ import { TabBar, reduce } from "../App";
 import type { IncomingEvent, McpSetupServer, SkillSetupEntry } from "../protocol";
 import { ZoomableImage } from "./image-preview";
 import { CapabilityDialog } from "./mcp-setup";
-import { TabMenu, getTabsToClear } from "./tab-menu";
+import { TabMenu, clearTabPartition, getTabsToClear } from "./tab-menu";
 import {
   EXPAND_EVENT,
   callAnchor,
@@ -71,6 +71,40 @@ describe("tab-menu", () => {
       ]);
       expect(getTabsToClear(tabs, "unknown", "right")).toEqual([]);
       expect(getTabsToClear(tabs, "unknown", "left")).toEqual([]);
+    });
+  });
+
+  describe("clearTabPartition", () => {
+    const tabs = [
+      { id: "tab-1", busy: false },
+      { id: "tab-2", busy: true },
+      { id: "tab-3", busy: false },
+      { id: "tab-4", busy: true },
+    ];
+
+    it("leaves every running tab out of the clear", () => {
+      const all = clearTabPartition(tabs, "tab-1", "all");
+      expect(all.doomed.map((t) => t.id)).toEqual(["tab-1", "tab-3"]);
+      expect(all.kept.map((t) => t.id)).toEqual(["tab-2", "tab-4"]);
+      expect(clearTabPartition(tabs, "tab-1", "right").doomed.map((t) => t.id)).toEqual(["tab-3"]);
+      expect(clearTabPartition(tabs, "tab-4", "left").doomed.map((t) => t.id)).toEqual([
+        "tab-1",
+        "tab-3",
+      ]);
+    });
+
+    it("names only the tabs a scope reaches, split by whether their agent runs", () => {
+      const right = clearTabPartition(tabs, "tab-2", "right");
+      expect(right.doomed.map((t) => t.id)).toEqual(["tab-3"]);
+      expect(right.kept.map((t) => t.id)).toEqual(["tab-4"]);
+      expect(clearTabPartition(tabs, "tab-1", "left")).toEqual({ doomed: [], kept: [] });
+    });
+
+    it("closes nothing and keeps every tab when the whole scope is running", () => {
+      const allBusy = tabs.map((tab) => ({ ...tab, busy: true }));
+      const all = clearTabPartition(allBusy, "tab-1", "all");
+      expect(all.doomed).toEqual([]);
+      expect(all.kept.map((t) => t.id)).toEqual(["tab-1", "tab-2", "tab-3", "tab-4"]);
     });
   });
 
@@ -139,6 +173,32 @@ describe("tab-menu", () => {
       fireEvent.click(clearLeftBtn);
       expect(onClear).toHaveBeenCalledWith("left");
       expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("names why a clear cannot help when every tab in reach is running", () => {
+      const onClear = vi.fn();
+      render(
+        <TabMenu
+          anchor={{ x: 100, y: 100 }}
+          tabs={[
+            { id: "tab-1", busy: true },
+            { id: "tab-2", busy: true },
+          ]}
+          activeId="tab-1"
+          onCloseTab={vi.fn()}
+          onClear={onClear}
+          onClose={vi.fn()}
+        />,
+      );
+
+      const clearAll = screen.getByRole("menuitem", { name: "Clear all tabs" });
+      // Inert, with the reason reachable on hover, and the click clears nothing.
+      expect(clearAll.getAttribute("aria-disabled")).toBe("true");
+      expect(clearAll.getAttribute("title")).toBe(
+        "Only idle tabs clear. Stop the running agent first.",
+      );
+      fireEvent.click(clearAll);
+      expect(onClear).not.toHaveBeenCalled();
     });
 
     it("dismisses on Escape key", () => {

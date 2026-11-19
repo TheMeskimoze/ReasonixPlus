@@ -11,6 +11,7 @@ import {
   type TurnCleanupOutcome,
   settleTurnBeforeClose,
   settleTurnCleanup,
+  shouldKeepTabOnClose,
   tabBusy,
   tabStatus,
   turnStartRejection,
@@ -228,6 +229,29 @@ describe("tabBusy / tabStatus — one busy source", () => {
       compacting: false,
       switching: false,
     });
+  });
+});
+
+describe("shouldKeepTabOnClose — a bulk clear never ends a live turn", () => {
+  const working = {
+    aborter: new AbortController(),
+    activeTurn: undefined,
+    compactingManual: false,
+  };
+  const folded = { aborter: null, activeTurn: undefined, compactingManual: true };
+  const idle = { aborter: null, activeTurn: undefined, compactingManual: false };
+
+  it("keeps a tab a clear asked to spare while its agent works", () => {
+    expect(shouldKeepTabOnClose(working, true)).toBe(true);
+    // A fold runs with both turn markers cleared, so it is named on its own.
+    expect(shouldKeepTabOnClose(folded, true)).toBe(true);
+    expect(shouldKeepTabOnClose(idle, true)).toBe(false);
+  });
+
+  it("never refuses an explicit close", () => {
+    // The pill's own control must always be able to get rid of a runaway tab.
+    expect(shouldKeepTabOnClose(working, undefined)).toBe(false);
+    expect(shouldKeepTabOnClose(folded, false)).toBe(false);
   });
 });
 

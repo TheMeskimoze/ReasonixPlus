@@ -50,7 +50,7 @@ import { formatBytes } from "./format";
 import { t, useLang } from "./i18n";
 import { I } from "./icons";
 import { downscaleImage, fileToDataUrl, isImagePath, typedMentionImages } from "./image-attach";
-import { ratesByWorkspace, runningTabSession } from "./live-rates";
+import { ratesByWorkspace, runningTabSession, tabRunning } from "./live-rates";
 import {
   type ApprovalSnapshot,
   type PlanFeedbackState,
@@ -193,7 +193,7 @@ import {
 } from "./ui/startup-failure";
 import { StartupLoadingOverlay } from "./ui/startup-loading";
 import { StatusBar } from "./ui/statusbar";
-import { type ClearTabsScope, TabMenu, getTabsToClear } from "./ui/tab-menu";
+import { type ClearTabsScope, TabMenu, clearTabPartition } from "./ui/tab-menu";
 import {
   AssistantMsg,
   CheckpointApprovalCard,
@@ -2835,6 +2835,9 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
     case "$mcp_setup":
       return {
         ...state,
+        // The picker withholds `$ready`: this chat cannot run until its capability
+        // answer lands, so a send now parks instead of reaching the agent.
+        ready: false,
         mcpSetup: {
           servers: Array.isArray(ev.servers) ? ev.servers : [],
           plugins: Array.isArray(ev.plugins) ? ev.plugins : [],
@@ -5248,19 +5251,25 @@ const TabRuntime = memo(function TabRuntime({
 
   // Props handed to memoized children must keep their identity across renders,
   // otherwise memo() can never bail out of their subtree.
-  const closeTab = useCallback((id: string) => {
-    rpcSend({ cmd: "tab_close", tabId: id }).catch((err) =>
-      recordFrontendFailure("frontend.tab_close_failed", err),
-    );
+  const closeTab = useCallback((id: string, options: { keepRunning?: boolean } = {}) => {
+    rpcSend({
+      cmd: "tab_close",
+      tabId: id,
+      ...(options.keepRunning ? { keepRunning: true } : {}),
+    }).catch((err) => recordFrontendFailure("frontend.tab_close_failed", err));
   }, []);
 
   const clearTabs = useCallback(
     (scope: ClearTabsScope) => {
       // The ribbon is flat, so the pills are the tabs: clearing a side of the
       // strip closes exactly those sessions, whichever workspace they sit on.
-      for (const target of getTabsToClear(tabsList, activeTabId, scope)) closeTab(target.id);
+      const { doomed, kept } = clearTabPartition(tabsList, activeTabId, scope);
+      for (const target of doomed) closeTab(target.id, { keepRunning: true });
+      // A running agent keeps its channel: the clear says so instead of taking a turn
+      // the user is waiting on with it.
+      if (kept.length > 0) appendNotice(t("app.tab.keptRunning", { n: kept.length }), "warning");
     },
-    [tabsList, activeTabId, closeTab],
+    [appendNotice, tabsList, activeTabId, closeTab],
   );
 
   const loadSession = useCallback(
@@ -5646,7 +5655,10 @@ const TabRuntime = memo(function TabRuntime({
                 activeQuickSendId={activeQuickSend.id}
                 onPickQuickSend={(id) => saveSettings({ quickSendId: id })}
                 onAbort={abort}
-                disabled={!state.ready}
+                // Typing is closed only where there is nothing to run in. A tab that has
+                // a workspace keeps its box while the agent is still coming up, so a
+                // keystroke is never swallowed; the send waits in the queue for `$ready`.
+                disabled={!state.ready && !state.settings?.workspaceDir}
                 shortcutsActive={active}
                 busy={engaged}
                 busyLabel={
@@ -6347,9 +6359,9 @@ export function TabBar({
     if (onClearTabs) {
       onClearTabs(scope);
     } else {
-      const targets = getTabsToClear(tabs, activeId, scope);
+      const { doomed } = clearTabPartition(tabs, activeId, scope);
       if (scope === "all") onNew();
-      for (const t of targets) onClose(t.id);
+      for (const t of doomed) onClose(t.id);
     }
   };
 
@@ -6400,7 +6412,7 @@ export function TabBar({
               }}
               title={blocked ? t("app.tab.switchBlocked") : tab.workspaceDir || tab.label}
             >
-              {tab.busy ? (
+              {tabRunning(tab) ? (
                 <span className="tab-active" title={t("app.tab.running")}>
                   <span className="dot" data-state="running" />
                 </span>
@@ -7291,6 +7303,20 @@ export function App() {
             const ev = JSON.parse(e.payload.data) as IncomingEvent;
             const tabId = ev.tabId;
 
+            /** Follow the channel's binding: the ribbon label, the running-agent set (dot,
+             *  tokens/second) and the clear-all split all read the tab row's session, so a
+             *  stale name would report work against a session that is not the one running. */
+            const bindTabSession = (id: string, name: string | undefined): void => {
+              const bound = name || undefined;
+              setTabs((prev) => {
+                const index = prev.findIndex((tab) => tab.id === id);
+                if (index === -1 || prev[index]!.session === bound) return prev;
+                const next = prev.slice();
+                next[index] = { ...prev[index]!, session: bound };
+                return next;
+              });
+            };
+
             if (ev.type === "$connected") {
               tracker.mark("backend_connected");
               setBackendConnected(true);
@@ -7611,6 +7637,12 @@ export function App() {
               });
             }
 
+            // A channel that binds or loads a session moves the tab row's identity with
+            // it, so the list and the ribbon never name the session it used to hold.
+            if ((ev.type === "$session_bound" || ev.type === "$session_loaded") && tabId) {
+              bindTabSession(tabId, ev.name);
+            }
+
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
@@ -7780,7 +7812,7 @@ export function App() {
   // name) while any agent is running. Throttled to ~4Hz so the sidebar
   // re-renders at a readable cadence instead of once per delta. When nothing is
   // running the map clears, so the readout disappears along with the dot.
-  const anyBusy = tabs.some((t) => t.busy);
+  const anyBusy = tabs.some((t) => tabRunning(t));
   useEffect(() => {
     if (!anyBusy) {
       setSessionRates((prev) => (prev.size === 0 ? prev : new Map()));

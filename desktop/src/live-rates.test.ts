@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ratesByWorkspace } from "./live-rates";
+import { ratesByWorkspace, runningTabSession, tabRunning } from "./live-rates";
 import { normalizeWorkspacePath } from "./workspace-path";
 
 type Tab = { id: string; workspaceDir?: string; session?: string; busy?: boolean };
@@ -13,6 +13,20 @@ const B = normalizeWorkspacePath(B_DIR);
 function tab(id: string, workspaceDir: string, session?: string, busy = true): Tab {
   return { id, workspaceDir, session, busy };
 }
+
+describe("tabRunning", () => {
+  it("answers only for a tab whose agent is running", () => {
+    expect(tabRunning({ busy: true })).toBe(true);
+    expect(tabRunning({ busy: false })).toBe(false);
+    expect(tabRunning({})).toBe(false);
+  });
+
+  it("is the rule the session name reads, so the dot and the clear name one tab", () => {
+    expect(runningTabSession({ session: "alpha-1", busy: true })).toBe("alpha-1");
+    expect(runningTabSession({ session: "alpha-1", busy: false })).toBeUndefined();
+    expect(runningTabSession({ busy: true })).toBeUndefined();
+  });
+});
 
 describe("ratesByWorkspace", () => {
   it("splits the rate map by the workspace whose session is running", () => {

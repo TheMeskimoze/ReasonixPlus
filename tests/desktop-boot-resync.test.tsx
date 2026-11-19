@@ -3,10 +3,7 @@
 // its boot state, so the follow-up resync must not replay every tab (the duplicate
 // pass that doubled cold-start work), and the splash must lift on the tab the user
 // is actually shown rather than on the last restored tab.
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,105 +14,33 @@ vi.mock("../desktop/src/diagnostics", async (importOriginal) => {
 
 import { App } from "../desktop/src/App";
 import { recordFrontendDiagnostic } from "../desktop/src/diagnostics";
+import {
+  WS,
+  appSettings,
+  feed,
+  feedBatch,
+  mockDesktopHost,
+  resetDesktopHost,
+  sent,
+  settle,
+} from "./support/desktop-harness";
 
 /** Diagnostics sink stand-in: boot progress is reported here, not to the console. */
 const record = vi.mocked(recordFrontendDiagnostic);
 
-const WS = "C:\\ws";
-const handlers = new Map<string, (e: { payload: unknown }) => void>();
-let sent: Array<Record<string, unknown>> = [];
 /** What the host reports for `rpc_spawn`: true = this app just created the daemon. */
 let spawnedFresh: unknown = true;
-
-async function feedBatch(events: Record<string, unknown>[]) {
-  const handler = handlers.get("rpc:event");
-  if (!handler) throw new Error("rpc:event handler not registered yet");
-  await act(async () => {
-    for (const event of events) {
-      handler({ payload: { data: JSON.stringify(event) } });
-    }
-  });
-}
-
-async function feed(ev: Record<string, unknown>, tabId?: string) {
-  await feedBatch([tabId ? { ...ev, tabId } : ev]);
-}
-
-const settle = (ms = 40) =>
-  act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
 
 const resyncs = () => sent.filter((c) => c.cmd === "desktop_resync");
 const splash = () => screen.queryByText(/Loading workspaces/);
 
-const settings = (model = "deepseek-v4-flash") => ({
-  type: "$settings",
-  reasoningEffort: "medium",
-  editMode: "follow",
-  quickSendId: "proceed",
-  quickSends: [],
-  workspaceDir: WS,
-  recentWorkspaces: [WS],
-  model,
-  version: "0.50.1",
-});
-
 describe("desktop boot — resync and splash gating", () => {
   beforeEach(() => {
-    handlers.clear();
-    sent = [];
     spawnedFresh = true;
-    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-    (Element.prototype as unknown as { scrollTo: () => void }).scrollTo = () => {};
-    if (!window.matchMedia) {
-      (window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-        matches: false,
-        addEventListener() {},
-        removeEventListener() {},
-        addListener() {},
-        removeListener() {},
-      });
-    }
-    (listen as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string, cb: (e: { payload: unknown }) => void) => {
-        handlers.set(name, cb);
-        return () => handlers.delete(name);
-      },
-    );
-    (getCurrentWindow as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isMaximized: vi.fn(async () => false),
-      isFocused: vi.fn(async () => true),
-      isVisible: vi.fn(async () => true),
-      isMinimized: vi.fn(async () => false),
-      listen: vi.fn(async () => () => {}),
-      close: vi.fn(),
-      minimize: vi.fn(),
-      toggleMaximize: vi.fn(),
-      maximize: vi.fn(),
-      unmaximize: vi.fn(),
-      setTitle: vi.fn(),
-      onCloseRequested: vi.fn(async () => () => {}),
-      onResized: vi.fn(async () => () => {}),
-    });
-    (invoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (cmd: string, args?: { line?: string }) => {
-        if (cmd === "rpc_send" && args?.line) {
-          sent.push(JSON.parse(args.line) as Record<string, unknown>);
-          return undefined;
-        }
-        if (cmd === "rpc_spawn") return spawnedFresh;
-        return undefined;
-      },
-    );
+    mockDesktopHost((cmd) => (cmd === "rpc_spawn" ? spawnedFresh : undefined));
   });
   afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+    resetDesktopHost();
   });
 
   it("skips the per-tab replay when this app spawned the daemon itself", async () => {
@@ -171,7 +96,7 @@ describe("desktop boot — resync and splash gating", () => {
         },
         id,
       );
-      await feed(settings(), id);
+      await feed(appSettings(), id);
     }
     expect(splash()).toBeTruthy();
   }
@@ -221,7 +146,7 @@ describe("desktop boot — resync and splash gating", () => {
       expect(visible[0]?.querySelector('.tab[data-active="true"]')?.textContent).toContain(
         expectedLabel,
       );
-      await feed({ ...settings(), workspaceDir: "" }, "t3");
+      await feed({ ...appSettings(), workspaceDir: "" }, "t3");
       expect(document.querySelectorAll(".app")).toHaveLength(multiple ? 1 : 2);
       expect(document.querySelector(".pending-workspace")).toBeTruthy();
     },

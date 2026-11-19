@@ -52,7 +52,6 @@ import { toWorkspaceRelative } from "../workspace-path";
 import type { ComposerDraft } from "./composer-draft";
 import { DEFAULT_COMPOSER_ROWS } from "./composer-sizing";
 import { CostBadge } from "./cost-badge";
-import { FitText } from "./fit-text";
 import { activationHandler } from "./keyboard";
 import { StuckLabel, TimerSpan } from "./live";
 import { menuPopLeft } from "./menu-pop";
@@ -69,6 +68,10 @@ type MenuId = "model" | "effort" | "mode" | "quick";
 
 /** The two targets the one model pill edits through its tabs. */
 type ModelTarget = "agent" | "subagent";
+
+/** The one width every composer dropdown opens at: the pills sit in a row, so their
+ *  menus read as one family instead of sizing themselves per control. */
+const MENU_WIDTH = 320;
 
 const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -174,6 +177,7 @@ function ModePill({
       <button
         type="button"
         className="model-pill mode-pill"
+        data-pill-tag="G"
         data-k={mode}
         onClick={onToggle}
         title={t(current.hint)}
@@ -185,7 +189,7 @@ function ModePill({
         <I.chev size={10} />
       </button>
       {open ? (
-        <MenuPop width={320}>
+        <MenuPop width={MENU_WIDTH}>
           <MenuHeader label={t("editMode.label")} />
           <div className="popup-list">
             {MODE_INFO.map((m) => (
@@ -214,9 +218,9 @@ export function StoredComposer({
   return <Composer {...props} draft={draft} setDraft={draftStore.setDraft} />;
 }
 
-/** One model pill: the box, the fit-to-width label, the cost badge and the
- *  trigger. Its dropdown content is supplied by the caller, because one pill
- *  offers both the agent and subagent targets behind tabs. */
+/** One model pill: the box, the truncating label, the cost badge and the trigger. Its
+ *  dropdown content is supplied by the caller, because one pill offers both the agent
+ *  and subagent targets behind tabs. */
 function ModelPickerPill({
   tag,
   title,
@@ -250,11 +254,13 @@ function ModelPickerPill({
         onClick={onToggle}
         title={title}
       >
-        <FitText text={label} />
+        {/* Same label recipe as the effort and gate pills: one fixed size, ellipsized,
+            with the full id in the title. */}
+        <span title={label}>{label}</span>
         <CostBadge cost={cost} />
         <I.chev size={10} />
       </button>
-      {open ? <MenuPop width={420}>{menu}</MenuPop> : null}
+      {open ? <MenuPop width={MENU_WIDTH}>{menu}</MenuPop> : null}
     </div>
   );
 }
@@ -1328,7 +1334,7 @@ export function Composer({
                 <I.chev size={10} />
               </button>
               {openMenu === "effort" && !effortControlDisabled ? (
-                <MenuPop width={320}>
+                <MenuPop width={MENU_WIDTH}>
                   <MenuHeader label={effortTitle} />
                   <div className="popup-list effort-menu-list">
                     {efforts.map((e) => (
@@ -1382,7 +1388,7 @@ export function Composer({
                 <I.zap size={13} />
               </button>
               {openMenu === "quick" ? (
-                <MenuPop width={320}>
+                <MenuPop width={MENU_WIDTH}>
                   <MenuHeader label={quickSendTitle} />
                   <div className="popup-list">
                     {quickSendOptions.map((q, index) => (

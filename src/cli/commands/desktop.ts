@@ -711,6 +711,11 @@ const SESSION_TITLE_MAX_CHARS = 200;
 export const NO_WORKSPACE_MESSAGE =
   "This tab has no workspace yet. Pick or open a workspace, then try again.";
 
+/** Why a clear-driven close left a tab open: a bulk action may not end a live turn.
+ *  The same wording serves every caller that closes with `keepRunning`. */
+export const TAB_RUNNING_CLEAR_MESSAGE =
+  "Kept this tab: its agent is still running. Stop it, then clear.";
+
 /** A tab can only mint or clone a session once it has a workspace: a pending
  *  tab has no rootDir, and both commands would otherwise return in silence.
  *  Exported for tests. */
@@ -744,6 +749,16 @@ export function channelHoldsLiveWork(channel: {
   // A fold runs with both turn markers cleared, so it is named here rather than folded
   // into the busy flag the UI reads.
   return tabBusy(channel) || channel.compactingManual === true;
+}
+
+/** Whether a close must leave this tab open: only a bulk clear asks for that, and only a
+ *  channel holding live work is spared. An explicit close is never refused, so the user
+ *  can always get rid of a runaway tab by clicking its own control. */
+export function shouldKeepTabOnClose(
+  channel: Parameters<typeof channelHoldsLiveWork>[0],
+  keepRunning: boolean | undefined,
+): boolean {
+  return keepRunning === true && channelHoldsLiveWork(channel);
 }
 
 /** Sessions whose channel holds live work. Deleting one would abort work the user is
@@ -5614,9 +5629,10 @@ export function tabStatus(tab: Tab): TabStatusEvent {
     type: "$tab_status",
     busy: tabBusy(tab),
     ...(tab.runtime ? { turn: tab.runtime.loop.currentTurn } : {}),
-    // The daemon holds no send queue: the desktop drains its own, and this
-    // count is only the inputs parked behind the active turn.
-    queued: tab.parkedSends,
+    // How many inputs are held for this tab: sends parked behind the active turn, plus a
+    // first message still owed to its capability answer. The desktop reads this to know
+    // its own send was accepted instead of lost.
+    queued: tab.parkedSends + (tab.owedTurn ? 1 : 0),
     compacting: tab.compactingManual,
     switching: tab.switching,
   };
@@ -5920,6 +5936,20 @@ interface TurnAttempt {
 
 type SymbolEntry = { name: string; path: string; line: number; kind: string };
 
+/** A user turn held until the chat it minted has answered its capability picker. */
+interface OwedTurn {
+  session: string;
+  content: string;
+  images?: TurnImage[];
+  clientId?: string;
+}
+
+/** Whether `owed` is still the turn parked on `tab`: the capability answer may have
+ *  consumed it already, and a turn that ran owns its own events from then on. */
+function owedStillParked(tab: Tab, owed: OwedTurn | undefined): owed is OwedTurn {
+  return owed !== undefined && tab.owedTurn === owed;
+}
+
 interface Tab {
   readonly id: string;
   /** Workspace-tab identity. Each Tab object is one independently running
@@ -6008,10 +6038,10 @@ interface Tab {
    *  default (the Settings MCP set, subagents off); Duplicate seeds its source session's
    *  frozen set so the clone starts faithful and the user can still diverge. */
   capabilitySeed?: ChatCapabilitySeed;
-  /** Duplicate's trimmed transcript while it is still owed, tagged with the session it
-   *  belongs to: auto-proceed leaves the log empty and runs this as the first turn once
-   *  the picker is answered. Keyed so a rebound channel can never replay it elsewhere. */
-  owedTurn?: { session: string; content: string };
+  /** A turn this channel owes once its capabilities are frozen, tagged with the session
+   *  it belongs to: Duplicate's trimmed transcript, or the first message that minted the
+   *  chat. Keyed so a rebound channel can never replay it elsewhere. */
+  owedTurn?: OwedTurn;
   /** True while a session switch is in progress — prevents stale events from the old turn. */
   switching: boolean;
   /** Plan progress for the diagnostics projection. Refreshed wherever plan state is
@@ -7102,13 +7132,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tabFocusedAt.set(tabId, focusStamp);
   }
   /** The tab a new one may replace, by the shared policy: least recently focused,
-   *  never the one the user is acting from, never one with a turn in flight. */
+   *  never the one the user is acting from, never one holding live work. */
   function idleTabToEvict(): Tab | undefined {
     const picked = pickTabToEvict(
       [...tabs.values()].map((tab) => ({
         id: tab.id,
         focusedAt: tabFocusedAt.get(tab.id),
-        running: Boolean(tab.aborter || tab.activeTurn),
+        running: channelHoldsLiveWork(tab),
       })),
       lastActiveTabId,
     );
@@ -8529,26 +8559,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (resume) {
       loadSessionIntoTab(tab, resume.name, { abortTurn, cancelPendingGates, persistOpenTabs });
     } else {
-      // A workspace with no sessions yet: mint one and gate it like any other session
-      // start. The confirm builds the runtime, so its prefix freezes the answered set,
-      // and the pre-fill is always off: opting in is the picker's job.
-      tab.currentSession = mintSessionFor(target, undefined, {
-        mcpSetup: true,
-        subagents: false,
-      });
-      bindSessionSubagents(tab, false);
-      emit(
-        {
-          type: "$session_loaded",
-          name: tab.currentSession,
-          messages: [],
-          events: [],
-          carryover: emptySessionCarryover(),
-        },
-        tab.id,
-      );
-      emitRestoredPlan(tab, false);
-      armSessionGate(tab);
+      // A workspace with no session lands NEUTRAL, not on the session-start picker: the
+      // composer has to take the first message before any chat exists, and that message
+      // mints the chat and answers for its capabilities. Gating the mint here keeps
+      // `$ready` back until the picker is answered, which closes the box being typed in.
+      // A stale gate withholds `$ready` the same way, so it goes with the session it
+      // belonged to.
+      tab.mcpSetupPending = false;
+      rebindTabSession(tab, "");
     }
     if (tab.mcpRuntime) {
       await tab.mcpRuntime.closeAll().catch(() => undefined);
@@ -8561,17 +8579,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSettings(tab);
     persistOpenTabs();
     // Let the frontend regroup: the tab's workspace (and now groupId) changed.
-    emit(
-      {
-        type: "$tab_opened",
-        workspaceDir: tab.rootDir,
-        active: tab.id === lastActiveTabId,
-        groupId: tab.groupId,
-        sessions: [tab.currentSession],
-        activeSession: tab.currentSession,
-      },
-      tab.id,
-    );
+    emitTabOpened(tab, tab.id === lastActiveTabId);
     emitTabDiagnostic(tab, "workspace.switch.completed", { targetChars: target.length }, "info");
     // Re-emit the setup/ready gate: a tab that was PENDING (no workspace) never
     // got `$ready`, so the composer would stay disabled after assigning one.
@@ -8712,32 +8720,44 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         reasoningEffort: tab.currentReasoningEffort,
         subagentModel: tab.currentSubagentModel,
       },
-      // The capability is frozen at this session boundary like any other mint; the
-      // neutral channel cannot host a picker, so it takes the configured default.
-      { subagents: tab.subagents },
+      // The capability is chosen at every session boundary, this one included: the
+      // message minted the chat, so its picker asks for that chat and withholds `$ready`
+      // until it is answered.
+      { mcpSetup: true, subagents: tab.subagents },
     );
     rebindTabSession(tab, name);
+    // The answer owns this chat's prefix: `mcp_session_configure` bridges the confirmed
+    // servers and only then builds the runtime, so no pre-answer runtime may exist.
+    tab.runtime = null;
+    refreshTabSystemPrompt(tab);
     // List it now: the sidebar is where the user sees the chat they just started.
     emitSessionsForWorkspace(tab.rootDir);
+    armSessionGate(tab);
     emitTabDiagnostic(tab, "session.bind.completed", { name }, "info");
   }
 
+  /** What a send got: it can run now, it minted the chat and parked for the capability
+   *  answer, or it cannot run at all (the refusal was emitted). */
+  type TurnSession = "ready" | "setup" | "refused";
+
   /** Every user turn funnels through here, so a channel holding no session creates the
-   *  session its message lands in first. False means it cannot run, and the refusal
-   *  has been emitted. */
-  function ensureTurnSession(tab: Tab): boolean {
+   *  session its message lands in first. */
+  function ensureTurnSession(tab: Tab): TurnSession {
     // A chat whose own model cannot run here still has its backups: take the first one
     // that can BEFORE the refusal below, so an unconfigured model never ends a send
     // with the whole backup list unused.
     adoptStartupBackup(tab);
     // A channel with no runtime cannot send at all, so it mints nothing: an empty
     // session would outlive the refusal below.
-    if (!tab.currentSession && tab.runtime) bindSessionForSend(tab);
+    if (!tab.currentSession && tab.runtime) {
+      bindSessionForSend(tab);
+      return "setup";
+    }
     if (!tab.runtime) {
       emitTurnEnded(tab, "stopped", { reason: notConfiguredMessage(tab.currentModel) });
-      return false;
+      return "refused";
     }
-    return true;
+    return "ready";
   }
 
   /** Abort every live writer bound to a doomed session BEFORE its folder is
@@ -9756,15 +9776,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     else appendSessionMessage(tab.currentSession, { role: "user", content: seed.content });
   }
 
-  /** Run the trimmed transcript a clone owes its creator, now that its channel can. A tab
-   *  with no runtime (unconfigured model) keeps the blob on disk rather than dropping it. */
+  /** Run the turn a channel owes, now that its capabilities are frozen and its runtime
+   *  exists. A tab with no runtime (unconfigured model) keeps the message on disk rather
+   *  than dropping it. */
   function runOwedSeed(tab: Tab): void {
     const owed = tab.owedTurn;
     tab.owedTurn = undefined;
     if (!owed || owed.session !== tab.currentSession) return;
-    if (tab.runtime) void runTurn(tab, owed.content);
+    if (tab.runtime) void runTurn(tab, owed.content, owed.images, owed.clientId);
     else {
-      // The copy lands on disk either way, but a transcript that never answers reads as
+      // The message lands on disk either way, but a transcript that never answers reads as
       // a cancelled conversation — name the missing credential above it.
       refuseUnrunnableModel(tab);
       appendSessionMessage(tab.currentSession, { role: "user", content: owed.content });
@@ -10343,7 +10364,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "tab_status") {
-      emit(tabStatus(tab));
+      // Addressed to the asking tab: an unrouted reply is dropped by the desktop, which
+      // then reads its own accepted send as lost and releases it.
+      emit(tabStatus(tab), tab.id);
       return;
     }
 
@@ -10364,6 +10387,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "tab_close") {
       // One pill is one tab, so closing it closes that channel only: the other
       // sessions sharing its workspace keep their own pills.
+      if (shouldKeepTabOnClose(tab, msg.keepRunning)) {
+        // A bulk clear may not take a live turn with it: the tab stays, and the notice
+        // names the way out. A plain close (the pill's own control) is never refused.
+        emit({ type: "$notice", text: TAB_RUNNING_CLEAR_MESSAGE, severity: "warning" }, tab.id);
+        return;
+      }
       closeChannel(tab).catch((err) => {
         emitDiagnosticError("tab.close.failed", err, {
           tabId: tab.id,
@@ -12057,7 +12086,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "user_input") {
-      if (!ensureTurnSession(tab)) return;
+      const session = ensureTurnSession(tab);
+      if (session === "refused") return;
+      // A chat minted by this send owes it a turn that may run only once the capability
+      // picker is answered. The raw text is parked first, so the daemon already reports a
+      // held input while the attachments below resolve.
+      const owed: OwedTurn | undefined =
+        session === "setup"
+          ? { session: tab.currentSession, content: msg.text, clientId: msg.clientId }
+          : undefined;
+      if (owed) tab.owedTurn = owed;
       void (async () => {
         let text = msg.text;
         let attachments = msg.images ? [...msg.images] : [];
@@ -12077,11 +12115,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           try {
             images = await resolveUserImages(attachments, tab.rootDir);
           } catch (err) {
-            emitTurnEnded(tab, "stopped", {
-              reason: `Image attach failed: ${(err as Error).message}`,
-            });
+            const reason = `Image attach failed: ${(err as Error).message}`;
+            // The answer may already have started the owed turn: that turn owns the
+            // terminal event, so the failure is reported instead of settled here.
+            if (owed && !owedStillParked(tab, owed)) {
+              emit({ type: "$notice", text: reason, severity: "error" }, tab.id);
+              return;
+            }
+            if (owed) tab.owedTurn = undefined;
+            emitTurnEnded(tab, "stopped", { reason });
             return;
           }
+        }
+        if (owed) {
+          // The picker can answer while the attachments resolve; a turn already taken
+          // is the one that runs, so only a still-parked send is refined in place.
+          if (owedStillParked(tab, owed)) {
+            owed.content = text;
+            owed.images = images;
+          }
+          return;
         }
         void runTurn(tab, text, images, msg.clientId);
       })();

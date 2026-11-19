@@ -1685,13 +1685,28 @@ describe("composer-pill-space", () => {
     });
 
     it("keeps a long model id whole as the label and as its hover title", () => {
-      // FitText shrinks this label to the pill; the title is what stays readable.
+      // The label ellipsizes at the pill's one font size; the title keeps it readable.
       const model = "my-private-gateway-model-id";
       const { container } = renderPills({ modelLabel: model });
 
       const label = container.querySelector(".model-pill span");
       expect(label?.textContent).toBe(model);
       expect(label?.getAttribute("title")).toBe(model);
+    });
+
+    it("opens every picker at the one width its siblings use", () => {
+      // The three pills sit in one row, so their menus must not size themselves per
+      // control: one width, declared once.
+      const { container } = renderPills({ supportedEfforts: ["low", "high"] });
+      const widths: number[] = [];
+      for (const trigger of [".model-pill", ".effort-pill", ".mode-pill"]) {
+        fireEvent.click(container.querySelector(trigger)!);
+        const popup = container.querySelector<HTMLElement>(".popup");
+        expect(popup, trigger).not.toBeNull();
+        widths.push(Number(/(\d+(?:\.\d+)?)px/.exec(popup!.style.width)?.[1]));
+        fireEvent.click(container.querySelector(trigger)!);
+      }
+      expect(new Set(widths).size).toBe(1);
     });
 
     it("opens a picker as bare rows, with no glyph beside a model or an effort", () => {
