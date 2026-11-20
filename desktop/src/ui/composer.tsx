@@ -265,6 +265,53 @@ function ModelPickerPill({
   );
 }
 
+/** One target of the model picker. The chosen target carries a check in the header's
+ *  own colour, so the switch reads as a menu choice without a brighter label or an
+ *  accent line under its text. A lone target gets no marker: there is nothing to tell
+ *  apart, so its band stays plain like every other menu title. */
+function TargetTab({
+  id,
+  target,
+  label,
+  selected,
+  marked,
+  panelId,
+  onTabChange,
+  onTabKeyDown,
+}: {
+  id: string;
+  target: ModelTarget;
+  label: string;
+  selected: boolean;
+  marked: boolean;
+  panelId: string;
+  onTabChange: (tab: ModelTarget) => void;
+  onTabKeyDown: (e: KeyboardEvent<HTMLButtonElement>, from: ModelTarget) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={id}
+      className="model-menu-tab"
+      data-model-tab={target}
+      aria-selected={selected}
+      aria-controls={panelId}
+      tabIndex={selected ? 0 : -1}
+      onClick={() => onTabChange(target)}
+      onKeyDown={(e) => onTabKeyDown(e, target)}
+    >
+      {marked ? (
+        // Hidden, the marker still holds its slot, so switching never shifts the labels.
+        <span className="model-menu-tab-tick" aria-hidden="true">
+          <I.check size={11} />
+        </span>
+      ) : null}
+      {label}
+    </button>
+  );
+}
+
 /** The main pill's dropdown: one catalog, two targets. The agent model is always
  *  offered; the subagent tab exists only for a session minted with subagents, which
  *  is a capability frozen at chat creation. */
@@ -303,35 +350,27 @@ function ModelPickerMenu({
   return (
     <>
       <div className="model-menu-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
+        <TargetTab
           id={tabId("agent")}
-          className="model-menu-tab"
-          data-model-tab="agent"
-          aria-selected={!isSubagent}
-          aria-controls={panelId}
-          tabIndex={isSubagent ? -1 : 0}
-          onClick={() => onTabChange("agent")}
-          onKeyDown={(e) => onTabKeyDown(e, "agent")}
-        >
-          {t("composer.agentModel")}
-        </button>
+          target="agent"
+          label={t("composer.agentModel")}
+          selected={!isSubagent}
+          marked={subagentsEnabled}
+          panelId={panelId}
+          onTabChange={onTabChange}
+          onTabKeyDown={onTabKeyDown}
+        />
         {subagentsEnabled ? (
-          <button
-            type="button"
-            role="tab"
+          <TargetTab
             id={tabId("subagent")}
-            className="model-menu-tab"
-            data-model-tab="subagent"
-            aria-selected={isSubagent}
-            aria-controls={panelId}
-            tabIndex={isSubagent ? 0 : -1}
-            onClick={() => onTabChange("subagent")}
-            onKeyDown={(e) => onTabKeyDown(e, "subagent")}
-          >
-            {t("composer.subagentModel")}
-          </button>
+            target="subagent"
+            label={t("composer.subagentModel")}
+            selected={isSubagent}
+            marked
+            panelId={panelId}
+            onTabChange={onTabChange}
+            onTabKeyDown={onTabKeyDown}
+          />
         ) : null}
       </div>
       <ModelList

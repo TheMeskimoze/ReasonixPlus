@@ -5150,6 +5150,9 @@ html[data-platform="macos"] .startup-loading-overlay {
   border-bottom: 1px solid var(--border);
 }
 .model-menu-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 8px 0;
   border: none;
   background: none;
@@ -5158,6 +5161,15 @@ html[data-platform="macos"] .startup-loading-overlay {
   font-size: 14px;
   cursor: pointer;
   transition: color 120ms;
+}
+/* Which target the list is editing: a check in the band's own colour. Hidden, it keeps
+   its slot, so switching targets never shifts the two labels. */
+.model-menu-tab-tick {
+  display: inline-flex;
+  visibility: hidden;
+}
+.model-menu-tab[aria-selected="true"] .model-menu-tab-tick {
+  visibility: visible;
 }
 .model-menu-tab:hover {
   color: var(--fg);

@@ -268,6 +268,32 @@ describe("desktop Composer model catalog", () => {
     expect(onModelChange).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the list open and marks the target it is editing", () => {
+    const { container } = renderComposer({
+      modelLabel: "deepseek-v4-flash",
+      subagentModelLabel: "deepseek-v4-pro",
+      enabledModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const tabs = () => Array.from(container.querySelectorAll<HTMLElement>(".model-menu-tab"));
+    const selected = () => tabs().map((tab) => tab.getAttribute("aria-selected"));
+
+    // The check marks the target being edited. Both tabs reserve its slot, so a switch
+    // cannot shift the labels.
+    expect(selected()).toEqual(["true", "false"]);
+    expect(tabs().every((tab) => tab.querySelector(".model-menu-tab-tick"))).toBe(true);
+
+    fireEvent.click(tabs()[1]!);
+
+    // The switch keeps the menu open and moves the marker, so the click has a visible
+    // effect instead of reading as a dead label.
+    expect(container.querySelector(".popup")).toBeTruthy();
+    expect(selected()).toEqual(["false", "true"]);
+    expect(
+      container.querySelector('.popup-item[data-active="true"]')?.textContent,
+    ).toContain("deepseek-v4-pro");
+  });
+
   it("preserves an existing uncatalogued active model without a Custom entry control", () => {
     const { container } = renderComposer({ modelLabel: "legacy-gateway-model" });
     fireEvent.click(container.querySelector(".model-pill")!);

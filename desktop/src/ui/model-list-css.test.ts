@@ -39,6 +39,12 @@ describe("model list CSS", () => {
     // accent under its text, and the one line under the band is the header's own.
     expect(cssRules('.model-menu-tab[data-on="true"]')).toEqual([]);
     expect(tab).not.toContain("border-bottom");
+    // The chosen target is a check in the same colour, keeping its slot on both tabs
+    // so switching never shifts the labels.
+    const tick = cssRules(".model-menu-tab-tick").join("\n");
+    const chosen = cssRules('.model-menu-tab[aria-selected="true"] .model-menu-tab-tick').join("\n");
+    expect(tick).toContain("visibility: hidden");
+    expect(chosen).toContain("visibility: visible");
     expect(cssRules(".model-menu-tab:hover").join("\n")).not.toContain("border-radius");
   });
 
