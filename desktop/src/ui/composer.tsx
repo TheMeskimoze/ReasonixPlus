@@ -69,6 +69,15 @@ type MenuId = "model" | "effort" | "mode" | "quick";
 /** The two targets the one model pill edits through its tabs. */
 type ModelTarget = "agent" | "subagent";
 
+/** What the model menu needs for one target: its name, the model it holds and where a
+ *  pick goes. One entry per target drives both the band and the list. */
+interface ModelTargetEntry {
+  target: ModelTarget;
+  label: string;
+  model: string;
+  pick: (model: string) => void;
+}
+
 /** The one width every composer dropdown opens at: the pills sit in a row, so their
  *  menus read as one family instead of sizing themselves per control. */
 const MENU_WIDTH = 320;
@@ -336,51 +345,68 @@ function ModelPickerMenu({
 }) {
   const panelId = useId();
   const tabId = (target: ModelTarget) => `${panelId}-${target}`;
-  const isSubagent = subagentsEnabled && tab === "subagent";
-  const pick = isSubagent ? onPickSubagent : onPickAgent;
+  // One list drives the band, the panel's label and the picker: a target cannot be
+  // offered by the header and routed somewhere else. The subagent entry exists only
+  // for a session minted with subagents, a capability frozen at chat creation.
+  const agentTarget: ModelTargetEntry = {
+    target: "agent",
+    label: t("composer.agentModel"),
+    model: agentModel,
+    pick: onPickAgent,
+  };
+  const targets: ModelTargetEntry[] = [
+    agentTarget,
+    ...(subagentsEnabled
+      ? [
+          {
+            target: "subagent" as const,
+            label: t("composer.subagentModel"),
+            model: subagentModel,
+            pick: onPickSubagent,
+          },
+        ]
+      : []),
+  ];
+  // A tab that is no longer offered falls back to the agent model instead of leaving
+  // the picker on a target it does not show.
+  const active = targets.find((entry) => entry.target === tab) ?? agentTarget;
   const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, from: ModelTarget) => {
-    if (!subagentsEnabled || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    if (targets.length < 2 || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
     e.preventDefault();
-    const next: ModelTarget = from === "agent" ? "subagent" : "agent";
-    onTabChange(next);
-    e.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`[data-model-tab="${next}"]`)
+    const index = targets.findIndex((entry) => entry.target === from);
+    const step = e.key === "ArrowRight" ? 1 : -1;
+    const next = targets[(index + step + targets.length) % targets.length]!;
+    onTabChange(next.target);
+    e.currentTarget
+      .closest('[role="tablist"]')
+      ?.querySelector<HTMLButtonElement>(`[data-model-tab="${next.target}"]`)
       ?.focus();
   };
   return (
     <>
       <div className="model-menu-tabs" role="tablist">
-        <TargetTab
-          id={tabId("agent")}
-          target="agent"
-          label={t("composer.agentModel")}
-          selected={!isSubagent}
-          marked={subagentsEnabled}
-          panelId={panelId}
-          onTabChange={onTabChange}
-          onTabKeyDown={onTabKeyDown}
-        />
-        {subagentsEnabled ? (
+        {targets.map((entry) => (
           <TargetTab
-            id={tabId("subagent")}
-            target="subagent"
-            label={t("composer.subagentModel")}
-            selected={isSubagent}
-            marked
+            key={entry.target}
+            id={tabId(entry.target)}
+            target={entry.target}
+            label={entry.label}
+            selected={entry.target === active.target}
+            marked={targets.length > 1}
             panelId={panelId}
             onTabChange={onTabChange}
             onTabKeyDown={onTabKeyDown}
           />
-        ) : null}
+        ))}
       </div>
       <ModelList
-        activeModel={isSubagent ? subagentModel : agentModel}
-        onPick={pick}
+        activeModel={active.model}
+        onPick={active.pick}
         {...listProps}
         panelProps={{
           id: panelId,
           role: "tabpanel",
-          "aria-labelledby": tabId(isSubagent ? "subagent" : "agent"),
+          "aria-labelledby": tabId(active.target),
         }}
       />
     </>

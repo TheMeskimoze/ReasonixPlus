@@ -289,9 +289,34 @@ describe("desktop Composer model catalog", () => {
     // effect instead of reading as a dead label.
     expect(container.querySelector(".popup")).toBeTruthy();
     expect(selected()).toEqual(["false", "true"]);
-    expect(
-      container.querySelector('.popup-item[data-active="true"]')?.textContent,
-    ).toContain("deepseek-v4-pro");
+    expect(container.querySelector('.popup-item[data-active="true"]')?.textContent).toContain(
+      "deepseek-v4-pro",
+    );
+  });
+
+  it("keeps a lone target's band plain, like every other menu title", () => {
+    const { container } = renderComposer({ subagentsEnabled: false });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const tabs = container.querySelectorAll(".model-menu-tab");
+    expect(tabs).toHaveLength(1);
+    // Nothing to tell apart, so the band carries no marker and reads as a title.
+    expect(tabs[0]!.querySelector(".model-menu-tab-tick")).toBeNull();
+  });
+
+  it("moves the target with the arrow keys, towards the pressed side", () => {
+    const { container } = renderComposer({ enabledModels: ["deepseek-v4-flash"] });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const tabs = () => Array.from(container.querySelectorAll<HTMLElement>(".model-menu-tab"));
+    const selected = () => tabs().map((tab) => tab.getAttribute("aria-selected"));
+
+    // Right goes to the second target, left wraps back to the first: the band is one
+    // control, so the keys walk its targets rather than guessing a pair.
+    fireEvent.keyDown(tabs()[0]!, { key: "ArrowRight" });
+    expect(selected()).toEqual(["false", "true"]);
+    fireEvent.keyDown(tabs()[1]!, { key: "ArrowRight" });
+    expect(selected()).toEqual(["true", "false"]);
+    fireEvent.keyDown(tabs()[0]!, { key: "ArrowLeft" });
+    expect(selected()).toEqual(["false", "true"]);
   });
 
   it("preserves an existing uncatalogued active model without a Custom entry control", () => {
