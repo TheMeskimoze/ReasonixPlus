@@ -3,6 +3,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { pathIsStrictlyUnder } from "@reasonix/core-utils/path-utils";
 import {
   type ReasonixConfig,
   type SkillRecord,
@@ -216,8 +217,7 @@ function skillDirsIn(tree: string): string[] {
 
 /** Whether `dir` sits strictly below `base`, the source root a diagnostic is relative to. */
 function isBelow(base: string, dir: string): boolean {
-  const rel = relative(base, dir);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return pathIsStrictlyUnder(dir, base);
 }
 
 /** The widest folder the install would accept as a source for `skillDir`: naming it turns a

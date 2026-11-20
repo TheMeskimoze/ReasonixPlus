@@ -82,6 +82,55 @@ export function clipText(text: string, max: number, ellipsis = "…"): string {
   return text.length > max ? `${text.slice(0, max)}${ellipsis}` : text;
 }
 
+export interface CapWithMarkerOptions {
+  /** Which end to keep; head-tail keeps both. Default "head". */
+  keep?: "head" | "tail" | "head-tail";
+  /** Chars reserved for the tail in head-tail mode. Default 10% of the cap, at most 1024. */
+  tailChars?: number;
+  /** Why the text was cut, appended to the marker after its dropped-char count. */
+  hint?: string;
+}
+
+/** Cap `text`, replacing the dropped middle/end with one marker line. The single
+ *  truncation format for tool results, job tails, fetched pages and memory files. */
+export function capWithMarker(
+  text: string,
+  maxChars: number,
+  opts: CapWithMarkerOptions = {},
+): { text: string; truncated: boolean; droppedChars: number } {
+  if (text.length <= maxChars) return { text, truncated: false, droppedChars: 0 };
+  const keep = opts.keep ?? "head";
+  const hint = opts.hint ? `: ${opts.hint}` : "";
+  if (keep === "tail") {
+    const tail = sliceSuffixAlignedToCodepoint(text, maxChars);
+    const droppedChars = text.length - tail.length;
+    return {
+      text: `[… ${droppedChars} chars omitted${hint} …]\n${tail}`,
+      truncated: true,
+      droppedChars,
+    };
+  }
+  if (keep === "head-tail") {
+    const tailBudget = Math.min(opts.tailChars ?? Math.floor(maxChars * 0.1), 1024);
+    const headBudget = Math.max(0, maxChars - tailBudget);
+    const head = sliceAlignedToCodepoint(text, headBudget);
+    const tail = sliceSuffixAlignedToCodepoint(text, tailBudget);
+    const droppedChars = text.length - head.length - tail.length;
+    return {
+      text: `${head}\n\n[… ${droppedChars} chars omitted${hint} …]\n\n${tail}`,
+      truncated: true,
+      droppedChars,
+    };
+  }
+  const head = sliceAlignedToCodepoint(text, maxChars);
+  const droppedChars = text.length - head.length;
+  return {
+    text: `${head}\n\n[… ${droppedChars} chars omitted${hint} …]`,
+    truncated: true,
+    droppedChars,
+  };
+}
+
 /** Clip a one-line index description to fit beside a name, reserving room for the
  *  name and an optional suffix (e.g. a subagent tag). Shared by the memory index lines,
  *  which used to reimplement the same budget math. */

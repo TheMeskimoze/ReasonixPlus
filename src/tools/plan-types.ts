@@ -1,6 +1,6 @@
-import type { PlanStep as CorePlanStep } from "@reasonix/core-utils";
+import type { PlanStep as CorePlanStep, PlanStepRisk } from "@reasonix/core-utils";
 
-export type PlanStepRisk = "low" | "med" | "high";
+export type { PlanStepRisk };
 
 export interface PlanStep extends CorePlanStep {
   risk?: PlanStepRisk;

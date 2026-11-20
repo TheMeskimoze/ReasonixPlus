@@ -7,6 +7,7 @@ import { join, relative } from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import type { DirectKernelWireEvent } from "@reasonix/core-utils";
+import { LruCache, TtlLruCache } from "@reasonix/core-utils";
 import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import {
   HEAP_HEADROOM_MB,
@@ -29,7 +30,6 @@ import { Usage } from "../src/client.js";
 import { type EventizeContext, Eventizer } from "../src/core/eventize.js";
 import type { Event } from "../src/core/events.js";
 import { lazy } from "../src/core/lazy.js";
-import { LruCache, TtlLruCache } from "../src/core/lru.js";
 import {
   apply,
   capabilities,

@@ -82,7 +82,7 @@ describe("JobRegistry reads", () => {
       await registry.waitForJob(res.jobId, { timeoutMs: 8000 });
       const full = registry.read(res.jobId, { tailLines: 0 });
       expect(full?.output.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);
-      expect(full?.output).toContain("elided");
+      expect(full?.output).toContain("omitted");
       // A plain tail read is bounded too.
       const tail = registry.read(res.jobId);
       expect(tail?.output.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);

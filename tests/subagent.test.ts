@@ -37,12 +37,14 @@ import {
   spawnSubagent,
 } from "../src/tools/subagent.js";
 import { registerTodoTool } from "../src/tools/todo.js";
+import { useTempHome } from "./support/env-sandbox.js";
 import {
   type FakeResponseShape,
   makeFakeClient,
   neverResolvingFetch,
 } from "./support/fake-client.js";
 import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
   return makeFakeClient(responses, { echoMessages: true }).client;
@@ -336,7 +338,7 @@ describe("registerSubagentTool", () => {
     const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "spew" }));
     const parsed = JSON.parse(out);
     expect(parsed.output.length).toBeLessThan(huge.length);
-    expect(parsed.output).toMatch(/truncated/);
+    expect(parsed.output).toMatch(/omitted/);
   });
 
   it("never registers spawn_subagent itself into the child registry (no recursion)", async () => {
@@ -1524,12 +1526,10 @@ describe("plan isolation", () => {
   it("never lets a child see the parent's plan, by tools or by injected context", async () => {
     // Plans AND sessions both live under the user home, so redirect it: this test must not
     // read the real plan store, nor leave a real session behind.
-    const home = mkdtempSync(join(tmpdir(), "subagent-plan-home-"));
+    const home = makeTempDir("subagent-plan-home-");
     const workspace = join(home, "workspace");
     mkdirSync(workspace, { recursive: true });
-    const previousHome = [process.env.HOME, process.env.USERPROFILE];
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+    const restoreHome = useTempHome(home);
     try {
       // An ACTIVE and UNCLAIMED plan: exactly the state any loop in this workspace may
       // adopt, which is what makes the isolation below meaningful.
@@ -1603,8 +1603,8 @@ describe("plan isolation", () => {
       }
       expect(JSON.stringify(control)).toContain("Authoritative session plan state");
     } finally {
-      [process.env.HOME, process.env.USERPROFILE] = previousHome;
-      rmSync(home, { recursive: true, force: true });
+      restoreHome();
+      removeTempDir(home);
     }
   }, 30_000);
 });

@@ -50,6 +50,7 @@ import {
 import { buildMcpServerSummary } from "../../mcp/summary.js";
 import type { McpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
+import { splitMcpToolName } from "../../tool-name.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ToolSpec } from "../../types.js";
 
@@ -166,10 +167,7 @@ function runtimeFingerprint(spec: McpServerSpec): string {
 function bareToolName(env: BridgeEnv, registeredName: string): string {
   const mapped = env.bareNames?.get(registeredName);
   if (mapped !== undefined) return mapped;
-  const { prefix } = env;
-  return prefix && registeredName.startsWith(prefix)
-    ? registeredName.slice(prefix.length)
-    : registeredName;
+  return splitMcpToolName(registeredName, env.prefix) ?? registeredName;
 }
 
 /** Per-session MCP enablement, absolute — a server is disabled iff named.

@@ -56,6 +56,8 @@ import {
 import {
   buildAssistantMessage,
   buildSyntheticAssistantMessage,
+  isUserTurn,
+  lastUserTurnIndex,
   stampUserTurns,
 } from "./loop/messages.js";
 import { looksCutOffMidSentence, looksLikePrematureStop } from "./loop/premature-stop.js";
@@ -100,12 +102,7 @@ import {
   type TurnStats,
   resolveContextTokens,
 } from "./telemetry/stats.js";
-import {
-  countTokensBounded,
-  estimateConversationTokens,
-  estimateRequestTokens,
-  tokensForMessage,
-} from "./tokenizer.js";
+import { estimateConversationTokens, estimateRequestTokens, toolSpecTokens } from "./tokenizer.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import { USER_CANCEL_NOTE } from "./tools/shell.js";
@@ -197,18 +194,11 @@ function sameUserContent(
   return JSON.stringify(stored) === JSON.stringify(expected);
 }
 
-/** True for a user record that starts a turn: an attached-file prompt counts, and so does
- *  an injected tool image, but a steer or nudge (synthetic) never does. The one rule behind
- *  turn numbering and retry targets. */
-function isRealUserMessage(message: ChatMessage): boolean {
-  return message.role === "user" && !message.synthetic;
-}
-
 /** Turn ordinal for a resumed session: the count of REAL user records. Steer/nudge records
  *  are marked `synthetic` (never a turn start), so the counter matches the desktop's
  *  user-position numbering even with failed turns (no reply) or tool loops (many records). */
 export function resumeTurnBaseline(messages: readonly ChatMessage[]): number {
-  return messages.reduce((n, m) => (isRealUserMessage(m) ? n + 1 : n), 0);
+  return messages.reduce((n, m) => (isUserTurn(m) ? n + 1 : n), 0);
 }
 
 export {
@@ -329,14 +319,6 @@ interface CacheShapeSnapshot {
   prefixHash: string;
   logRewriteVersion: number;
   toolSchemaTokens: number;
-}
-
-/** Index of the last user prompt — everything above it is the outgoing turn. */
-function lastUserIndex(messages: readonly ChatMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.role === "user") return i;
-  }
-  return 0;
 }
 
 /** Escalating synthetic prompts for a model that stops right after thinking.
@@ -493,8 +475,14 @@ export class CacheFirstLoop {
   private _lastCacheShape: CacheShapeSnapshot | null = null;
   /** When true, the stream repetition / "stuck re-thinking" guard is active. */
   private _repetitionGuardEnabled: boolean;
-  /** Cached log token total for Desktop's context meter — invalidated on any log mutation. */
-  private _logTokensCache: { version: number; tokens: number } | null = null;
+  /** Cached context total for Desktop's meter — invalidated on any log mutation, prefix
+   *  change or refusal fold. */
+  private _contextTokensCache: {
+    logVersion: number;
+    prefixHash: string;
+    foldTarget: number | null;
+    tokens: number;
+  } | null = null;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
   get inflight(): InflightSet {
@@ -603,16 +591,38 @@ export class CacheFirstLoop {
     }
   }
 
-  /** Real-time token count of the current log — forwarded to Desktop for meter refresh.
-   *  Cached against the log version so repeated meter polls don't re-tokenize the whole log. */
-  getCurrentLogTokens(): number {
-    if (this._logTokensCache && this._logTokensCache.version === this.log.version) {
-      return this._logTokensCache.tokens;
+  /** Tokens the next request would carry: prefix, the log (or its refusal fold) and tool
+   *  schemas. The meter, the auto-compaction trigger and every fold budget read this one
+   *  number. Cached so repeated meter polls do not re-tokenize the log. */
+  getContextTokens(): number {
+    const prefixHash = this.prefix.diagnosticHashes().prefixHash;
+    const cached = this._contextTokensCache;
+    if (
+      cached &&
+      cached.logVersion === this.log.version &&
+      cached.prefixHash === prefixHash &&
+      cached.foldTarget === this._requestFoldTarget
+    ) {
+      return cached.tokens;
     }
-    let total = 0;
-    for (const m of this.log.entries) total += tokensForMessage(m, false);
-    this._logTokensCache = { version: this.log.version, tokens: total };
-    return total;
+    const tokens = this.contextEstimate();
+    this._contextTokensCache = {
+      logVersion: this.log.version,
+      prefixHash,
+      foldTarget: this._requestFoldTarget,
+      tokens,
+    };
+    return tokens;
+  }
+
+  private contextEstimate(): number {
+    return estimateRequestTokens(
+      pruneOldImageParts(
+        [...this.prefix.toMessages(), ...this.foldRequestForRefusal([...this.log.entries])],
+        this.keepImages,
+      ),
+      this.prefix.tools(),
+    );
   }
 
   /** Detach every persistence path before an active session is deleted. The
@@ -1010,13 +1020,20 @@ export class CacheFirstLoop {
     return folded && folded.tokensAfter < folded.tokensBefore ? folded.messages : null;
   }
 
+  /** Log budget behind a whole-request budget: the prefix and tool schemas are a
+   *  fixed cost no fold can remove. */
+  private logBudgetFor(requestTargetTokens: number): number {
+    const fixed = estimateRequestTokens(this.prefix.toMessages(), this.prefix.tools());
+    return Math.max(1_000, requestTargetTokens - fixed);
+  }
+
   /** Shrink the outgoing log copy to the refusal ladder's target without touching
    *  the log, so a refused prompt is retried smaller while the transcript keeps
    *  its full history. */
   private foldRequestForRefusal(messages: ChatMessage[]): ChatMessage[] {
     const target = this._requestFoldTarget;
     if (target === null) return messages;
-    return this.foldMessagesToTarget(messages, target) ?? messages;
+    return this.foldMessagesToTarget(messages, this.logBudgetFor(target)) ?? messages;
   }
 
   /** Target for a refusal-recovery fold, or null when the request is too small
@@ -1032,7 +1049,7 @@ export class CacheFirstLoop {
     const target = Math.max(REFUSAL_FOLD_MIN_TOKENS, Math.round(tokens * REFUSAL_FOLD_RATIO));
     // Only offer a fold that actually drops history: a fold that keeps
     // everything would relabel the retry without shrinking it.
-    return this.foldMessagesToTarget(this.log.entries, target) ? target : null;
+    return this.foldMessagesToTarget(this.log.entries, this.logBudgetFor(target)) ? target : null;
   }
 
   private cacheShapeForRequest(
@@ -1045,7 +1062,7 @@ export class CacheFirstLoop {
       fewShotsHash: prefixEvidence.fewShotsHash,
       prefixHash: prefixEvidence.prefixHash,
       logRewriteVersion: this.log.rewriteVersion,
-      toolSchemaTokens: countTokensBounded(JSON.stringify(toolSpecs)),
+      toolSchemaTokens: toolSpecTokens(toolSpecs),
     };
   }
 
@@ -1097,7 +1114,7 @@ export class CacheFirstLoop {
     // A thinking-mode endpoint rejects the whole request over one bare
     // assistant turn, so never let a current-turn turn go out bare.
     const stamped = stampMissingReasoningForThinkingMode(pruned.messages, this.model, {
-      fromIndex: this._reasoningRoundTripRequired ? 0 : lastUserIndex(pruned.messages),
+      fromIndex: this._reasoningRoundTripRequired ? 0 : lastUserTurnIndex(pruned.messages),
       force: this._reasoningRoundTripRequired,
     });
     if (
@@ -1255,22 +1272,13 @@ export class CacheFirstLoop {
     };
   }
 
-  /** Index of the newest record {@link isRealUserMessage} accepts, or -1. */
-  private lastRealUserIndex(): number {
-    const entries = this.log.entries;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (isRealUserMessage(entries[i]!)) return i;
-    }
-    return -1;
-  }
-
   /** Drop the log from the newest REAL user turn on, after `accept` approves its stored
    *  content (when given), and report what was dropped. One truncation path behind both
    *  the Retry button and a failover replay, so neither can leave a different tail. */
   private rewindLastRealUser(
     accept?: (content: ChatMessage["content"]) => boolean,
   ): { content: ChatMessage["content"] } | null {
-    const lastUserIdx = this.lastRealUserIndex();
+    const lastUserIdx = lastUserTurnIndex(this.log.entries);
     if (lastUserIdx < 0) return null;
     const content = this.log.entries[lastUserIdx]!.content;
     if (accept && !accept(content)) return null;
@@ -1329,6 +1337,19 @@ export class CacheFirstLoop {
    *  path, and two concurrent folds would race the log rewrite. */
   private _compactLock: Promise<void> = Promise.resolve();
 
+  /** Auto-compaction decision shared by the pre-turn check and every iteration: the
+   *  trigger and the meter read the same estimate, so the two can never disagree. */
+  private async autoCompactIfNeeded(signal: AbortSignal): Promise<LoopEvent[] | null> {
+    if (!this.autoCompact) return null;
+    const ctxMax = resolveContextTokens(this.model, this.ctxMaxOverride);
+    if (this.getContextTokens() < this.autoCompactTriggerRatio * ctxMax) return null;
+    const outcome = await this.compactNow({ trigger: "auto", signal });
+    return [
+      { turn: this._turn, role: "compaction_start", compactionTrigger: "auto", content: "" },
+      ...outcome.events,
+    ];
+  }
+
   /** Compact the log: LLM rolling summary of the folded span plus a
    *  verification probe, falling back to a deterministic fold. Overflow
    *  recovery is fold-only (an estimated summarizer call could overflow). */
@@ -1355,10 +1376,11 @@ export class CacheFirstLoop {
     const signal = opts.signal ?? this._turnAbort.signal;
     const events: LoopEvent[] = [];
     const ctxMax = resolveContextTokens(this.model, this.ctxMaxOverride);
-    const targetTokens =
+    const requestTarget =
       opts.targetTokens !== undefined
         ? Math.max(1_000, Math.round(opts.targetTokens))
         : Math.max(1_000, Math.round(ctxMax * COMPACT_TARGET_RATIO));
+    const targetTokens = this.logBudgetFor(requestTarget);
     // Snapshot boundary: the summarizer call below yields the event loop, and
     // a streaming turn can append to the log while it runs. The fold is
     // re-based onto the live log at apply time (see `appended` below).
@@ -1591,21 +1613,7 @@ export class CacheFirstLoop {
     // phase): the fresh user message can never be folded away. Mid-turn the
     // check re-fires from the iteration loop once the threshold is crossed.
     if (this.autoCompact) {
-      const estimate = estimateRequestTokens(
-        pruneOldImageParts([...this.prefix.toMessages(), ...this.log.entries], this.keepImages),
-        this.prefix.tools(),
-      );
-      const ctxMax = resolveContextTokens(this.model, this.ctxMaxOverride);
-      if (estimate >= this.autoCompactTriggerRatio * ctxMax) {
-        yield {
-          turn: this._turn,
-          role: "compaction_start",
-          compactionTrigger: "auto",
-          content: "",
-        };
-        const outcome = await this.compactNow({ trigger: "auto", signal });
-        for (const ev of outcome.events) yield ev;
-      }
+      for (const ev of (await this.autoCompactIfNeeded(signal)) ?? []) yield ev;
     }
     const turnStartLogIndex = this.log.length;
     this.appendAndPersist({ role: "user", content: buildUserContent(userInput, this._turnImages) });
@@ -1621,21 +1629,7 @@ export class CacheFirstLoop {
       // after turn start, and the pre-turn check above never re-runs inside
       // the iteration loop.
       if (this.autoCompact && iter > 0) {
-        const estimate = estimateRequestTokens(
-          pruneOldImageParts([...this.prefix.toMessages(), ...this.log.entries], this.keepImages),
-          this.prefix.tools(),
-        );
-        const ctxMax = resolveContextTokens(this.model, this.ctxMaxOverride);
-        if (estimate >= this.autoCompactTriggerRatio * ctxMax) {
-          yield {
-            turn: this._turn,
-            role: "compaction_start",
-            compactionTrigger: "auto",
-            content: "",
-          };
-          const outcome = await this.compactNow({ trigger: "auto", signal });
-          for (const ev of outcome.events) yield ev;
-        }
+        for (const ev of (await this.autoCompactIfNeeded(signal)) ?? []) yield ev;
       }
       if (signal.aborted) {
         // Reset in finally — the consumer (desktop runTurn) breaks the

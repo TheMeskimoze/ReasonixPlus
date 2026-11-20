@@ -10,6 +10,7 @@ import {
   type PlaywrightManagedBrowser,
   type PlaywrightMcpConnectionMode,
 } from "@reasonix/core-utils/desktop-protocol";
+import { dropFlags, flagValue } from "./argv-flags.js";
 import { resolvePlaywrightTemplatePath } from "./playwright-tooling.js";
 import type { McpServerSpec } from "./spec.js";
 
@@ -48,12 +49,6 @@ export async function installFromPlaywrightDownloadSources(
   return { ok: false, failures };
 }
 
-const CONNECTION_VALUE_ARGS = new Set([
-  "--browser",
-  "--cdp-endpoint",
-  "--profile-dir-name",
-  "--user-data-dir",
-]);
 /** Vendor-installed channels sit outside Playwright's download set; every other managed
  *  mode is a hermetic build we install ourselves. */
 const SYSTEM_CHANNEL_BROWSERS = new Set<PlaywrightManagedBrowser>(["msedge"]);
@@ -224,16 +219,6 @@ export function createPlaywrightProgressParser(
   };
 }
 
-/** Read the `--browser`/`--browser=` value from a Playwright MCP argv, if any. */
-function browserArg(args: string[]): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    const value = arg === "--browser" ? args[index + 1] : arg.match(/^--browser=(.+)$/)?.[1];
-    if (value) return value;
-  }
-  return undefined;
-}
-
 /** Map a `--browser` value onto a managed mode. Legacy specs name a Chromium system
  *  channel ("chrome", "chrome-beta", ...); those resolve to the hermetic build instead, so
  *  the launch-time rewrite moves them off the system install without a user edit. */
@@ -255,20 +240,13 @@ export function parsePlaywrightConnection(args: string[]): {
   if (args.includes(PLAYWRIGHT_EXTENSION_ARG)) {
     return {
       mode: "extension",
-      extensionBrowser: browserArg(args) === "msedge" ? "msedge" : "chrome",
+      extensionBrowser: flagValue(args, "browser") === "msedge" ? "msedge" : "chrome",
     };
   }
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    const cdpEndpoint =
-      arg === "--cdp-endpoint" ? args[index + 1] : arg.match(/^--cdp-endpoint=(.+)$/)?.[1];
-    if (cdpEndpoint) return { mode: "cdp", cdpEndpoint };
-    const browser = normalizeManagedBrowser(
-      arg === "--browser" ? args[index + 1] : arg.match(/^--browser=(.+)$/)?.[1],
-    );
-    if (browser) return { mode: browser };
-  }
-  return { mode: "chromium" };
+  const cdpEndpoint = flagValue(args, "cdp-endpoint");
+  if (cdpEndpoint) return { mode: "cdp", cdpEndpoint };
+  const browser = normalizeManagedBrowser(flagValue(args, "browser"));
+  return browser ? { mode: browser } : { mode: "chromium" };
 }
 
 /** Replace connection-specific flags while preserving package pins and unrelated user options. */
@@ -278,17 +256,10 @@ export function configurePlaywrightArgs(
   cdpEndpoint?: string,
   extensionBrowser: PlaywrightExtensionBrowser = "chrome",
 ): string[] {
-  const result: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg === PLAYWRIGHT_EXTENSION_ARG) continue;
-    if (CONNECTION_VALUE_ARGS.has(arg)) {
-      index += 1;
-      continue;
-    }
-    if (/^--(?:browser|cdp-endpoint|profile-dir-name|user-data-dir)=/.test(arg)) continue;
-    result.push(arg);
-  }
+  const result = dropFlags(args, {
+    values: ["browser", "cdp-endpoint", "profile-dir-name", "user-data-dir"],
+    bare: [PLAYWRIGHT_EXTENSION_ARG],
+  });
   if (mode === "extension") {
     // Chrome is @playwright/mcp's extension default; only Edge needs the flag.
     return extensionBrowser === "msedge"
@@ -309,33 +280,13 @@ export function configurePlaywrightArgs(
 /** Replace any user `--output-dir` with an absolute, workspace-scoped one so every
  *  Playwright artifact (downloads, screenshots, snapshots, PDFs) lands inside the sandbox. */
 export function withPlaywrightOutputDir(args: string[], outputDir: string): string[] {
-  const result: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg === "--output-dir") {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--output-dir=")) continue;
-    result.push(arg);
-  }
-  return [...result, `--output-dir=${outputDir}`];
+  return [...dropFlags(args, { values: ["output-dir"] }), `--output-dir=${outputDir}`];
 }
 
 /** Mute page media in the managed browser: a tool must never make noise. */
 export function withPlaywrightSilence(args: string[], scriptPath: string): string[] {
   if (!existsSync(scriptPath)) return args;
-  const result: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg === "--init-script") {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--init-script=")) continue;
-    result.push(arg);
-  }
-  return [...result, `--init-script=${scriptPath}`];
+  return [...dropFlags(args, { values: ["init-script"] }), `--init-script=${scriptPath}`];
 }
 
 /** Pin a Playwright spec to the workspace: managed modes get the workspace-local

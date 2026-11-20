@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   PLAN_INTERACTIVE_TOOL_NAMES,
@@ -10,17 +8,17 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerPlanTool } from "../src/tools/plan.js";
+import { useTempHome } from "./support/env-sandbox.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 let home: string;
-let previous: [string | undefined, string | undefined];
+let restoreHome: () => void;
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "plan-tools-"));
-  previous = [process.env.HOME, process.env.USERPROFILE];
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
+  home = makeTempDir("plan-tools-");
+  restoreHome = useTempHome(home);
 });
 afterEach(() => {
-  [process.env.HOME, process.env.USERPROFILE] = previous;
-  rmSync(home, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(home);
 });
 function gate(type: string, optionId?: string): PauseGate {
   const gate = new PauseGate();

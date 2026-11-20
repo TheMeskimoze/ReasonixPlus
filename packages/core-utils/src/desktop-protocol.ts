@@ -5,7 +5,16 @@
 
 import type { ApprovalPrompt } from "./approval-prompt.js";
 import type { ChangelogRelease } from "./changelog.js";
-import type { ChoiceOption, PlanStep, ReasoningEffort } from "./permission-types.js";
+import type {
+  ChoiceOption,
+  PlanStep,
+  ReasoningEffort,
+  RuleEffect,
+  RuleKind,
+  RuleMatch,
+  RuleMode,
+  RuleScope,
+} from "./permission-types.js";
 import type { PlaywrightManagedBrowser } from "./playwright-browsers.js";
 import type {
   ProviderID,
@@ -1248,12 +1257,12 @@ export type NeedsSetupEvent = {
 
 /** One approval rule, resolved: which mode owns it, what it does, and where it applies. */
 export interface RuleRecord {
-  mode: "follow" | "never-ask";
-  effect: "allow" | "ask" | "deny" | "ignore";
-  kind: "shell" | "path";
-  scope: "workspace" | "global";
+  mode: RuleMode;
+  effect: RuleEffect;
+  kind: RuleKind;
+  scope: RuleScope;
   pattern: string;
-  match?: "pattern" | "regex";
+  match?: RuleMatch;
 }
 
 /** Every user-facing trigger the desktop can acknowledge with a sound cue and/or a

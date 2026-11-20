@@ -75,7 +75,7 @@ export function serverRows(
   const specs = registry.specs();
   const skipped = opts.getMcpToolSkips?.() ?? [];
   return configured.map((spec) => {
-    const name = spec.name ?? "anon";
+    const name = spec.name || "anon";
     const prefix = spec.name ? `${spec.name}_` : "";
     const tools = prefix
       ? specs

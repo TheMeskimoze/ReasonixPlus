@@ -16,6 +16,7 @@ import {
   readProjectMemory,
   resolveProjectMemoryWritePath,
 } from "../src/memory/project.js";
+import { unsetEnv } from "./support/env-sandbox.js";
 
 const BASE = "You are a test assistant.";
 
@@ -43,7 +44,7 @@ describe("project-memory", () => {
       process.env.REASONIX_MEMORY = originalEnv;
     }
     if (originalConfigPath === undefined) {
-      process.env.REASONIX_CONFIG = undefined;
+      unsetEnv(["REASONIX_CONFIG"]);
     } else {
       process.env.REASONIX_CONFIG = originalConfigPath;
     }
@@ -76,7 +77,7 @@ describe("project-memory", () => {
       const mem = readProjectMemory(root);
       expect(mem?.truncated).toBe(true);
       expect(mem?.originalChars).toBe(PROJECT_MEMORY_MAX_CHARS + 1500);
-      expect(mem?.content).toMatch(/truncated 1500 chars/);
+      expect(mem?.content).toMatch(/1500 chars omitted/);
       // Content is bounded: first MAX chars + the marker line.
       expect(mem?.content.length).toBeLessThan(PROJECT_MEMORY_MAX_CHARS + 64);
     });

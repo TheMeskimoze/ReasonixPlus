@@ -1,7 +1,7 @@
 /** One transport, one cache and one address resolver for provider usage reads, so no probe owns its own copy. */
 
-import { createHash } from "node:crypto";
 import { type ProviderSpec, messageOf } from "@reasonix/core-utils";
+import { credentialFingerprint } from "@reasonix/core-utils/fingerprint";
 
 export const QUOTA_TIMEOUT_MS = 10_000;
 
@@ -164,9 +164,7 @@ export function resetQuotaCoordinators(): void {
 /** Cache key for one usage source: the probe name, the endpoint and an opaque
  *  credential fingerprint — never the raw key. */
 export function quotaCacheKey(probe: string, endpoint: string, credential: string): string {
-  const fingerprint = credential
-    ? createHash("sha256").update(credential).digest("hex").slice(0, 16)
-    : "anonymous";
+  const fingerprint = credential ? credentialFingerprint({ credential }) : "anonymous";
   return `${probe}|${endpoint}|${fingerprint}`;
 }
 

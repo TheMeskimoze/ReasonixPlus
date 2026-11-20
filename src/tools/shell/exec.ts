@@ -4,6 +4,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as pathMod from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { capWithMarker } from "@reasonix/core-utils";
 import {
   OutputRecoveryCapture,
   type OutputRecoveryRef,
@@ -321,14 +322,14 @@ export function assembleResult(args: {
   recovery?: OutputRecoveryRef;
   recoveryError?: string;
 }): RunCommandResult {
-  const truncated = args.buf.length > args.maxChars || args.totalBytes > args.rawByteLength;
-  const omittedBytes = Math.max(
-    0,
-    args.totalBytes -
-      Math.min(args.totalBytes, Buffer.byteLength(args.buf.slice(0, args.maxChars))),
-  );
-  const marker = truncated ? `\n\n[… truncated ${omittedBytes} chars …]` : "";
-  const output = truncated ? `${args.buf.slice(0, args.maxChars)}${marker}` : args.buf;
+  const capped = capWithMarker(args.buf, args.maxChars);
+  const captureDropped = args.totalBytes > args.rawByteLength;
+  const truncated = capped.truncated || captureDropped;
+  const output = capped.truncated
+    ? capped.text
+    : captureDropped
+      ? `${args.buf}\n\n[… ${args.totalBytes - args.rawByteLength} chars omitted …]`
+      : args.buf;
   return {
     exitCode: args.exitCode,
     output,

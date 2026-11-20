@@ -193,13 +193,18 @@ export class McpClient {
     } satisfies GetPromptParams);
   }
 
-  /** Close the transport and reject any outstanding requests. */
-  async close(): Promise<void> {
+  /** Reject every outstanding request and clear the map. */
+  private rejectAllPending(err: Error): void {
     for (const [, pending] of this.pending) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error("MCP client closed"));
+      pending.reject(err);
     }
     this.pending.clear();
+  }
+
+  /** Close the transport and reject any outstanding requests. */
+  async close(): Promise<void> {
+    this.rejectAllPending(new Error("MCP client closed"));
     await this.transport.close();
   }
 
@@ -298,23 +303,14 @@ export class McpClient {
       }
     } catch (err) {
       // Surface as rejections on all pending requests so nobody hangs.
-      for (const [, pending] of this.pending) {
-        clearTimeout(pending.timeout);
-        pending.reject(err as Error);
-      }
-      this.pending.clear();
+      this.rejectAllPending(err as Error);
       return;
     }
     // Stream closed cleanly or child process exited. If there are still
     // pending requests, reject them immediately rather than waiting for
     // the requestTimeoutMs to fire.
     if (this.pending.size > 0) {
-      const err = new Error("MCP transport closed before request completed");
-      for (const [, pending] of this.pending) {
-        clearTimeout(pending.timeout);
-        pending.reject(err);
-      }
-      this.pending.clear();
+      this.rejectAllPending(new Error("MCP transport closed before request completed"));
     }
   }
 
@@ -326,11 +322,7 @@ export class McpClient {
     if (!("id" in msg) || msg.id === null || msg.id === undefined) {
       if ("error" in msg && msg.error) {
         const err = new Error((msg as { error: { message: string } }).error.message);
-        for (const [, pending] of this.pending) {
-          clearTimeout(pending.timeout);
-          pending.reject(err);
-        }
-        this.pending.clear();
+        this.rejectAllPending(err);
         return;
       }
       if ("method" in msg && msg.method === "notifications/progress") {

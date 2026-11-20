@@ -1,7 +1,8 @@
 /** Module-scoped memory files (#1033). Walks from a file's dir up to rootDir, collecting REASONIX.md (or AGENTS.md / AGENT.md) found along the way. The root's memory is excluded — it's already in the system prompt via applyProjectMemory. */
 
 import { existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { PROJECT_MEMORY_FILES, PROJECT_MEMORY_MAX_CHARS } from "./project.js";
 import { readCappedTextFile } from "./read-capped.js";
 
@@ -9,13 +10,11 @@ import { readCappedTextFile } from "./read-capped.js";
 export function findDirMemory(absDir: string, rootDir: string): string[] {
   const root = resolve(rootDir);
   const target = resolve(absDir);
-  const rel = relative(root, target);
-  if (rel.startsWith("..")) return [];
+  if (!pathIsUnder(target, root)) return [];
   const found: string[] = [];
   let cur = target;
   while (cur !== root) {
-    const r = relative(root, cur);
-    if (!r || r.startsWith("..")) break;
+    if (!pathIsUnder(cur, root)) break;
     for (const name of PROJECT_MEMORY_FILES) {
       const path = join(cur, name);
       if (existsSync(path)) {

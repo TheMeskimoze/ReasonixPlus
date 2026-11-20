@@ -960,7 +960,7 @@ describe("compaction", () => {
     it("returns null when there is nothing foldable", () => {
       const messages = [user("hello"), assistant("hi there")];
       const plan = planCompaction(messages, {
-        targetTokens: 10,
+        targetTokens: 40,
         preserveRecentTokens: 0,
         userRetentionTokens: 0,
       });

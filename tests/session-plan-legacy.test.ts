@@ -12,23 +12,20 @@ import {
   sessionPlanPath,
   sessionPlansDir,
 } from "../src/memory/session.js";
+import { useTempHome } from "./support/env-sandbox.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 let tempHome: string;
-let originalHome: string | undefined;
-let originalUserProfile: string | undefined;
+let restoreHome: () => void;
 
 beforeEach(() => {
-  tempHome = mkdtempSync(join(tmpdir(), "plan-legacy-"));
-  originalHome = process.env.HOME;
-  originalUserProfile = process.env.USERPROFILE;
-  process.env.HOME = tempHome;
-  process.env.USERPROFILE = tempHome;
+  tempHome = makeTempDir("plan-legacy-");
+  restoreHome = useTempHome(tempHome);
 });
 
 afterEach(() => {
-  process.env.HOME = originalHome;
-  process.env.USERPROFILE = originalUserProfile;
-  rmSync(tempHome, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(tempHome);
 });
 
 function writeFixture(path: string, value: unknown): void {

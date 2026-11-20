@@ -18,6 +18,7 @@ import {
   revokeOAuthToken,
   signOutOpenAI,
 } from "../src/oauth.js";
+import { jsonResponse } from "./support/fake-client.js";
 
 const ENV_KEYS = [
   "OPENAI_OAUTH_CLIENT_ID",
@@ -31,13 +32,6 @@ const ENV_KEYS = [
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]));
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 /** Real HTTP GET against the localhost callback server (fetch is mocked in these tests). */
 function httpGet(url: string): Promise<{ status: number; body: string }> {

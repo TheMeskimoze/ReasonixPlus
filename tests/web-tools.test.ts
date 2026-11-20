@@ -2939,7 +2939,7 @@ describe("webFetch", () => {
     try {
       const page = await webFetch("https://example.com/big", { maxChars: 1000 });
       expect(page.truncated).toBe(true);
-      expect(page.text).toMatch(/\[… truncated \d+ chars …\]$/);
+      expect(page.text).toMatch(/\[… \d+ chars omitted …\]$/);
     } finally {
       globalThis.fetch = originalFetch;
     }

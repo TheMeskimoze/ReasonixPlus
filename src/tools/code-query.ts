@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve as pathResolve } from "node:path";
+import { resolveToolPath } from "@reasonix/core-utils/path-utils";
 import type { CodeMatchKind, FindInCodeOptions } from "../code-query/find-in-code.js";
 import { grammarForPath } from "../code-query/grammar-map.js";
 import { lazy } from "../core/lazy.js";
@@ -16,6 +16,8 @@ export interface CodeQueryToolOpts {
 
 const UNSUPPORTED =
   "language not supported (TS/TSX/JS/JSX/Python/Go/Rust/Java); use search_content for grep-style matching";
+
+const OUTSIDE = "path is outside the project root; code_query reads only workspace files";
 
 const PATH_PARAM_DESCRIPTION =
   "File path relative to the project root. Leading / or \\ is also treated as project-root-relative; external absolute paths are not supported.";
@@ -42,6 +44,9 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
     },
     fn: async (args: { path: string }) => {
       const filePath = resolveProjectPath(rootDir, args.path);
+      if (filePath === null) {
+        return JSON.stringify({ path: args.path, error: OUTSIDE });
+      }
       if (!grammarForPath(filePath)) {
         return JSON.stringify({ path: args.path, error: UNSUPPORTED });
       }
@@ -80,6 +85,9 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
     },
     fn: async (args: { name: string; path: string; kind?: string }) => {
       const filePath = resolveProjectPath(rootDir, args.path);
+      if (filePath === null) {
+        return JSON.stringify({ path: args.path, error: OUTSIDE });
+      }
       if (!grammarForPath(filePath)) {
         return JSON.stringify({ path: args.path, error: UNSUPPORTED });
       }
@@ -93,7 +101,7 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
   });
 }
 
-function resolveProjectPath(rootDir: string, raw: string): string {
-  const stripped = raw.replace(/^[/\\]+/, "");
-  return pathResolve(rootDir, stripped.length === 0 ? "." : stripped);
+function resolveProjectPath(rootDir: string, raw: string): string | null {
+  const { abs, inside } = resolveToolPath(rootDir, raw);
+  return inside ? abs : null;
 }

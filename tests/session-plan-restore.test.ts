@@ -1,21 +1,20 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { restorePlanForTab } from "../src/cli/commands/desktop.js";
 import { planRepository } from "../src/code/plans.js";
+import { useTempHome } from "./support/env-sandbox.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 let home: string;
-let previous: [string | undefined, string | undefined];
+let restoreHome: () => void;
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "plan-restore-"));
-  previous = [process.env.HOME, process.env.USERPROFILE];
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
+  home = makeTempDir("plan-restore-");
+  restoreHome = useTempHome(home);
 });
 afterEach(() => {
-  [process.env.HOME, process.env.USERPROFILE] = previous;
-  rmSync(home, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(home);
 });
 
 it("projects the active plan for a healthy workspace", () => {

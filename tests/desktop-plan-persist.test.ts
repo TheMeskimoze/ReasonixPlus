@@ -1,30 +1,26 @@
 /** Desktop plan projection — the daemon derives plan UI events from the single
  *  workspace repository and writes no plan file of its own. */
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { restorePlanForTab } from "../src/cli/commands/desktop.js";
 import { planRepository } from "../src/code/plans.js";
 import { sessionPlanPath } from "../src/memory/session.js";
+import { useTempHome } from "./support/env-sandbox.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 let tempHome: string;
-let originalHome: string | undefined;
-let originalUserProfile: string | undefined;
+let restoreHome: () => void;
 
 beforeEach(() => {
-  tempHome = mkdtempSync(join(tmpdir(), "reasonix-desktop-plan-"));
-  originalHome = process.env.HOME;
-  originalUserProfile = process.env.USERPROFILE;
-  process.env.HOME = tempHome;
-  process.env.USERPROFILE = tempHome;
+  tempHome = makeTempDir("reasonix-desktop-plan-");
+  restoreHome = useTempHome(tempHome);
 });
 
 afterEach(() => {
-  process.env.HOME = originalHome;
-  process.env.USERPROFILE = originalUserProfile;
-  rmSync(tempHome, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(tempHome);
 });
 
 const twoSteps = [

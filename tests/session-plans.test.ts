@@ -1,10 +1,16 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { PlanRepository, workspacePlansDir } from "../src/code/plans.js";
-import { sessionPlansDir } from "../src/memory/session-layout.js";
-import { appendSessionMessage, patchSessionMeta } from "../src/memory/session.js";
+import { sessionPlansDir, workspacesRootDir } from "../src/memory/session-layout.js";
+import {
+  appendSessionMessage,
+  legacyWorkspaceStorageKey,
+  patchSessionMeta,
+  sanitizeName,
+} from "../src/memory/session.js";
 
 let home: string;
 let oldHome: string | undefined;
@@ -262,3 +268,19 @@ it("clears the whole workspace history in one write", () => {
   // An empty history has nothing left to remove, and clearing it again stays legal.
   expect(() => repo.clear()).not.toThrow();
 });
+
+it.skipIf(process.platform !== "win32")(
+  "keeps plans written under the pre-fold workspace key readable",
+  () => {
+    const workspace = join(home, "Proj");
+    const frozen = legacyWorkspaceStorageKey(workspace);
+    const hash = createHash("sha1").update(frozen).digest("hex").slice(0, 16);
+    const legacyDir = join(
+      workspacesRootDir(),
+      `${sanitizeName(basename(frozen) || "workspace")}-${hash}`,
+      "plans",
+    );
+    mkdirSync(legacyDir, { recursive: true });
+    expect(workspacePlansDir(workspace)).toBe(legacyDir);
+  },
+);

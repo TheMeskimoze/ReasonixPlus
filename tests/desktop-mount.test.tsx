@@ -2,9 +2,6 @@
 // Consolidated from 5 per-module test files; each source keeps its own
 // describe() wrapper so its helpers stay file-scoped. Test bodies are unchanged.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React, { useState, useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +11,7 @@ import { createComposerDraft } from "../desktop/src/ui/composer-draft";
 import { StuckLabel } from "../desktop/src/ui/live";
 import { StartupFailure, coerceStartupFailure } from "../desktop/src/ui/startup-failure";
 import { StartupLoadingOverlay } from "../desktop/src/ui/startup-loading";
+import { WS, feed, mockDesktopHost, resetDesktopHost, settle } from "./support/desktop-harness";
 
 describe("desktop-composer-draft", () => {
   afterEach(cleanup);
@@ -206,23 +204,6 @@ describe("desktop-stuck-label", () => {
 // // mounted (hidden) instead, so this pins that contract: after focusing another tab,
 // // the one you just left still has its transcript in the DOM.
 describe("desktop-transcript-keep-alive", () => {
-  const WS = "C:\\ws";
-  const handlers = new Map<string, (e: { payload: unknown }) => void>();
-
-  async function feed(ev: Record<string, unknown>, tabId?: string) {
-    const handler = handlers.get("rpc:event");
-    if (!handler) throw new Error("rpc:event handler not registered yet");
-    const line = JSON.stringify(tabId ? { ...ev, tabId } : ev);
-    await act(async () => {
-      handler({ payload: { data: line } });
-    });
-  }
-
-  const settle = (ms = 40) =>
-    act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, ms));
-    });
-
   const settings = (model: string) => ({ type: "$settings", workspaceDir: WS, model });
 
   const openTab = (id: string, active: boolean, session: string) =>
@@ -256,51 +237,11 @@ describe("desktop-transcript-keep-alive", () => {
 
   describe("transcript keep-alive across a tab switch", () => {
     beforeEach(() => {
-      handlers.clear();
-      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      };
-      (Element.prototype as unknown as { scrollTo: () => void }).scrollTo = () => {};
-      if (!window.matchMedia) {
-        (window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-          matches: false,
-          addEventListener() {},
-          removeEventListener() {},
-          addListener() {},
-          removeListener() {},
-        });
-      }
-      (listen as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-        async (name: string, cb: (e: { payload: unknown }) => void) => {
-          handlers.set(name, cb);
-          return () => handlers.delete(name);
-        },
-      );
-      (getCurrentWindow as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-        isMaximized: vi.fn(async () => false),
-        isFocused: vi.fn(async () => true),
-        isVisible: vi.fn(async () => true),
-        isMinimized: vi.fn(async () => false),
-        listen: vi.fn(async () => () => {}),
-        close: vi.fn(),
-        minimize: vi.fn(),
-        toggleMaximize: vi.fn(),
-        maximize: vi.fn(),
-        unmaximize: vi.fn(),
-        setTitle: vi.fn(),
-        onCloseRequested: vi.fn(async () => () => {}),
-        onResized: vi.fn(async () => () => {}),
-      });
-      (invoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (cmd: string) =>
-        cmd === "rpc_spawn" ? true : undefined,
-      );
+      mockDesktopHost((cmd) => (cmd === "rpc_spawn" ? true : undefined));
     });
 
     afterEach(() => {
-      cleanup();
-      vi.clearAllMocks();
+      resetDesktopHost();
     });
 
     it("keeps the tab you just left mounted, and mounts a tab you have not seen", async () => {

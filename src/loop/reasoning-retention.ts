@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../types.js";
+import { lastUserTurnIndex } from "./messages.js";
 
 export interface ReasoningPruneResult {
   messages: ChatMessage[];
@@ -6,19 +7,33 @@ export interface ReasoningPruneResult {
   charsDropped: number;
 }
 
-function hasToolCalls(msg: ChatMessage): boolean {
-  return Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+/** The shape the drop rule reads; `ChatMessage` and the tokenizer's template
+ *  records both satisfy it. */
+export interface ReasoningRecord {
+  role?: string;
+  tool_calls?: unknown;
+  reasoning_content?: string | null;
 }
 
-/** Keep tool-call reasoning for DeepSeek validation; drop stale plain-turn reasoning. */
+/** The one "this reasoning is stale" rule: an assistant record before the last user
+ *  turn that carries no tool calls. Tool-call turns keep theirs, because a continuation
+ *  that drops it is rejected. */
+export function isStaleReasoning(
+  msg: ReasoningRecord,
+  index: number,
+  lastUserIdx: number,
+): boolean {
+  return (
+    msg.role === "assistant" &&
+    index <= lastUserIdx &&
+    !(Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) &&
+    Object.hasOwn(msg, "reasoning_content")
+  );
+}
+
+/** Keep tool-call reasoning for validation; drop stale plain-turn reasoning. */
 export function stripDroppableReasoningContent(messages: ChatMessage[]): ReasoningPruneResult {
-  let lastUser = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.role === "user") {
-      lastUser = i;
-      break;
-    }
-  }
+  const lastUser = lastUserTurnIndex(messages);
   if (lastUser < 0) {
     return { messages, prunedCount: 0, charsDropped: 0 };
   }
@@ -28,14 +43,7 @@ export function stripDroppableReasoningContent(messages: ChatMessage[]): Reasoni
   let charsDropped = 0;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
-    if (
-      msg.role !== "assistant" ||
-      i > lastUser ||
-      hasToolCalls(msg) ||
-      !Object.hasOwn(msg, "reasoning_content")
-    ) {
-      continue;
-    }
+    if (!isStaleReasoning(msg, i, lastUser)) continue;
     if (next === null) next = messages.slice();
     const { reasoning_content: dropped, ...replacement } = msg;
     if (typeof dropped === "string") charsDropped += dropped.length;

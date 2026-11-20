@@ -77,7 +77,8 @@ import { estimateConversationTokens } from "../src/tokenizer.js";
 import { derivePrefix as fromCliPath } from "../src/tools/shell/parse.js";
 import type { SubagentEvent } from "../src/tools/subagent.js";
 import { cssRule, cssRules, sourceFile, stylesCss } from "./support/css.js";
-import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
+import { restoreEnv, saveEnv, unsetEnv } from "./support/env-sandbox.js";
+import { type FakeResponseShape, jsonResponse, makeFakeClient } from "./support/fake-client.js";
 
 describe("desktop-mcp-server-label", () => {
   it("prefers a display name and falls back to the config id", () => {
@@ -219,9 +220,6 @@ describe("desktop-account-quota", () => {
 });
 
 describe("desktop-quota-transport", () => {
-  const jsonResponse = (body: unknown): Response =>
-    new Response(JSON.stringify(body), { status: 200 });
-
   const specOf = (overrides: Record<string, unknown>) => {
     const [spec] = parseProviderRegistry({
       providers: [
@@ -1329,13 +1327,6 @@ describe("desktop-models-settings-layout", () => {
 
 // Ollama account-plan lookup + subscription-gated model probing.
 describe("desktop-ollama-models", () => {
-  function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
   function textResponse(body: string, status = 200): Response {
     return new Response(body, { status });
   }
@@ -1854,16 +1845,17 @@ describe("desktop-ollama-models", () => {
      *  `GET {base}/models` calls, not every fetch. */
     const modelsFetchCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/models")).length;
+    let savedEnv: ReturnType<typeof saveEnv> | undefined;
     beforeEach(() => {
       resetOllamaCatalogCacheForTest();
-      process.env.OLLAMA_API_KEY = undefined;
-      process.env.ollamaApiKey = undefined;
+      savedEnv = saveEnv(["OLLAMA_API_KEY", "ollamaApiKey", "OLLAMA_BASE_URL"]);
+      unsetEnv(["OLLAMA_API_KEY", "ollamaApiKey"]);
       process.env.OLLAMA_BASE_URL = "https://ollama.test/v1";
       fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
     });
     afterEach(() => {
-      process.env.OLLAMA_BASE_URL = undefined;
+      if (savedEnv) restoreEnv(savedEnv);
       vi.unstubAllGlobals();
       resetOllamaCatalogCacheForTest();
     });
@@ -2176,13 +2168,6 @@ describe("desktop-subagent-progress", () => {
 
 // Z.AI GLM Coding Plan usage parsing — `GET {origin}/api/monitor/usage/quota/limit`.
 describe("desktop-zai-quota", () => {
-  function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
   describe("fetchZaiQuota", () => {
     let fetchMock: ReturnType<typeof vi.fn>;
     beforeEach(() => {
@@ -2294,13 +2279,6 @@ describe("desktop-zai-quota", () => {
 
 // Each provider's usage probe in one place: Synthetic, then Experiential Labs.
 describe("desktop-provider-usage", () => {
-  function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     fetchMock = vi.fn();

@@ -4,7 +4,7 @@
 import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   BROWSER_SEARCH_ENGINES,
   SEARCH_ENGINE_SPECS,
@@ -14,12 +14,14 @@ import {
   type SearchEngineStrategy,
   WEB_SEARCH_ENGINE_NAMES,
   type WebSearchEngineName,
+  capWithMarker,
   flattenText,
   messageOf,
   requireSearchEngineError,
   searchEngineSpec,
   sliceAlignedToCodepoint,
 } from "@reasonix/core-utils";
+import { pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { parse as parseHtml } from "node-html-parser";
 import {
   loadBaiduApiKey,
@@ -34,6 +36,7 @@ import {
   webSearchEngine as loadWebSearchEngine,
   loadZaiApiKey,
 } from "../config.js";
+import { deadlineSignal } from "../core/with-deadline.js";
 import { interpolate, t } from "../i18n/index.js";
 import type { ToolRegistry } from "../tools.js";
 import {
@@ -1106,26 +1109,16 @@ interface EngineFetchRequest {
 
 /** Clip extracted text to the caller's cap, reporting whether anything was dropped. */
 function capText(text: string, maxChars: number): { text: string; truncated: boolean } {
-  return text.length > maxChars
-    ? { text: text.slice(0, maxChars), truncated: true }
-    : { text, truncated: false };
-}
-
-/** Clip to the cap and mark the cut in the text itself, so a reader knows it was cut. */
-function finishPageText(text: string, maxChars: number): { text: string; truncated: boolean } {
-  const capped = capText(text, maxChars);
-  return capped.truncated
-    ? { text: `${capped.text}\n\n[… truncated ${text.length - maxChars} chars …]`, truncated: true }
-    : capped;
+  const capped = capWithMarker(text, maxChars);
+  return { text: capped.text, truncated: capped.truncated };
 }
 
 async function fetchEnginePage(
   url: string,
   request: EngineFetchRequest,
 ): Promise<PageContent & { links?: string[] }> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), request.timeoutMs);
-  const signal = request.signal ? AbortSignal.any([request.signal, ctrl.signal]) : ctrl.signal;
+  const timeoutMessage = t("webErrors.fetchTimeout", { ms: request.timeoutMs, url });
+  const deadline = deadlineSignal(request.timeoutMs, timeoutMessage, request.signal);
 
   let resp: Response;
   try {
@@ -1137,16 +1130,16 @@ async function fetchEnginePage(
         Accept: "application/json",
       },
       body: JSON.stringify({ url }),
-      signal,
+      signal: deadline.signal,
     });
   } catch (err) {
     if (request.signal?.aborted) throw err;
-    if (ctrl.signal.aborted) {
-      throw new Error(t("webErrors.fetchTimeout", { ms: request.timeoutMs, url }));
+    if (deadline.timedOut()) {
+      throw new Error(timeoutMessage);
     }
     throw err;
   } finally {
-    clearTimeout(timer);
+    deadline.clearTimer();
   }
 
   if (!resp.ok) {
@@ -1226,7 +1219,7 @@ async function renderPage(
   return {
     url: finalUrl.toString(),
     title: rendered.title || extractTitle(rendered.html),
-    ...finishPageText(htmlToText(rendered.html), opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS),
+    ...capText(htmlToText(rendered.html), opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS),
     previewPath: rendered.preview ? savePagePreview(rendered.preview, opts.rootDir) : undefined,
   };
 }
@@ -1358,7 +1351,7 @@ function drivenResult(
   return {
     url: result.state.url,
     title: result.state.title || undefined,
-    ...finishPageText(text, maxChars),
+    ...capText(text, maxChars),
     previewPath: result.preview ? savePagePreview(result.preview, opts.rootDir) : undefined,
     page: {
       scrollY: result.state.scrollY,
@@ -1865,7 +1858,7 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
     return {
       url: currentUrl,
       title,
-      ...finishPageText(text, maxChars),
+      ...capText(text, maxChars),
       ...(isHtml ? { html: raw } : {}),
     };
   } finally {
@@ -2083,8 +2076,7 @@ export function saveFetchedPage(page: PageContent, outFile: string, rootDir?: st
   const body = page.html ? htmlToMarkdown(page.html) : page.text;
   const ext = page.html ? "md" : "txt";
   const target = isDir ? join(wanted, `page-${Date.now()}-${slugFor(page)}.${ext}`) : wanted;
-  const inside = relative(root, target);
-  if (inside.startsWith("..")) {
+  if (!pathIsUnder(target, root)) {
     throw new Error(`web_fetch: outFile must stay inside the workspace (${outFile})`);
   }
   const heading = [`url: ${page.url}`];

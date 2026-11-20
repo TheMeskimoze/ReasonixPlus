@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
+import { relativeDisplayPath as displayRel } from "@reasonix/core-utils/path-utils";
 import { lineEndingOf, locateSingleMatch } from "../../code/edit-blocks.js";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
-import { displayRel } from "./rel.js";
 
 /** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
 const READ_BEFORE_EDIT_MARKER = "read_file first";

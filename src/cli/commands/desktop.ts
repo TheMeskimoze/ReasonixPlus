@@ -117,7 +117,7 @@ import type {
   ZaiQuota,
   ZaiQuotaWindow,
 } from "@reasonix/core-utils";
-import { toPosixPath } from "@reasonix/core-utils/path-utils";
+import { pathIsUnder, toPosixPath } from "@reasonix/core-utils/path-utils";
 import {
   type FileWithStats,
   listDirectory,
@@ -396,6 +396,7 @@ import {
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
 import { isContextOverflowError } from "../../loop/errors.js";
+import { isUserTurn } from "../../loop/messages.js";
 import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
 import {
   DESKTOP_SERVER_NAME,
@@ -1732,13 +1733,13 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   let pendingAssistantIdx = -1;
   for (const rec of records) {
     if (rec.role === "system") continue;
-    if (rec.role === "user") {
-      if (rec.synthetic === true) continue;
+    if (isUserTurn(rec)) {
       turn += 1;
       pendingAssistantIdx = -1;
       out.push(userLoadedMessage(rec.content, rec.ts, rec.injected === true));
       continue;
     }
+    if (rec.role === "user") continue;
     if (rec.role === "assistant") {
       assistantRecord += 1;
       const segments: LoadedSegment[] = [];
@@ -5572,7 +5573,9 @@ function emitCtxBreakdown(tab: Tab): void {
   const tools = cached.tools;
   let logTokens = 0;
   try {
-    logTokens = tab.runtime.loop.getCurrentLogTokens();
+    // The loop reports the whole request (prefix + log + tool schemas). The panel shows
+    // the same total split into reserved and log, so the log share is the remainder.
+    logTokens = Math.max(0, tab.runtime.loop.getContextTokens() - (sys + tools));
   } catch {
     for (const msg of tab.runtime.loop.log.toMessages()) {
       logTokens += countTokensForMeter(typeof msg.content === "string" ? msg.content : "");
@@ -11943,7 +11946,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const abs = isAbsolute(rel) ? rel : join(tab.rootDir, rel);
       const safeAbs = resolve(abs);
       const safeRoot = resolve(tab.rootDir);
-      if (!safeAbs.startsWith(safeRoot)) {
+      if (!pathIsUnder(safeAbs, safeRoot)) {
         emit({ type: "$mention_preview", nonce, path: rel, head: "", totalLines: 0 }, tab.id);
         return;
       }

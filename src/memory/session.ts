@@ -24,6 +24,7 @@ import {
   messageOf,
   parseSessionTimestamp,
   sortSessionsDescending,
+  workspacePathKey,
 } from "@reasonix/core-utils";
 import { toPosixPath } from "@reasonix/core-utils/path-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
@@ -765,13 +766,21 @@ function sessionCreatedAt(meta: SessionMeta, name: string): number | undefined {
   return parseSessionTimestamp(name) || undefined;
 }
 
-/** Canonical form for workspace path comparisons — Windows drive-case + separator drift between session writes (yesterday) and reads (today) used to hide sessions from the sidebar. Issue #878. */
+/** Canonical form for workspace comparisons — the key every surface compares by, so a tab group and its session list cannot disagree. Issue #878. */
 export function normalizeWorkspace(
   p: string | undefined,
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (typeof p !== "string" || p.length === 0) return "";
-  if (platform === "win32") {
+  const resolved = platform === "win32" ? win32Path.resolve(p) : posixPath.resolve(p);
+  return workspacePathKey(resolved);
+}
+
+/** The pre-fold form that names plan folders on disk. Frozen: changing it would move
+ *  every existing plan directory, so it exists only to keep reading them. */
+export function legacyWorkspaceStorageKey(p: string | undefined): string {
+  if (typeof p !== "string" || p.length === 0) return "";
+  if (process.platform === "win32") {
     const resolved = win32Path.resolve(p);
     return toPosixPath(resolved).replace(/^([A-Z]):/i, (_, d: string) => `${d.toLowerCase()}:`);
   }
@@ -981,9 +990,16 @@ export async function listSessionsForWorkspaceLastKnown(
 }
 
 export function legacySessionPrefixForWorkspace(workspace: string): string {
-  const normalized = normalizeWorkspace(workspace);
-  const base =
-    process.platform === "win32" ? win32Path.basename(normalized) : posixPath.basename(normalized);
+  const resolved = workspace
+    ? process.platform === "win32"
+      ? win32Path.resolve(workspace)
+      : posixPath.resolve(workspace)
+    : "";
+  const base = resolved
+    ? process.platform === "win32"
+      ? win32Path.basename(resolved)
+      : posixPath.basename(resolved)
+    : "";
   return `${sanitizeName(`code-${base}`)}-`;
 }
 

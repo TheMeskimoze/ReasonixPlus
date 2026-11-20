@@ -1172,7 +1172,7 @@ function ruleActionFor(
   return prompt.actions.find((a) => a.kind === "allow_always" && a.scope === scope);
 }
 
-function mapTone(tone: ApprovalPrompt["tone"]): import("./extra-cards").ApprovalTone {
+function mapTone(tone: ApprovalPrompt["tone"]): import("./extra-cards").CardTone {
   switch (tone) {
     case "error":
       return "danger";

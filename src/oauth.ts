@@ -13,11 +13,13 @@ import {
   type LocalhostOAuthFlow,
   type TokenResponse,
   beginLocalhostOAuthFlow,
+  buildPkceAuthorizeUrl,
+  credsFromToken,
   envOr,
   fetchUserEmail,
-  isTokenFresh,
   makePkcePair,
   postTokenForm,
+  resolveFreshAccessToken,
 } from "./oauth-shared.js";
 
 export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
@@ -69,23 +71,21 @@ export interface AuthorizeParams {
 }
 
 export function buildAuthorizeUrl(p: AuthorizeParams): string {
-  const q = new URLSearchParams({
-    client_id: p.clientId,
-    redirect_uri: p.redirectUri,
-    response_type: "code",
-    code_challenge: p.codeChallenge,
-    code_challenge_method: "S256",
-    state: p.state,
-    scope: p.scope ?? envOr(DEFAULT_SCOPE, "OPENAI_OAUTH_SCOPE"),
-    // Matches the Codex CLI flow (opencode): simplified consent, and orgs in
-    // the id_token so the account id survives without a userinfo round-trip.
-    codex_cli_simplified_flow: "true",
-    id_token_add_organizations: "true",
-    originator: "reasonix",
-  });
   const audience = p.audience ?? process.env.OPENAI_OAUTH_AUDIENCE?.trim();
-  if (audience) q.set("audience", audience);
-  return `${openAIAuthorizeUrl()}?${q.toString()}`;
+  return buildPkceAuthorizeUrl({
+    endpoint: openAIAuthorizeUrl(),
+    clientId: p.clientId,
+    redirectUri: p.redirectUri,
+    state: p.state,
+    codeChallenge: p.codeChallenge,
+    scope: p.scope ?? envOr(DEFAULT_SCOPE, "OPENAI_OAUTH_SCOPE"),
+    extra: {
+      codex_cli_simplified_flow: "true",
+      id_token_add_organizations: "true",
+      originator: "reasonix",
+      ...(audience ? { audience } : {}),
+    },
+  });
 }
 
 /** OpenAI account id from JWT claims (id_token or access_token) — the Codex
@@ -110,9 +110,7 @@ export function accountFromIdToken(token: string | undefined): string | undefine
 
 function toCreds(parsed: TokenResponse, fallbackRefresh: string): OpenAIOAuthCreds {
   return {
-    accessToken: parsed.access_token as string,
-    refreshToken: parsed.refresh_token ?? fallbackRefresh,
-    expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1000 : Date.now() + 10 * 60_000,
+    ...credsFromToken(parsed, { fallbackRefresh, defaultExpiresInSec: 600 }),
     account: accountFromIdToken(parsed.id_token) ?? accountFromIdToken(parsed.access_token),
   };
 }
@@ -176,17 +174,11 @@ const refreshOpenAITokenOnce = singleFlight<string | undefined>();
 export async function resolveOpenAIToken(
   path: string = defaultConfigPath(),
 ): Promise<string | undefined> {
-  const creds = readConfig(path).openaiOAuth;
-  if (!creds?.accessToken) return undefined;
-  if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  return refreshOpenAITokenOnce(async () => {
-    try {
-      const next = await refreshOAuthToken(creds.refreshToken, openAIClientId());
-      saveOpenAIOAuth(next, path);
-      return next.accessToken;
-    } catch {
-      return undefined;
-    }
+  return resolveFreshAccessToken({
+    read: () => readConfig(path).openaiOAuth,
+    save: (next) => saveOpenAIOAuth(next, path),
+    refresh: (creds) => refreshOAuthToken(creds.refreshToken, openAIClientId()),
+    flight: refreshOpenAITokenOnce,
   });
 }
 

@@ -1148,7 +1148,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const content = typeof toolEntry!.content === "string" ? toolEntry!.content : "";
     // Well under the raw 50k — pre-clip fired before append.
     expect(content.length).toBeLessThan(40_000);
-    expect(content).toMatch(/truncated/);
+    expect(content).toMatch(/omitted/);
   });
 
   it("honours a tighter per-result cap handed down by the cost policy", async () => {

@@ -1,6 +1,6 @@
-import { tokensForMessage } from "../tokenizer.js";
+import { tokensForMessageInRequest } from "../tokenizer.js";
 import type { ChatMessage, ToolCall } from "../types.js";
-import { messageText } from "./messages.js";
+import { isUserTurn, messageText } from "./messages.js";
 
 // Research-derived constants (Codex compact.rs, Gemini chatCompressionService,
 // Cline basic-compaction): trigger at 0.8 of the window, settle near 0.55,
@@ -68,7 +68,7 @@ export function compactionSummaryBody(messages: ReadonlyArray<ChatMessage>): str
 /** Real user intent. Synthetic records (steers, nudges) and compaction
  *  artifacts are machine-generated and never count as prompts. */
 export function isUserPrompt(m: ChatMessage): boolean {
-  return m.role === "user" && !m.synthetic && messageText(m).trim().length > 0;
+  return isUserTurn(m, { requireText: true });
 }
 
 function isLegacy(m: ChatMessage): boolean {
@@ -84,7 +84,7 @@ function isPlainAssistantFinal(m: ChatMessage): boolean {
 }
 
 function msgTokens(m: ChatMessage): number {
-  return tokensForMessage(m, false);
+  return tokensForMessageInRequest(m);
 }
 
 function truncateChars(s: string, max: number): string {
@@ -169,7 +169,7 @@ export function toolActivityDigest(span: readonly ChatMessage[]): ToolActivityDi
       }
       if (isPlainAssistantFinal(m))
         digest.lastReply = truncateChars(messageText(m), NOTICE_REPLY_MAX_CHARS) || null;
-    } else if (m.role === "user" && !m.synthetic && !isLegacy(m)) {
+    } else if (isUserTurn(m) && !isLegacy(m)) {
       pushUnique(
         digest.foldedPrompts,
         `Earlier request: ${truncateChars(messageText(m), NOTICE_PROMPT_MAX_CHARS)}`,

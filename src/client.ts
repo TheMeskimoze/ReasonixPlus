@@ -23,7 +23,13 @@ import {
   supportedReasoningEfforts,
 } from "./config.js";
 import { tryParseJson } from "./core/parse-json.js";
+import { type DeadlineSignal, deadlineSignal } from "./core/with-deadline.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import {
+  GeminiCallLedger,
+  appendSystemInstruction,
+  callThoughtSignature,
+} from "./gemini-transcript.js";
 import { createLogger } from "./logging.js";
 import { messageText } from "./loop/messages.js";
 import { showPayloadContextLength, showPayloadThinking } from "./ollama-model-map.js";
@@ -338,17 +344,6 @@ const GEMINI_SCHEMA_KEYS = new Set([
   "example",
 ]);
 
-/** Sentinel for a functionCall part with no real thought signature (history from
- *  a non-signing source); a bare part 400s Gemini 3. */
-const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
-
-/** True for models that enforce Gemini 3 thought-signature validation (Gemini 3+
- *  and later); Gemini 2.5 ignores signatures and rejects the field entirely. */
-function requiresThoughtSignature(model: string): boolean {
-  const major = model.match(/^gemini-(\d+)/i)?.[1];
-  return major !== undefined && Number.parseInt(major, 10) >= 3;
-}
-
 /** Collapse a JSON-Schema `type` union (e.g. `["string","null"]`) to the single
  *  string Gemini's `Schema.type` proto accepts; `"null"` maps to `nullable: true`.
  *  Gemini 400s on an array here ("Proto field is not repeating, cannot start list"). */
@@ -567,31 +562,13 @@ function buildInteractionsPayload(
   // A function_result must name its function. The loop's tool message carries the
   // name; a nameless result is resolved from the call it answers, or dropped —
   // the API 400s on an empty name ("Name cannot be empty").
-  const pendingCallNames = new Map<string, string[]>();
-  const callNameById = new Map<string, string>();
-  // A Gemini 3 call replayed without its signature is rejected outright
-  // ("Request contains an invalid argument"), so a call whose own signature is
-  // gone borrows any known one, else Google's documented sentinel — exactly what
-  // the Cloud Code builder does for the same reason.
-  const needsSignature = requiresThoughtSignature(wireModel);
-  let carriedSignature: string | undefined;
-  for (const msg of opts.messages) {
-    for (const call of msg.tool_calls ?? []) {
-      if (call.thoughtSignature) {
-        carriedSignature = call.thoughtSignature;
-        break;
-      }
-    }
-    if (carriedSignature) break;
-  }
+  const ledger = new GeminiCallLedger(opts.model);
+  ledger.rememberFromTranscript(opts.messages);
 
   for (const msg of opts.messages) {
     switch (msg.role) {
       case "system": {
-        const text = messageText(msg, true);
-        if (text.length > 0) {
-          systemInstruction = systemInstruction ? `${systemInstruction}\n\n${text}` : text;
-        }
+        systemInstruction = appendSystemInstruction(systemInstruction, messageText(msg, true));
         break;
       }
       case "user": {
@@ -603,15 +580,8 @@ function buildInteractionsPayload(
         if (content.length > 0) steps.push({ type: "model_output", content });
         for (const call of msg.tool_calls ?? []) {
           const id = call.id ?? globalThis.crypto.randomUUID();
-          const pending = pendingCallNames.get(call.function.name) ?? [];
-          pending.push(id);
-          pendingCallNames.set(call.function.name, pending);
-          callNameById.set(id, call.function.name);
-          const signature =
-            call.thoughtSignature ||
-            carriedSignature ||
-            (needsSignature ? SKIP_THOUGHT_SIGNATURE_VALIDATOR : "");
-          if (signature) carriedSignature = signature;
+          ledger.noteCall(call, id);
+          const signature = ledger.signatureFor(call);
           steps.push({
             type: "function_call",
             id,
@@ -623,15 +593,7 @@ function buildInteractionsPayload(
         break;
       }
       case "tool": {
-        const pending = msg.name ? pendingCallNames.get(msg.name) : undefined;
-        if (msg.tool_call_id && pending) {
-          const matched = pending.indexOf(msg.tool_call_id);
-          if (matched >= 0) pending.splice(matched, 1);
-        }
-        // The name may come from the message, from the call it answers, or from
-        // what is still pending for this role.
-        const answered = msg.tool_call_id ? callNameById.get(msg.tool_call_id) : undefined;
-        const name = msg.name || answered || pending?.shift() || "";
+        const { name } = ledger.resultFor(msg);
         if (name.length === 0) break;
         steps.push({ type: "function_result", name, result: toolResultText(msg.content) });
         break;
@@ -1085,24 +1047,13 @@ export class DeepSeekClient {
     return headerName ? { [headerName]: key } : { Authorization: `Bearer ${key}` };
   }
 
-  /** Timer + combined-signal pair for one request — the caller clears the
-   *  timer in its finally. Combining keeps timeoutMs reaching fetch (#1535). */
-  private withTimeout(signal?: AbortSignal): {
-    signal: AbortSignal;
-    timer: ReturnType<typeof setTimeout>;
-    timedOut: () => boolean;
-  } {
-    const ctrl = new AbortController();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`));
-    }, this.timeoutMs);
-    return {
-      signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal,
-      timer,
-      timedOut: () => timedOut,
-    };
+  /** One request deadline; call sites clear its timer in their finally (#1535). */
+  private withTimeout(signal?: AbortSignal): DeadlineSignal {
+    return deadlineSignal(
+      this.timeoutMs,
+      `Model request timed out after ${this.timeoutMs}ms`,
+      signal,
+    );
   }
 
   /** Shared chat/stream plumbing. Yields a status chunk before each wait, so a caller
@@ -2247,35 +2198,18 @@ export class DeepSeekClient {
     // be coalesced into a single `user` content with one functionResponse per
     // result. Gemini rejects a `role: "function"` content.
     let pendingFunctionResponses: Array<Record<string, unknown>> = [];
-    const pendingCallIdsByName = new Map<string, string[]>();
+    const ledger = new GeminiCallLedger(opts.model);
+    ledger.rememberFromTranscript(opts.messages);
     const flushFunctionResponses = (): void => {
       if (pendingFunctionResponses.length === 0) return;
       pushContent("user", pendingFunctionResponses);
       pendingFunctionResponses = [];
     };
 
-    // Pre-scan conversation for any thought signature so earlier calls that lost
-    // theirs (e.g. from session deserialization or cross-provider transitions) can
-    // still carry a valid signature instead of triggering a fatal HTTP 400.
-    let lastKnownThoughtSignature: string | undefined;
-    for (const msg of opts.messages) {
-      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
-        for (const tc of msg.tool_calls) {
-          const sig = tc.thoughtSignature ?? (tc as any).thought_signature;
-          if (typeof sig === "string" && sig.length > 0) {
-            lastKnownThoughtSignature = sig;
-            break;
-          }
-        }
-        if (lastKnownThoughtSignature) break;
-      }
-    }
-
     for (const msg of opts.messages) {
       switch (msg.role) {
         case "system": {
-          const text = messageText(msg, true);
-          systemInstruction = systemInstruction ? `${systemInstruction}\n\n${text}` : text;
+          systemInstruction = appendSystemInstruction(systemInstruction, messageText(msg, true));
           break;
         }
         case "user": {
@@ -2288,63 +2222,35 @@ export class DeepSeekClient {
           flushFunctionResponses();
           const parts: Array<Record<string, unknown>> = [];
           parts.push(...cloudCodeParts(msg.content, true));
-          const msgThoughtSig = msg.tool_calls?.find((c) => {
-            const s = c.thoughtSignature ?? (c as any).thought_signature;
-            return typeof s === "string" && s.length > 0;
-          });
-          const activeMsgSig =
-            msgThoughtSig?.thoughtSignature ?? (msgThoughtSig as any)?.thought_signature;
+          const messageSignature = msg.tool_calls
+            ?.map((c) => callThoughtSignature(c))
+            .find((sig) => sig !== undefined);
 
           for (const tc of msg.tool_calls ?? []) {
             const id = tc.id ?? globalThis.crypto.randomUUID();
+            ledger.noteCall(tc, id);
             const call: Record<string, unknown> = {
               id,
               name: tc.function.name,
               args: parseToolCallArguments(tc.function.arguments),
             };
-            const pendingIds = pendingCallIdsByName.get(tc.function.name) ?? [];
-            pendingIds.push(id);
-            pendingCallIdsByName.set(tc.function.name, pendingIds);
             // Echo the model's thought signature back unchanged as a SIBLING of
             // functionCall — Part.thought_signature is a top-level field, not a
             // nested functionCall field. Nesting it 400s (INVALID_ARGUMENT:
             // "Function call is missing a thought_signature").
             const part: Record<string, unknown> = { functionCall: call };
-            const sig =
-              tc.thoughtSignature ??
-              (tc as any).thought_signature ??
-              activeMsgSig ??
-              lastKnownThoughtSignature;
-            if (sig) {
-              part.thoughtSignature = sig;
-              lastKnownThoughtSignature = sig;
-            } else if (requiresThoughtSignature(stripProviderQualifier(opts.model))) {
-              // Gemini 3 requires a thought_signature on every functionCall part.
-              // When no real signature is available (history transferred from a
-              // provider that never emitted one, a pre-signature session, or a
-              // repaired/scavenged call the model never signed), echo Google's
-              // documented sentinel rather than a bare part — a bare part 400s the
-              // whole request ("Function call is missing a thought_signature").
-              part.thoughtSignature = SKIP_THOUGHT_SIGNATURE_VALIDATOR;
-            }
+            const signature = ledger.signatureFor({
+              thoughtSignature: callThoughtSignature(tc) ?? messageSignature,
+            });
+            if (signature) part.thoughtSignature = signature;
             parts.push(part);
           }
           pushContent("model", parts);
           break;
         }
         case "tool": {
-          // Healing guarantees every tool message pairs with a preceding call,
-          // so name is present; skip nameless results defensively (Gemini 400s
-          // on an empty functionResponse name).
-          const name = msg.name ?? "";
+          const { name, id } = ledger.resultFor(msg);
           if (name.length === 0) break;
-          const pendingIds = pendingCallIdsByName.get(name);
-          const id = msg.tool_call_id || pendingIds?.shift();
-          if (msg.tool_call_id && pendingIds) {
-            const matchedIndex = pendingIds.indexOf(msg.tool_call_id);
-            if (matchedIndex >= 0) pendingIds.splice(matchedIndex, 1);
-          }
-          if (pendingIds?.length === 0) pendingCallIdsByName.delete(name);
           pendingFunctionResponses.push({
             functionResponse: {
               ...(id ? { id } : {}),

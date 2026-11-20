@@ -6,7 +6,7 @@ import { DeepSeekClient, Usage, normalizeStopReason } from "../src/client.js";
 import { InflightSet } from "../src/core/inflight.js";
 import { type ConfirmationChoice, PauseGate, type PauseRequest } from "../src/core/pause-gate.js";
 import { NEVER_ASK_PICKER_COUNTDOWN_MS, autoResolveVerdict } from "../src/core/pause-policy.js";
-import { isRetryableProviderFailure } from "../src/core/retry-shared.js";
+import { isRetryableProviderFailure, parseProviderError } from "../src/core/retry-shared.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
@@ -22,6 +22,7 @@ import {
 import { countTokens } from "../src/tokenizer.js";
 import { RegexRunner } from "../src/tools/fs/regex-runner.js";
 import type { SubagentResult } from "../src/tools/subagent.js";
+import { jsonResponse } from "./support/fake-client.js";
 
 // Tests for the PauseGate core — ask/resolve/on/current.
 describe("pause-gate", () => {
@@ -966,6 +967,27 @@ describe("retry", () => {
       ).toBe(true);
     });
   });
+
+  describe("parseProviderError", () => {
+    it("splits brand, status and body", () => {
+      expect(parseProviderError('DeepSeek 429: {"error":"rate limited"}')).toEqual({
+        brand: "DeepSeek",
+        status: "429",
+        body: '{"error":"rate limited"}',
+      });
+    });
+
+    it("keeps a body that spans lines", () => {
+      const parsed = parseProviderError("Z.AI 500: first\nsecond");
+      expect(parsed?.status).toBe("500");
+      expect(parsed?.body).toBe("first\nsecond");
+    });
+
+    it("returns null for a message with no brand and status", () => {
+      expect(parseProviderError("socket hang up")).toBeNull();
+      expect(parseProviderError("400: bare status")).toBeNull();
+    });
+  });
 });
 
 // InflightSet — finally-driven cleanup contract.
@@ -1169,13 +1191,6 @@ describe("inflight", () => {
 
 // Model refusal / filter / empty-stop handling — the loop must explain stops, never fail silently.
 describe("turn-stop-reason", () => {
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   function chatBody(message: Record<string, unknown>, finishReason: string): unknown {
     return {
       choices: [{ index: 0, message, finish_reason: finishReason }],

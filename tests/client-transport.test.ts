@@ -16,18 +16,11 @@ import { saveOllamaGenerationPatch } from "../src/config.js";
 import { isThinkingModeModel, thinkingModeForModel } from "../src/loop.js";
 import { resolveContextTokens } from "../src/telemetry/stats.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
-import { makeFakeClient } from "./support/fake-client.js";
+import { jsonResponse, makeFakeClient } from "./support/fake-client.js";
 
 // Locks each declared wire quirk to the request it produces, so changing a
 // *  provider's `wire` block cannot silently alter the payload it sends.
 describe("client-wire", () => {
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   interface CaptureOptions {
     model: string;
     thinking?: "enabled" | "disabled";
@@ -1761,13 +1754,6 @@ describe("client-qualified-model", () => {
       process.env.REASONIX_CONFIG = savedReasonixConfig;
     }
   });
-
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
 
   function capturingFetch(): { fetch: typeof fetch; body: () => Record<string, unknown> } {
     let captured: Record<string, unknown> = {};

@@ -17,6 +17,8 @@ import {
   shouldSkipSave,
   storageDir,
 } from "../src/tools/truncated-result-saver.js";
+import { useTempHome } from "./support/env-sandbox.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 describe("saveTruncatedResult", () => {
   let rootDir: string;
@@ -61,11 +63,8 @@ describe("saveTruncatedResult", () => {
   });
 
   it("falls back to ~/.reasonix when rootDir is the filesystem root", () => {
-    const origHome = process.env.HOME;
-    const origUserProfile = process.env.USERPROFILE;
-    const fakeHome = mkdtempSync(join(tmpdir(), "reasonix-trunc-home-"));
-    process.env.HOME = fakeHome;
-    process.env.USERPROFILE = fakeHome;
+    const fakeHome = makeTempDir("reasonix-trunc-home-");
+    const restoreHome = useTempHome(fakeHome);
 
     try {
       const fsRoot = process.platform === "win32" ? "C:\\" : "/";
@@ -74,21 +73,15 @@ describe("saveTruncatedResult", () => {
       expect(path.startsWith("/.reasonix")).toBe(false);
       expect(existsSync(path)).toBe(true);
     } finally {
-      if (origHome === undefined) process.env.HOME = undefined;
-      else process.env.HOME = origHome;
-      if (origUserProfile === undefined) process.env.USERPROFILE = undefined;
-      else process.env.USERPROFILE = origUserProfile;
-      rmSync(fakeHome, { recursive: true, force: true });
+      restoreHome();
+      removeTempDir(fakeHome);
     }
   });
 
   it("falls back to ~/.reasonix when rootDir is empty", () => {
     // Redirect HOME so os.homedir() points to a temp dir instead of real home.
-    const origHome = process.env.HOME;
-    const origUserProfile = process.env.USERPROFILE;
-    const fakeHome = mkdtempSync(join(tmpdir(), "reasonix-trunc-home-"));
-    process.env.HOME = fakeHome;
-    process.env.USERPROFILE = fakeHome;
+    const fakeHome = makeTempDir("reasonix-trunc-home-");
+    const restoreHome = useTempHome(fakeHome);
 
     try {
       const content = "fallback test";
@@ -97,11 +90,8 @@ describe("saveTruncatedResult", () => {
       expect(path).toMatch(/\.reasonix\/truncated-results\//);
       expect(existsSync(path)).toBe(true);
     } finally {
-      if (origHome === undefined) process.env.HOME = undefined;
-      else process.env.HOME = origHome;
-      if (origUserProfile === undefined) process.env.USERPROFILE = undefined;
-      else process.env.USERPROFILE = origUserProfile;
-      rmSync(fakeHome, { recursive: true, force: true });
+      restoreHome();
+      removeTempDir(fakeHome);
     }
   });
 
@@ -184,7 +174,7 @@ describe("truncation functions with extraNote", () => {
     const note = "Full result saved at: some/path.txt";
     const result = truncateForModel(long, 100, note);
     expect(result).toContain(note);
-    expect(result).toMatch(/…truncated \d+ chars/);
+    expect(result).toMatch(/\d+ chars omitted/);
   });
 
   it("truncateForModel returns full string unchanged when within limit (extraNote ignored)", () => {
@@ -210,7 +200,7 @@ describe("truncation functions with extraNote", () => {
   it("existing 2-arg callers still work (backward compat)", () => {
     const long = "x".repeat(1000);
     const result = truncateForModel(long, 100);
-    expect(result).toMatch(/…truncated \d+ chars/);
+    expect(result).toMatch(/\d+ chars omitted/);
     expect(result).not.toContain("Full result saved at");
 
     const long2 = "hello ".repeat(500);
@@ -227,7 +217,7 @@ describe("truncation functions with extraNote", () => {
   it("both functions handle empty extraNote gracefully", () => {
     const long = "x".repeat(1000);
     const r1 = truncateForModel(long, 100, "");
-    expect(r1).toMatch(/…truncated \d+ chars/);
+    expect(r1).toMatch(/\d+ chars omitted/);
 
     const long2 = "hello ".repeat(500);
     const r2 = truncateForModelByTokens(long2, 100, "");

@@ -587,6 +587,84 @@ export function SettingsModal({
   );
 }
 
+/** Open a URL in the system browser; the browser reports its own failure. */
+function openExternal(url: string, program?: string): void {
+  void (program ? openUrl(url, program) : openUrl(url)).catch(() => undefined);
+}
+
+function signUpLink(url: string): ReactNode {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => {
+        e.preventDefault();
+        openExternal(url);
+      }}
+    >
+      {t("settings.webSearchApiKeySignup")}
+    </a>
+  );
+}
+
+/** The declared fields the shared setting row renders; each surface adds its own owner. */
+interface DeclaredSettingView {
+  key: string;
+  label: string | null;
+  hint: string | null;
+  kind: "secret" | "url" | "internal";
+  placeholder: string | null;
+  signupUrl?: string | null;
+}
+
+/** One declared setting, rendered the same way on the Search page and a provider card:
+ *  a masked row for secrets, a labelled input row otherwise. */
+function DeclaredSettingRow({
+  setting,
+  value,
+  placeholder,
+  rowClass,
+  onSave,
+}: {
+  setting: DeclaredSettingView;
+  value?: string;
+  placeholder?: string;
+  rowClass?: string;
+  onSave: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => setDraft(value ?? ""), [value]);
+  const label = setting.label ?? setting.key;
+  const resolvedPlaceholder = placeholder ?? setting.placeholder ?? undefined;
+  const save = (next: string): void => onSave(next.trim());
+  if (setting.kind === "secret") {
+    return (
+      <ApiKeyRow
+        label={label}
+        prefix={value}
+        placeholder={resolvedPlaceholder}
+        onSave={save}
+        hint={setting.signupUrl ? signUpLink(setting.signupUrl) : (setting.hint ?? undefined)}
+      />
+    );
+  }
+  return (
+    <div className={`setting-row setting-row-entry${rowClass ? ` ${rowClass}` : ""}`}>
+      <div className="l">
+        <div className="n">{label}</div>
+        <div className="h">{setting.hint}</div>
+      </div>
+      <SettingsEntry
+        value={draft}
+        onChange={setDraft}
+        placeholder={resolvedPlaceholder}
+        onSave={() => save(draft)}
+      />
+    </div>
+  );
+}
+
 /** One declared engine setting, rendered from its declaration. Writes stay inside the
  *  engine's own entry, so a shared credential can never be copied through this surface. */
 function SearchEngineSettingRow({
@@ -600,53 +678,13 @@ function SearchEngineSettingRow({
   value?: string;
   onSave: (patch: SettingsPatch) => void;
 }) {
-  const [draft, setDraft] = useState(value ?? "");
-  const label = setting.label;
-  const hint = setting.hint ?? undefined;
-  const save = (next: string): void => {
-    onSave({ searchSettings: { [engineId]: { [setting.key]: next.trim() } } });
-  };
-  if (setting.kind === "secret") {
-    const signupUrl = setting.signupUrl;
-    return (
-      <ApiKeyRow
-        label={label}
-        prefix={value}
-        placeholder={setting.placeholder ?? undefined}
-        onSave={save}
-        hint={
-          signupUrl ? (
-            <a
-              href={signupUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => {
-                e.preventDefault();
-                void openUrl(signupUrl).catch(() => undefined);
-              }}
-            >
-              {t("settings.webSearchApiKeySignup")}
-            </a>
-          ) : (
-            hint
-          )
-        }
-      />
-    );
-  }
   return (
-    <div className="setting-row setting-row-entry setting-row-base-url">
-      <div className="l">
-        <div className="n">{label}</div>
-        <div className="h">{hint}</div>
-      </div>
-      <SettingsEntry
-        value={draft}
-        onChange={setDraft}
-        placeholder={setting.placeholder ?? undefined}
-        onSave={() => save(draft)}
-      />
-    </div>
+    <DeclaredSettingRow
+      setting={setting}
+      value={value}
+      rowClass="setting-row-base-url"
+      onSave={(next) => onSave({ searchSettings: { [engineId]: { [setting.key]: next } } })}
+    />
   );
 }
 
@@ -862,6 +900,42 @@ function PageSearch({
   );
 }
 
+/** One segmented setting row: a label, a hint, and the options that set the value. */
+function SegmentedSetting<T extends string>({
+  label,
+  hint,
+  value,
+  options,
+  onSelect,
+}: {
+  label: string;
+  hint?: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onSelect: (next: T) => void;
+}) {
+  return (
+    <div className="setting-row">
+      <div className="l">
+        <div className="n">{label}</div>
+        <div className="h">{hint}</div>
+      </div>
+      <div className="seg-ctrl">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            data-on={value === option.value}
+            onClick={() => onSelect(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PageGeneral({
   fontScale,
   onSetFontScale,
@@ -892,71 +966,29 @@ function PageGeneral({
     <div className="page-general">
       <section className="section">
         <div className="stitle">{t("settings.appearanceSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.fontScale")}</div>
-            <div className="h">{t("settings.fontScaleHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={fontScale === FONT_SCALE.SMALL}
-              onClick={() => onSetFontScale(FONT_SCALE.SMALL)}
-            >
-              {t("settings.fontScaleSmall")}
-            </button>
-            <button
-              type="button"
-              data-on={fontScale === FONT_SCALE.MEDIUM}
-              onClick={() => onSetFontScale(FONT_SCALE.MEDIUM)}
-            >
-              {t("settings.fontScaleMedium")}
-            </button>
-            <button
-              type="button"
-              data-on={fontScale === FONT_SCALE.LARGE}
-              onClick={() => onSetFontScale(FONT_SCALE.LARGE)}
-            >
-              {t("settings.fontScaleLarge")}
-            </button>
-          </div>
-        </div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.fontFamily")}</div>
-            <div className="h">{t("settings.fontFamilyHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={fontFamily === FONT_FAMILY.SANS}
-              onClick={() => onSetFontFamily(FONT_FAMILY.SANS)}
-            >
-              {t("settings.fontFamilySans")}
-            </button>
-            <button
-              type="button"
-              data-on={fontFamily === FONT_FAMILY.SYSTEM}
-              onClick={() => onSetFontFamily(FONT_FAMILY.SYSTEM)}
-            >
-              {t("settings.fontFamilySystem")}
-            </button>
-            <button
-              type="button"
-              data-on={fontFamily === FONT_FAMILY.SERIF}
-              onClick={() => onSetFontFamily(FONT_FAMILY.SERIF)}
-            >
-              {t("settings.fontFamilySerif")}
-            </button>
-            <button
-              type="button"
-              data-on={fontFamily === FONT_FAMILY.CUSTOM}
-              onClick={() => onSetFontFamily(FONT_FAMILY.CUSTOM)}
-            >
-              {t("settings.fontFamilyCustom")}
-            </button>
-          </div>
-        </div>
+        <SegmentedSetting
+          label={t("settings.fontScale")}
+          hint={t("settings.fontScaleHint")}
+          value={fontScale}
+          onSelect={onSetFontScale}
+          options={[
+            { value: FONT_SCALE.SMALL, label: t("settings.fontScaleSmall") },
+            { value: FONT_SCALE.MEDIUM, label: t("settings.fontScaleMedium") },
+            { value: FONT_SCALE.LARGE, label: t("settings.fontScaleLarge") },
+          ]}
+        />
+        <SegmentedSetting
+          label={t("settings.fontFamily")}
+          hint={t("settings.fontFamilyHint")}
+          value={fontFamily}
+          onSelect={onSetFontFamily}
+          options={[
+            { value: FONT_FAMILY.SANS, label: t("settings.fontFamilySans") },
+            { value: FONT_FAMILY.SYSTEM, label: t("settings.fontFamilySystem") },
+            { value: FONT_FAMILY.SERIF, label: t("settings.fontFamilySerif") },
+            { value: FONT_FAMILY.CUSTOM, label: t("settings.fontFamilyCustom") },
+          ]}
+        />
         {fontFamily === FONT_FAMILY.CUSTOM && (
           <div className="setting-row">
             <div className="l">
@@ -1752,91 +1784,32 @@ function panelText(
   return (key, vars) => providerString(spec, key, vars) ?? "";
 }
 
-export function OpenAISection({
-  signedIn,
-  account,
-  flowError,
-  waiting,
-  onBegin,
-  onCancel,
-  onSignOut,
-}: {
+interface OAuthSectionProps {
   signedIn: boolean;
-  account?: string;
-  /** Last OAuth flow failure — shown so a failed sign-in (e.g. upstream invalid_client) is visible instead of just "not signed in". */
-  flowError?: string;
-  waiting: boolean;
-  onBegin: () => void;
-  onCancel: () => void;
-  onSignOut: () => void;
-}) {
-  const copy = panelText("openai");
-  if (!copy) return null;
-  return (
-    <>
-      {signedIn ? (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignedIn")}</div>
-            <div className="h">
-              {account ? copy("panelAccount", { account }) : copy("panelTokenSet")}
-            </div>
-          </div>
-          <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
-            {copy("panelSignOut")}
-          </button>
-        </div>
-      ) : (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignInTitle")}</div>
-            <div className="h">{waiting ? copy("panelWaiting") : copy("panelSignInHint")}</div>
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {waiting && (
-              <button type="button" className="btn" onClick={onCancel}>
-                {copy("panelCancel")}
-              </button>
-            )}
-            <button type="button" className="btn primary" onClick={onBegin} disabled={waiting}>
-              {copy("panelSignIn")}
-            </button>
-          </div>
-        </div>
-      )}
-      {flowError ? (
-        <div className="setting-row" style={{ borderColor: "var(--danger)" }}>
-          <div className="l">
-            <div className="n">{copy("panelFlowFailed")}</div>
-            <div className="h" style={{ color: "var(--danger)" }}>
-              {flowError}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-export function AntigravitySection({
-  signedIn,
-  account,
-  flowError,
-  waiting,
-  onBegin,
-  onCancel,
-  onSignOut,
-}: {
-  signedIn: boolean;
-  account?: string;
   /** Last OAuth flow failure — shown so a failed sign-in is visible instead of just "not signed in". */
   flowError?: string;
   waiting: boolean;
   onBegin: () => void;
   onCancel: () => void;
   onSignOut: () => void;
+}
+
+/** One provider's declared OAuth panel. The providers differ only in the line that
+ *  replaces the sign-in hint once signed in, so that line is the slot. */
+function OAuthPanel({
+  providerId,
+  signedIn,
+  flowError,
+  waiting,
+  onBegin,
+  onCancel,
+  onSignOut,
+  statusLine,
+}: OAuthSectionProps & {
+  providerId: string;
+  statusLine: (copy: (key: string, vars?: Record<string, string>) => string) => ReactNode;
 }) {
-  const copy = panelText("gemini");
+  const copy = panelText(providerId);
   if (!copy) return null;
   return (
     <>
@@ -1844,9 +1817,7 @@ export function AntigravitySection({
         <div className="setting-row">
           <div className="l">
             <div className="n">{copy("panelSignedIn")}</div>
-            <div className="h">
-              {account ? copy("panelAccount", { account }) : copy("panelTokenSet")}
-            </div>
+            <div className="h">{statusLine(copy)}</div>
           </div>
           <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
             {copy("panelSignOut")}
@@ -1884,64 +1855,46 @@ export function AntigravitySection({
   );
 }
 
-export function MiMoSection({
-  signedIn,
-  flowError,
-  waiting,
-  onBegin,
-  onCancel,
-  onSignOut,
-}: {
-  signedIn: boolean;
-  flowError?: string;
-  waiting: boolean;
-  onBegin: () => void;
-  onCancel: () => void;
-  onSignOut: () => void;
-}) {
-  const copy = panelText("mimo");
-  if (!copy) return null;
+export function OpenAISection(props: OAuthSectionProps & { account?: string }) {
+  const { account, ...rest } = props;
   return (
-    <>
-      {signedIn ? (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignedIn")}</div>
-            <div className="h">{copy("panelKeyStored")}</div>
-          </div>
-          <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
-            {copy("panelSignOut")}
-          </button>
-        </div>
-      ) : (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignInTitle")}</div>
-            <div className="h">{waiting ? copy("panelWaiting") : copy("panelSignInHint")}</div>
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {waiting && (
-              <button type="button" className="btn" onClick={onCancel}>
-                {copy("panelCancel")}
-              </button>
-            )}
-            <button type="button" className="btn primary" onClick={onBegin} disabled={waiting}>
-              {copy("panelSignIn")}
-            </button>
-          </div>
-        </div>
-      )}
-      {flowError ? (
-        <div className="setting-row" style={{ borderColor: "var(--danger)" }}>
-          <div className="l">
-            <div className="n">{copy("panelFlowFailed")}</div>
-            <div className="h" style={{ color: "var(--danger)" }}>
-              {flowError}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
+    <OAuthPanel
+      providerId="openai"
+      {...rest}
+      statusLine={(copy) => (account ? copy("panelAccount", { account }) : copy("panelTokenSet"))}
+    />
+  );
+}
+
+export function AntigravitySection(props: OAuthSectionProps & { account?: string }) {
+  const { account, ...rest } = props;
+  return (
+    <OAuthPanel
+      providerId="gemini"
+      {...rest}
+      statusLine={(copy) => (account ? copy("panelAccount", { account }) : copy("panelTokenSet"))}
+    />
+  );
+}
+
+export function MiMoSection(props: OAuthSectionProps) {
+  return <OAuthPanel providerId="mimo" {...props} statusLine={(copy) => copy("panelKeyStored")} />;
+}
+
+export function OpencodeSection(props: OAuthSectionProps & { account?: string; orgName?: string }) {
+  const { account, orgName, ...rest } = props;
+  return (
+    <OAuthPanel
+      providerId="opencode"
+      {...rest}
+      statusLine={(copy) =>
+        account
+          ? orgName
+            ? copy("panelAccountOrg", { account, org: orgName })
+            : copy("panelAccount", { account })
+          : copy("panelTokenSet")
+      }
+    />
   );
 }
 
@@ -1996,80 +1949,8 @@ export function OpencodeFreeTierSection({
   );
 }
 
-export function OpencodeSection({
-  signedIn,
-  account,
-  orgName,
-  flowError,
-  waiting,
-  onBegin,
-  onCancel,
-  onSignOut,
-}: {
-  signedIn: boolean;
-  account?: string;
-  /** Active Console organization name, when the account has one. */
-  orgName?: string;
-  /** Last OAuth flow failure — shown so a failed sign-in is visible instead of just "not signed in". */
-  flowError?: string;
-  waiting: boolean;
-  onBegin: () => void;
-  onCancel: () => void;
-  onSignOut: () => void;
-}) {
-  const copy = panelText("opencode");
-  if (!copy) return null;
-  return (
-    <>
-      {signedIn ? (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignedIn")}</div>
-            <div className="h">
-              {account
-                ? orgName
-                  ? copy("panelAccountOrg", { account, org: orgName })
-                  : copy("panelAccount", { account })
-                : copy("panelTokenSet")}
-            </div>
-          </div>
-          <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
-            {copy("panelSignOut")}
-          </button>
-        </div>
-      ) : (
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{copy("panelSignInTitle")}</div>
-            <div className="h">{waiting ? copy("panelWaiting") : copy("panelSignInHint")}</div>
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {waiting && (
-              <button type="button" className="btn" onClick={onCancel}>
-                {copy("panelCancel")}
-              </button>
-            )}
-            <button type="button" className="btn primary" onClick={onBegin} disabled={waiting}>
-              {copy("panelSignIn")}
-            </button>
-          </div>
-        </div>
-      )}
-      {flowError ? (
-        <div className="setting-row" style={{ borderColor: "var(--danger)" }}>
-          <div className="l">
-            <div className="n">{copy("panelFlowFailed")}</div>
-            <div className="h" style={{ color: "var(--danger)" }}>
-              {flowError}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-/** One collapsible card on the Models page. The header toggles a two-column
+/** One collapsible card on the Models page.
+ *  The header toggles a two-column
  *  body: the left `models` column (a scrollable per-provider model list) and the
  *  right `settings` column (that provider's keys, base URLs and auth). Cards
  *  without a model list (audio input) render one full-width column. */
@@ -2369,53 +2250,12 @@ function ProviderSettingRow({
   value?: string;
   onSave: (patch: SettingsPatch) => void;
 }) {
-  const [draft, setDraft] = useState(value ?? "");
-  useEffect(() => setDraft(value ?? ""), [value]);
-  const label = setting.label ?? setting.key;
-  const signupUrl = setting.signupUrl;
-  const fallbackPlaceholder =
-    setting.kind === "url" ? providerDefaultEndpoint(providerId) : undefined;
-  const placeholder = setting.placeholder ?? fallbackPlaceholder;
-  const save = (next: string): void => {
-    onSave({ providerSettings: { [providerId]: { [setting.key]: next.trim() } } });
-  };
-  if (setting.kind !== "secret") {
-    return (
-      <div className="setting-row setting-row-entry">
-        <div className="l">
-          <div className="n">{label}</div>
-          <div className="h">{setting.hint}</div>
-        </div>
-        <SettingsEntry
-          value={draft}
-          onChange={setDraft}
-          placeholder={placeholder}
-          onSave={() => save(draft)}
-        />
-      </div>
-    );
-  }
   return (
-    <ApiKeyRow
-      label={label}
-      prefix={value}
-      placeholder={placeholder}
-      onSave={save}
-      hint={
-        signupUrl ? (
-          <a
-            href={signupUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => {
-              e.preventDefault();
-              void openUrl(signupUrl).catch(() => undefined);
-            }}
-          >
-            {t("settings.webSearchApiKeySignup")}
-          </a>
-        ) : undefined
-      }
+    <DeclaredSettingRow
+      setting={setting}
+      value={value}
+      placeholder={setting.kind === "url" ? providerDefaultEndpoint(providerId) : undefined}
+      onSave={(next) => onSave({ providerSettings: { [providerId]: { [setting.key]: next } } })}
     />
   );
 }
@@ -2617,6 +2457,21 @@ function PageModels({
       onSelect={selectable ? (id) => onSave({ model: id }) : undefined}
     />
   );
+  /** A provider card with no auth section: its declared fields, nothing else. */
+  const providerCard = (id: ModelCatalogGroupKey) => (
+    <DeclaredProviderCard
+      group={id}
+      defaultOpen={false}
+      models={modelColumn(id, groupModels(id))}
+      settings={
+        <ProviderSettingFields
+          providerId={id}
+          settings={settings.providerSettings}
+          onSave={onSave}
+        />
+      }
+    />
+  );
 
   return (
     <>
@@ -2649,18 +2504,7 @@ function PageModels({
 
       {HAS_DECLARED_PROVIDERS ? null : <div className="h">{t("settings.noProvidersDeclared")}</div>}
 
-      <DeclaredProviderCard
-        group="deepseek"
-        defaultOpen={false}
-        models={modelColumn("deepseek", groupModels("deepseek"))}
-        settings={
-          <ProviderSettingFields
-            providerId="deepseek"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("deepseek")}
 
       <DeclaredProviderCard
         group="openai"
@@ -2686,18 +2530,7 @@ function PageModels({
         }
       />
 
-      <DeclaredProviderCard
-        group="zai"
-        defaultOpen={false}
-        models={modelColumn("zai", groupModels("zai"))}
-        settings={
-          <ProviderSettingFields
-            providerId="zai"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("zai")}
 
       <DeclaredProviderCard
         group="mimo"
@@ -2722,57 +2555,13 @@ function PageModels({
         }
       />
 
-      <DeclaredProviderCard
-        group="experiential"
-        defaultOpen={false}
-        models={modelColumn("experiential", groupModels("experiential"))}
-        settings={
-          <ProviderSettingFields
-            providerId="experiential"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("experiential")}
 
-      <DeclaredProviderCard
-        group="synthetic"
-        defaultOpen={false}
-        models={modelColumn("synthetic", groupModels("synthetic"))}
-        settings={
-          <ProviderSettingFields
-            providerId="synthetic"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("synthetic")}
 
-      <DeclaredProviderCard
-        group="openrouter"
-        defaultOpen={false}
-        models={modelColumn("openrouter", groupModels("openrouter"))}
-        settings={
-          <ProviderSettingFields
-            providerId="openrouter"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("openrouter")}
 
-      <DeclaredProviderCard
-        group="gemini-api"
-        defaultOpen={false}
-        models={modelColumn("gemini-api", groupModels("gemini-api"))}
-        settings={
-          <ProviderSettingFields
-            providerId="gemini-api"
-            settings={settings.providerSettings}
-            onSave={onSave}
-          />
-        }
-      />
+      {providerCard("gemini-api")}
 
       <DeclaredProviderCard
         group="opencode"
@@ -2943,7 +2732,7 @@ function useAutoOpenUrl(url: string | undefined): void {
   useEffect(() => {
     if (!url || opened.current === url) return;
     opened.current = url;
-    void openUrl(url).catch(() => undefined);
+    openExternal(url);
   }, [url]);
 }
 
@@ -3009,7 +2798,7 @@ function MailActions({
         <button
           type="button"
           className="btn primary"
-          onClick={() => void openUrl(mail.verificationUrl!).catch(() => undefined)}
+          onClick={() => openExternal(mail.verificationUrl!)}
         >
           {t(ui.open)}
         </button>
@@ -3496,7 +3285,7 @@ export function PageMCP({
                 // Open in the browser picked above, not the OS default, so the
                 // extension installs into the browser the relay will attach to.
                 const program = extensionBrowser === "msedge" ? "msedge.exe" : "chrome.exe";
-                void openUrl(extensionStatus.storeUrl, program).catch(() => undefined);
+                openExternal(extensionStatus.storeUrl, program);
               }}
             >
               {t("settings.mcpOpenExtensionStore")}
@@ -3584,7 +3373,7 @@ export function PageMCP({
               <button
                 type="button"
                 className="btn secondary sm"
-                onClick={() => void openUrl("https://nodejs.org").catch(() => undefined)}
+                onClick={() => openExternal("https://nodejs.org")}
               >
                 {t("settings.mcpOutdatedNodeUpdateBtn")}
               </button>
@@ -4114,7 +3903,7 @@ function PluginCard({
             type="button"
             className="btn ghost"
             onClick={() => {
-              void openUrl(plugin.homepage as string).catch(() => undefined);
+              openExternal(plugin.homepage as string);
             }}
           >
             {t("settings.pluginsOpenHomepage")}

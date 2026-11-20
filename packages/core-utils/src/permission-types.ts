@@ -7,6 +7,12 @@
  *  (every workspace). */
 export type RuleScope = "workspace" | "global";
 
+/** Which permission mode owns a rule, what it does, and how its pattern matches. */
+export type RuleMode = "follow" | "never-ask";
+export type RuleEffect = "allow" | "ask" | "deny" | "ignore";
+export type RuleKind = "shell" | "path";
+export type RuleMatch = "pattern" | "regex";
+
 export type ConfirmationChoice =
   | { type: "deny"; denyContext?: string }
   | { type: "run_once" }
@@ -41,6 +47,9 @@ export type ChoiceOption = {
   summary?: string;
 };
 
+/** Risk a plan step declares, shared by the wire plan and the tools. */
+export type PlanStepRisk = "low" | "med" | "high";
+
 /** A plan step as passed over the wire to the desktop.  The canonical rich
  *  server-side PlanStep (with targets / acceptance / verification) extends
  *  this shape in `src/tools/plan-types.ts`. */
@@ -48,5 +57,5 @@ export type PlanStep = {
   id: string;
   title: string;
   action: string;
-  risk?: "low" | "med" | "high";
+  risk?: PlanStepRisk;
 };

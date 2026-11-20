@@ -10,10 +10,12 @@ import {
   type LocalhostOAuthFlow,
   type TokenResponse,
   beginLocalhostOAuthFlow,
+  buildPkceAuthorizeUrl,
+  credsFromToken,
   fetchUserEmail,
-  isTokenFresh,
   makePkcePair,
   postTokenForm,
+  resolveFreshAccessToken,
 } from "../oauth-shared.js";
 import type { McpServerSpec } from "./spec.js";
 
@@ -45,18 +47,15 @@ export function buildGmailAuthorizeUrl(opts: {
   state: string;
   codeChallenge: string;
 }): string {
-  const query = new URLSearchParams({
-    client_id: opts.clientId,
-    redirect_uri: opts.redirectUri,
-    response_type: "code",
-    scope: GMAIL_SCOPES.join(" "),
+  return buildPkceAuthorizeUrl({
+    endpoint: GMAIL_AUTHORIZE_URL,
+    clientId: opts.clientId,
+    redirectUri: opts.redirectUri,
     state: opts.state,
-    access_type: "offline",
-    prompt: "consent",
-    code_challenge: opts.codeChallenge,
-    code_challenge_method: "S256",
+    codeChallenge: opts.codeChallenge,
+    scope: GMAIL_SCOPES.join(" "),
+    extra: { access_type: "offline", prompt: "consent" },
   });
-  return `${GMAIL_AUTHORIZE_URL}?${query.toString()}`;
 }
 
 function tokenCreds(
@@ -66,9 +65,10 @@ function tokenCreds(
 ): GmailOAuthCreds {
   return {
     ...configured,
-    accessToken: parsed.access_token as string,
-    refreshToken: parsed.refresh_token ?? fallbackRefresh,
-    expiresAt: Date.now() + (parsed.expires_in ?? 3600) * 1000,
+    ...credsFromToken(parsed, {
+      fallbackRefresh: fallbackRefresh ?? configured.refreshToken,
+      defaultExpiresInSec: 3600,
+    }),
   };
 }
 
@@ -100,24 +100,27 @@ async function refreshGmailToken(creds: GmailOAuthCreds): Promise<GmailOAuthCred
   return tokenCreds(await postTokenForm(GMAIL_TOKEN_URL, body), creds, creds.refreshToken);
 }
 
-const refreshGmailTokenOnce = singleFlight<string>();
+const refreshGmailTokenOnce = singleFlight<string | undefined>();
 
 export async function resolveGmailToken(path: string = defaultConfigPath()): Promise<string> {
-  const creds = readConfig(path).gmailOAuth;
-  if (!creds?.clientId || !creds.clientSecret) {
-    throw new Error("Gmail OAuth client ID and client secret are not configured");
-  }
-  if (!creds.accessToken || !creds.expiresAt) throw new Error("Gmail is not signed in");
-  if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  return refreshGmailTokenOnce(async () => {
-    try {
-      const refreshed = await refreshGmailToken(creds);
-      saveGmailOAuth(refreshed, path);
-      return refreshed.accessToken as string;
-    } catch (error) {
+  const token = await resolveFreshAccessToken({
+    read: () => {
+      const creds = readConfig(path).gmailOAuth;
+      if (!creds?.clientId || !creds.clientSecret) {
+        throw new Error("Gmail OAuth client ID and client secret are not configured");
+      }
+      if (!creds.accessToken || !creds.expiresAt) throw new Error("Gmail is not signed in");
+      return creds;
+    },
+    save: (next) => saveGmailOAuth(next, path),
+    refresh: (creds) => refreshGmailToken(creds),
+    flight: refreshGmailTokenOnce,
+    onRefreshError: (error) => {
       throw new Error(`Gmail OAuth refresh failed: ${(error as Error).message}`, { cause: error });
-    }
+    },
   });
+  if (!token) throw new Error("Gmail is not signed in");
+  return token;
 }
 
 export async function beginGmailOAuthFlow(

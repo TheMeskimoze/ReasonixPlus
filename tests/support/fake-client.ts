@@ -149,10 +149,10 @@ export function neverResolvingFetch(): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-/** 200 JSON response helper shared by fold tests. */
-export function jsonOkResponse(body: unknown): Response {
+/** JSON response double shared by provider and OAuth tests. */
+export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }

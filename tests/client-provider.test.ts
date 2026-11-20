@@ -15,7 +15,7 @@ import {
 import { SUMMARIZER_OUTPUT_HEADROOM } from "../src/loop/compaction.js";
 import { isThinkingModeModel, thinkingModeForModel } from "../src/loop/thinking.js";
 import type { ChatMessage } from "../src/types.js";
-import { makeFakeClient } from "./support/fake-client.js";
+import { jsonResponse, makeFakeClient } from "./support/fake-client.js";
 
 describe("client-deepseek-message-ids", () => {
   /** History that round-trips both message kinds the DeepSeek deserializer
@@ -90,13 +90,6 @@ describe("client-deepseek-message-ids", () => {
 // Experiential Labs gateway chat: it refuses unknown fields (400,
 // *  unsupported_parameter), and forwards reasoning effort by its own policy.
 describe("client-experiential", () => {
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   describe.skipIf(!providerDeclared("experiential"))("Experiential Labs gateway chat", () => {
     it("never sends a thinking toggle, strips the qualifier, and forwards a supported effort", async () => {
       let url = "";
@@ -2165,13 +2158,6 @@ describe("client-gpt56", () => {
 // Xiaomi MiMo chat contract: the `thinking` toggle is sent top-level; MiMo has
 // *  no effort ladder, so `reasoning_effort` must never ride along.
 describe("client-mimo", () => {
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   describe("Xiaomi MiMo chat", () => {
     it("sends the thinking toggle and never a reasoning_effort ladder", async () => {
       let url = "";
@@ -2867,10 +2853,10 @@ describe("client-opencode-session", () => {
         expect(session).not.toContain("desktop-");
         expect(h["x-opencode-session-id"]).toBe(session);
         expect(h["x-session-affinity"]).toBe(session);
-        expect(h["X-Session-Id"]).toBe(session);
+        expect(h["x-session-id"]).toBe(session);
         expect(h["x-opencode-client"]).toBe("cli");
         expect(h["x-opencode-project"]).toMatch(/^[0-9a-f]{40}$/);
-        expect(h["User-Agent"]).toMatch(/^opencode\/[a-z]+\/[\d.]+\/cli$/);
+        expect(h["user-agent"]).toMatch(/^opencode\/[a-z]+\/[\d.]+\/cli$/);
       }
       // Same conversation → same id on both requests, so provider routing and
       // prompt caching stay pinned to it.
@@ -3222,13 +3208,6 @@ describe("client-opencode-session", () => {
 });
 
 describe("client-zai", () => {
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   describe("Z.AI GLM chat", () => {
     it("sends the documented top-level thinking parameters", async () => {
       let url = "";

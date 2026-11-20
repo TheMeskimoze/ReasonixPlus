@@ -12,6 +12,7 @@ import { writeConfig } from "../src/config.js";
 import { patchSessionMeta } from "../src/memory/session.js";
 import { MemoryStore } from "../src/memory/user.js";
 import { ToolRegistry } from "../src/tools.js";
+import { unsetEnv } from "./support/env-sandbox.js";
 
 type TabForPrompt = Parameters<typeof refreshTabSystemPrompt>[0];
 
@@ -123,7 +124,7 @@ describe("refreshEditModeKnowledge", () => {
   });
 
   afterEach(() => {
-    process.env.REASONIX_CONFIG = undefined;
+    unsetEnv(["REASONIX_CONFIG"]);
     rmSync(root, { recursive: true, force: true });
   });
 

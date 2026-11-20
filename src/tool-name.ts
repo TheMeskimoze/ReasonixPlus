@@ -27,3 +27,16 @@ export function toolNameDisambiguator(raw: string): string {
   }
   return (hash >>> 0).toString(36).slice(0, 4);
 }
+
+/** Server name recovered from a registered tool prefix. A named server's prefix is
+ *  `<name>_`; an anonymous bridge has none, so the fallback names it. */
+export function mcpServerName(prefix: string, fallback = "anon"): string {
+  const trimmed = prefix.endsWith("_") ? prefix.slice(0, -1) : prefix;
+  return trimmed || fallback;
+}
+
+/** The bare MCP tool name behind a registered wire name, or null when the prefix
+ *  does not match. */
+export function splitMcpToolName(registeredName: string, prefix: string): string | null {
+  return prefix && registeredName.startsWith(prefix) ? registeredName.slice(prefix.length) : null;
+}

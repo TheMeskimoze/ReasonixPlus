@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { credentialFingerprint } from "@reasonix/core-utils/fingerprint";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write";
 import { readJsonFileSilently } from "./core/json-file";
 import type { OllamaThinkingCapability } from "./ollama-thinking";
@@ -72,8 +72,7 @@ export function ollamaVerdictsPath(home: string = reasonixHome()): string {
 /** Scope key for a verdict map: endpoint plus a sha256 hash of the key, never
  *  the raw key — the file is user-private state, not a secret store. */
 export function scopeKeyFor(baseUrl: string, apiKey: string): string {
-  const hash = createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
-  return `${baseUrl}|${hash}`;
+  return `${baseUrl}|${credentialFingerprint({ apiKey })}`;
 }
 
 export function emptyOllamaVerdicts(): OllamaVerdictStore {

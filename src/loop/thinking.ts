@@ -9,38 +9,46 @@ function isDeepSeekThinkingFamily(model: string): boolean {
   return model.includes("flash") || model.includes("pro");
 }
 
-/** True when the model emits reasoning_content and requires it round-tripped on follow-ups. */
-export function isThinkingModeModel(model: string): boolean {
+/** The one capability table: `mode` is the value that goes on the wire (`undefined`
+ *  omits the field), `requiresRoundTrip` is why a follow-up must carry the field back. */
+export interface ThinkingCapability {
+  mode: "enabled" | "disabled" | undefined;
+  requiresRoundTrip: boolean;
+}
+
+const THINKING: ThinkingCapability = { mode: "enabled", requiresRoundTrip: true };
+const NO_THINKING: ThinkingCapability = { mode: undefined, requiresRoundTrip: false };
+const THINKING_DISABLED: ThinkingCapability = { mode: "disabled", requiresRoundTrip: false };
+
+export function thinkingCapabilityForModel(model: string): ThinkingCapability {
   // Capability checks match the wire id: `opencode/<id>` and the same id bare
   // are one model on different endpoints.
   const id = stripProviderQualifier(model);
-  if (id.startsWith("gpt-")) return false;
-  if (id.includes("reasoner")) return true;
-  if (id.startsWith("glm-")) return true;
-  if (isDeepSeekThinkingFamily(id)) return true;
-  // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:7b)
-  if (id.includes("deepseek-r1")) return true;
-  // Xiaomi MiMo emits reasoning_content and 400s if a tool-call turn drops it.
-  if (id.startsWith("mimo-")) return true;
-  return false;
+  if (id.startsWith("gpt-")) return NO_THINKING;
+  if (id === "deepseek-chat") return THINKING_DISABLED;
+  if (
+    id.startsWith("gemini-") ||
+    id.startsWith("glm-") ||
+    id.includes("reasoner") ||
+    isDeepSeekThinkingFamily(id) ||
+    // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:7b)
+    id.includes("deepseek-r1") ||
+    // Xiaomi MiMo emits reasoning_content and 400s if a tool-call turn drops it.
+    id.startsWith("mimo-")
+  ) {
+    return THINKING;
+  }
+  return NO_THINKING;
+}
+
+/** True when the model emits reasoning_content and requires it round-tripped on follow-ups. */
+export function isThinkingModeModel(model: string): boolean {
+  return thinkingCapabilityForModel(model).mode === "enabled";
 }
 
 /** Pins extra_body.thinking.type; `undefined` lets third-party endpoints skip the field. */
 export function thinkingModeForModel(model: string): "enabled" | "disabled" | undefined {
-  const id = stripProviderQualifier(model);
-  if (id.startsWith("gpt-")) return undefined;
-  if (id === "deepseek-chat") return "disabled";
-  // Gemini 2.5+/3.x thinking models: opt into thought summaries so their
-  // reasoning is captured (and persisted) instead of silently dropped.
-  if (id.startsWith("gemini-")) return "enabled";
-  if (id.startsWith("glm-")) return "enabled";
-  if (id.includes("reasoner")) return "enabled";
-  if (isDeepSeekThinkingFamily(id)) return "enabled";
-  // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:8b)
-  if (id.includes("deepseek-r1")) return "enabled";
-  // Xiaomi MiMo: thinking is on by default and toggled via `thinking: { type }`.
-  if (id.startsWith("mimo-")) return "enabled";
-  return undefined;
+  return thinkingCapabilityForModel(model).mode;
 }
 
 /** Strip hallucinated tool-call envelopes — `tools: undefined` doesn't always force prose. */

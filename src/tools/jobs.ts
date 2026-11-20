@@ -2,6 +2,7 @@
 
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import * as pathMod from "node:path";
+import { capWithMarker } from "@reasonix/core-utils";
 import { killProcessTree } from "./process-tree.js";
 import { detectShellOperator, prepareSpawn, tokenizeCommand } from "./shell.js";
 import { type RunCommandResult, runCommand } from "./shell/exec.js";
@@ -697,13 +698,13 @@ function capJobOutput(
   keep: "head" | "tail",
   nextSince?: number,
 ): string {
-  if (text.length <= maxChars) return text;
-  const elided = text.length - maxChars;
-  if (keep === "head") {
-    const cont = nextSince === undefined ? "" : `: continue with since=${nextSince}`;
-    return `${text.slice(0, maxChars)}\n[… ${elided} chars elided${cont} …]`;
-  }
-  return `[… ${elided} chars elided: narrow with since/tailLines …]\n${text.slice(-maxChars)}`;
+  const hint =
+    keep === "head"
+      ? nextSince === undefined
+        ? undefined
+        : `continue with since=${nextSince}`
+      : "narrow with since/tailLines";
+  return capWithMarker(text, maxChars, { keep, hint }).text;
 }
 
 function latestOutputSince(before: string, after: string): string {

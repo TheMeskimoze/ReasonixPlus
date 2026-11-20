@@ -1,8 +1,10 @@
 import { asRecord, messageOf } from "@reasonix/core-utils";
 import { type OutlookSendPreview, type PauseGate, askUser } from "../core/pause-gate.js";
+import { dropFlags } from "./argv-flags.js";
 import type { McpClient } from "./client.js";
+import { mcpTextContent } from "./result-text.js";
 import type { McpServerSpec } from "./spec.js";
-import type { CallToolResult, McpContentBlock } from "./types.js";
+import type { CallToolResult } from "./types.js";
 
 export const OUTLOOK_MAIL_SERVER_NAME = "outlook_mail";
 export const OUTLOOK_MAIL_PACKAGE = "@softeria/ms-365-mcp-server@0.85.0";
@@ -55,16 +57,7 @@ export const OUTLOOK_MAIL_ARGS = [
  *  once at spawn, and the filter stored in config belongs to the install, not to this build. */
 export function withOutlookMailSurface(spec: McpServerSpec): McpServerSpec {
   if (spec.transport !== "stdio" || !isOutlookMailSpec(spec)) return spec;
-  const args: string[] = [];
-  for (let index = 0; index < spec.args.length; index += 1) {
-    const arg = spec.args[index]!;
-    if (arg === "--enabled-tools") {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--enabled-tools=")) continue;
-    args.push(arg);
-  }
+  const args = dropFlags(spec.args, { values: ["enabled-tools"] });
   args.push("--enabled-tools", OUTLOOK_MAIL_ENABLED_TOOLS_FILTER);
   return { ...spec, args };
 }
@@ -382,10 +375,7 @@ export async function confirmOutlookSend(opts: {
 }
 
 export function mcpTextResult(result: CallToolResult): string {
-  return result.content
-    .filter((block): block is Extract<McpContentBlock, { type: "text" }> => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  return mcpTextContent(result);
 }
 
 export interface OutlookLoginStatus {

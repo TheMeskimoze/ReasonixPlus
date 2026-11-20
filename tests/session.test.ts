@@ -1217,8 +1217,8 @@ describe("normalizeWorkspace", () => {
     expect(normalizeWorkspace("/proj/./a", "linux")).toBe("/proj/a");
   });
 
-  it("lowercases drive letter and unifies separators on win32", () => {
-    expect(normalizeWorkspace("C:\\Users\\Foo\\proj", "win32")).toBe("c:/Users/Foo/proj");
+  it("folds the whole path on win32, so case variants share one key", () => {
+    expect(normalizeWorkspace("C:\\Users\\Foo\\proj", "win32")).toBe("c:/users/foo/proj");
     expect(normalizeWorkspace("c:/users/foo/proj", "win32")).toBe("c:/users/foo/proj");
   });
 

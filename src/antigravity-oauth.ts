@@ -18,11 +18,13 @@ import {
   type LocalhostOAuthFlow,
   type TokenResponse,
   beginLocalhostOAuthFlow,
+  buildPkceAuthorizeUrl,
+  credsFromToken,
   envOr,
   fetchUserEmail,
-  isTokenFresh,
   makePkcePair,
   postTokenForm,
+  resolveFreshAccessToken,
 } from "./oauth-shared.js";
 
 /** Published installed-app OAuth identity used by Antigravity's browser flow. */
@@ -83,28 +85,21 @@ export interface AuthorizeParams {
 }
 
 export function buildAuthorizeUrl(p: AuthorizeParams): string {
-  const q = new URLSearchParams({
-    client_id: p.clientId,
-    redirect_uri: p.redirectUri,
-    response_type: "code",
-    scope: p.scope ?? envOr(DEFAULT_SCOPE, "ANTIGRAVITY_OAUTH_SCOPE"),
+  return buildPkceAuthorizeUrl({
+    endpoint: antigravityAuthorizeUrl(),
+    clientId: p.clientId,
+    redirectUri: p.redirectUri,
     state: p.state,
-    access_type: "offline",
-    prompt: "consent",
+    codeChallenge: p.codeChallenge,
+    scope: p.scope ?? envOr(DEFAULT_SCOPE, "ANTIGRAVITY_OAUTH_SCOPE"),
+    extra: { access_type: "offline", prompt: "consent" },
   });
-  if (p.codeChallenge) {
-    q.set("code_challenge", p.codeChallenge);
-    q.set("code_challenge_method", "S256");
-  }
-  return `${antigravityAuthorizeUrl()}?${q.toString()}`;
 }
 
 function toCreds(parsed: TokenResponse, fallbackRefresh: string): AntigravityOAuthCreds {
   return {
-    accessToken: parsed.access_token as string,
-    refreshToken: parsed.refresh_token ?? fallbackRefresh,
+    ...credsFromToken(parsed, { fallbackRefresh, defaultExpiresInSec: 600 }),
     clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
-    expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1000 : Date.now() + 10 * 60_000,
   };
 }
 
@@ -148,26 +143,35 @@ const refreshAntigravityTokenOnce = singleFlight<string | undefined>();
 export async function resolveAntigravityToken(
   path: string = defaultConfigPath(),
 ): Promise<string | undefined> {
-  const creds = readConfig(path).antigravityOAuth;
-  if (!creds?.accessToken) return undefined;
-  if (creds.clientId !== ANTIGRAVITY_OAUTH_CLIENT_ID) {
-    clearAntigravityOAuth(path);
-    throw new Error("Stored Antigravity OAuth credentials use an obsolete client; sign in again");
-  }
-  if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  return refreshAntigravityTokenOnce(async () => {
-    try {
-      const next = await refreshAntigravityToken(creds.refreshToken);
+  return resolveFreshAccessToken({
+    read: () => {
+      const creds = readConfig(path).antigravityOAuth;
+      if (!creds?.accessToken) return undefined;
+      if (creds.clientId !== ANTIGRAVITY_OAUTH_CLIENT_ID) {
+        clearAntigravityOAuth(path);
+        throw new Error(
+          "Stored Antigravity OAuth credentials use an obsolete client; sign in again",
+        );
+      }
+      return creds;
+    },
+    save: (next, previous) =>
       saveAntigravityOAuth(
-        { ...next, account: creds.account, projectId: creds.projectId, models: creds.models },
+        {
+          ...next,
+          account: previous.account,
+          projectId: previous.projectId,
+          models: previous.models,
+        },
         path,
-      );
-      return next.accessToken;
-    } catch (err) {
-      throw new Error(`Antigravity OAuth refresh failed: ${(err as Error).message}`, {
-        cause: err,
+      ),
+    refresh: (creds) => refreshAntigravityToken(creds.refreshToken),
+    flight: refreshAntigravityTokenOnce,
+    onRefreshError: (error) => {
+      throw new Error(`Antigravity OAuth refresh failed: ${(error as Error).message}`, {
+        cause: error,
       });
-    }
+    },
   });
 }
 

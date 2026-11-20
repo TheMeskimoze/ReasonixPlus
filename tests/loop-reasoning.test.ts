@@ -12,8 +12,15 @@ import {
   thinkingModeForModel,
 } from "../src/loop.js";
 import { isReasoningRoundTripError } from "../src/loop/errors.js";
-import { buildAssistantMessage, buildSyntheticAssistantMessage } from "../src/loop/messages.js";
+import {
+  buildAssistantMessage,
+  buildSyntheticAssistantMessage,
+  isUserTurn,
+  lastUserTurnIndex,
+} from "../src/loop/messages.js";
+import { isStaleReasoning } from "../src/loop/reasoning-retention.js";
 import { StreamRepetitionDetector } from "../src/loop/repetition.js";
+import { thinkingCapabilityForModel } from "../src/loop/thinking.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
@@ -1313,6 +1320,74 @@ describe("loop-context-replace", () => {
       ]);
       expect(result.dropped).toBe(1);
       expect(loop.log.toMessages()).toEqual([{ role: "user", content: "q" }]);
+    });
+  });
+
+  describe("one reasoning contract", () => {
+    it("agrees on every model across both entry points", () => {
+      for (const model of [
+        "gpt-4",
+        "deepseek-chat",
+        "deepseek-coder",
+        "deepseek-v4.1-flash",
+        "gemini-2.5-flash",
+        "glm-5.3",
+        "mimo-v2.6-pro",
+        "qwen3.8-max",
+      ]) {
+        expect(isThinkingModeModel(model)).toBe(thinkingModeForModel(model) === "enabled");
+      }
+    });
+
+    it("treats a Gemini thinking model as needing the round trip", () => {
+      expect(thinkingModeForModel("gemini-2.5-flash")).toBe("enabled");
+      expect(isThinkingModeModel("gemini-2.5-flash")).toBe(true);
+      expect(thinkingCapabilityForModel("gemini-2.5-flash").requiresRoundTrip).toBe(true);
+    });
+  });
+
+  describe("the user-turn and reasoning predicates", () => {
+    it("does not count a steer as a turn", () => {
+      const messages = [
+        { role: "user", content: "first" },
+        { role: "assistant", content: "a", reasoning_content: "r1" },
+        { role: "user", content: "steer", synthetic: true },
+      ] as ChatMessage[];
+      expect(lastUserTurnIndex(messages)).toBe(0);
+      expect(lastUserTurnIndex(messages, { includeSynthetic: true })).toBe(2);
+    });
+
+    it("counts an injected tool image but requires text only when asked", () => {
+      const injected = { role: "user", content: [], injected: true } as ChatMessage;
+      expect(isUserTurn(injected)).toBe(true);
+      expect(isUserTurn(injected, { requireText: true })).toBe(false);
+    });
+
+    it("counts an image-only prompt as text but not an empty record", () => {
+      const imageOnly = {
+        role: "user",
+        content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA" } }],
+      } as ChatMessage;
+      expect(isUserTurn(imageOnly, { requireText: true })).toBe(true);
+      expect(isUserTurn({ role: "user", content: [] } as ChatMessage, { requireText: true })).toBe(
+        false,
+      );
+    });
+
+    it("keeps tool-call reasoning and drops stale plain-turn reasoning", () => {
+      const stale = {
+        role: "assistant",
+        content: "old",
+        reasoning_content: "stale",
+      } as ChatMessage;
+      const toolCall = {
+        role: "assistant",
+        content: "call",
+        reasoning_content: "keep",
+        tool_calls: [{ id: "1", type: "function", function: { name: "f", arguments: "{}" } }],
+      } as ChatMessage;
+      expect(isStaleReasoning(stale, 0, 1)).toBe(true);
+      expect(isStaleReasoning(toolCall, 2, 1)).toBe(false);
     });
   });
 });

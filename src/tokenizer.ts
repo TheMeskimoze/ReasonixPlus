@@ -5,7 +5,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { LruCache } from "./core/lru.js";
+import { LruCache } from "@reasonix/core-utils";
+import { lastUserTurnIndex } from "./loop/messages.js";
+import { isStaleReasoning } from "./loop/reasoning-retention.js";
 import type { UserContentPart } from "./types.js";
 
 /** OpenAI bills image_url parts at 85 tokens at detail:"low" — the fixed detail
@@ -437,33 +439,16 @@ function mergeToolMessages(messages: V4Message[]): V4Message[] {
   return merged;
 }
 
-/** Drop `reasoning_content` from assistant messages before the last user/developer message. Matches Python `_drop_thinking_messages`. */
+/** Apply the shared stale-reasoning rule to the template form; developer records before
+ *  the boundary are dropped entirely. */
 function dropThinkingMessages(messages: V4Message[]): V4Message[] {
-  let lastUserIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const role = messages[i]!.role;
-    if (role === "user" || role === "developer") {
-      lastUserIdx = i;
-      break;
-    }
-  }
+  const lastUserIdx = lastUserTurnIndex(messages, { includeDeveloper: true });
   if (lastUserIdx < 0) return messages;
-
-  // Match Python `_drop_thinking_messages`:
-  //   - developer messages before lastUserIdx are dropped entirely
-  //   - assistant messages before lastUserIdx keep content & tool_calls
-  //     but have reasoning_content stripped
-  const result: V4Message[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    if (i < lastUserIdx && msg.role === "developer") continue;
-    if (i < lastUserIdx && msg.role === "assistant") {
-      result.push({ ...msg, reasoning_content: null });
-    } else {
-      result.push(msg);
-    }
-  }
-  return result;
+  return messages.flatMap((msg, i) => {
+    if (i >= lastUserIdx) return [msg];
+    if (msg.role === "developer") return [];
+    return isStaleReasoning(msg, i, lastUserIdx) ? [{ ...msg, reasoning_content: null }] : [msg];
+  });
 }
 
 /** Apply DeepSeek V4 chat template. Matches `encoding_dsv4.py`: tool results merged into user messages, assistant tool_calls in DSML, generation suffix appended. */
@@ -515,7 +500,12 @@ export function formatDeepSeekPrompt(
   return parts.join("");
 }
 
-const PER_MESSAGE_TEMPLATE_TOKENS = 6;
+/** Per-message chat-template cost. Every context budget counts it, so a fold target
+ *  and the request estimate cannot drift apart. */
+export const PER_MESSAGE_TEMPLATE_TOKENS = 6;
+
+/** Fixed per-request chat-template cost (BOS plus the generation suffix). */
+export const REQUEST_BASE_TOKENS = 2;
 
 /** Keyed by content string — WeakMap-on-message can't be used because callers spread `{...e}` defensive copies, breaking identity every turn. */
 const contentTokenCache = new LruCache<string, number>(4096);
@@ -572,6 +562,14 @@ export function tokensForMessage(
   return n;
 }
 
+/** Per-message cost as a request counts it: the message body plus the template overhead. */
+export function tokensForMessageInRequest(
+  m: Parameters<typeof tokensForMessage>[0],
+  dropThisReasoning = false,
+): number {
+  return PER_MESSAGE_TEMPLATE_TOKENS + tokensForMessage(m, dropThisReasoning);
+}
+
 /** Per-message bounded sum, not a full-prompt rebuild — used for fold-threshold checks where ±5% slop is fine. */
 export function estimateConversationTokens(
   messages: Array<{
@@ -584,25 +582,21 @@ export function estimateConversationTokens(
   drop_thinking = false,
 ): number {
   if (messages.length === 0) return 0;
-  let lastUserOrDev = -1;
-  if (drop_thinking) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const r = messages[i]!.role;
-      if (r === "user" || r === "developer") {
-        lastUserOrDev = i;
-        break;
-      }
-    }
-  }
-  let total = 2;
+  const lastUserOrDev = drop_thinking
+    ? lastUserTurnIndex(messages, { includeDeveloper: true })
+    : -1;
+  let total = REQUEST_BASE_TOKENS;
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!;
     if (drop_thinking && i < lastUserOrDev && m.role === "developer") continue;
-    total += PER_MESSAGE_TEMPLATE_TOKENS;
-    const dropReasoning = drop_thinking && i < lastUserOrDev && m.role === "assistant";
-    total += tokensForMessage(m, dropReasoning);
+    total += tokensForMessageInRequest(m, drop_thinking && isStaleReasoning(m, i, lastUserOrDev));
   }
   return total;
+}
+
+/** Tokens the rendered tool block adds to every request. */
+export function toolSpecTokens(toolSpecs: ReadonlyArray<unknown> | null | undefined): number {
+  return toolSpecs && toolSpecs.length > 0 ? countTokensBounded(renderTools(toolSpecs)) : 0;
 }
 
 /** Total request tokens (messages + tool specs) as the API counts them. Tool specs rendered via V4 TOOLS_TEMPLATE and added to message token count. */
@@ -617,11 +611,7 @@ export function estimateRequestTokens(
   toolSpecs?: ReadonlyArray<unknown> | null,
   drop_thinking = false,
 ): number {
-  let total = estimateConversationTokens(messages, drop_thinking);
-  if (toolSpecs && toolSpecs.length > 0) {
-    total += countTokensBounded(renderTools(toolSpecs));
-  }
-  return total;
+  return estimateConversationTokens(messages, drop_thinking) + toolSpecTokens(toolSpecs);
 }
 
 /** Exposed for tests — resets the lazy-load singleton. */

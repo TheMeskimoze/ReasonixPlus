@@ -58,7 +58,7 @@ export function resolveProjectMemoryWritePath(rootDir: string): string {
 export interface ProjectMemory {
   /** Absolute path the memory was read from. */
   path: string;
-  /** Post-truncation content (may include a "… (truncated N chars)" marker). */
+  /** Post-truncation content (may include a "[… N chars omitted …]" marker). */
   content: string;
   /** Original byte length before truncation. */
   originalChars: number;

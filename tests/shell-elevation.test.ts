@@ -61,7 +61,7 @@ describe("assembleResult", () => {
     });
     expect(r.truncated).toBe(true);
     expect(r.output.startsWith("xxxxxxxxxx")).toBe(true);
-    expect(r.output).toContain("[… truncated 90 chars …]");
+    expect(r.output).toContain("[… 90 chars omitted …]");
   });
 
   it("passes output through unchanged when under the cap", () => {

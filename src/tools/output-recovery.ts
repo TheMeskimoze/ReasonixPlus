@@ -6,17 +6,16 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { basename, dirname, join, parse } from "node:path";
 import { gzipSync } from "node:zlib";
 import { DAY_MS } from "@reasonix/core-utils";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
+import { pruneStateDir } from "../core/state-dir.js";
 import { projectRelativeDisplayPath, reasonixStateDir } from "../reasonix-home.js";
 
 const RECOVERY_DIR = "output-recovery";
@@ -105,34 +104,17 @@ interface RecoveryMetadata {
 
 export function cleanupOutputRecovery(rootDir: string, limits: OutputRecoveryLimits = {}): void {
   const dir = outputRecoveryDir(rootDir);
-  if (!existsSync(dir)) return;
-  const maxAgeMs = limits.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
-  const maxEntries = Math.max(1, limits.maxEntries ?? DEFAULT_MAX_ENTRIES);
-  const cutoff = Date.now() - maxAgeMs;
-  let metas: Array<{ path: string; hash: string; mtimeMs: number }> = [];
-  try {
-    metas = readdirSync(dir)
-      .filter((name) => /^[a-f0-9]{24}\.json$/.test(name))
-      .map((name) => {
-        const path = join(dir, name);
-        return { path, hash: name.slice(0, 24), mtimeMs: statSync(path).mtimeMs };
-      })
-      .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  } catch {
-    return;
-  }
-  for (let i = 0; i < metas.length; i++) {
-    const entry = metas[i]!;
-    if (entry.mtimeMs >= cutoff && i < maxEntries) continue;
-    const paths = artifactPaths(dir, entry.hash);
-    for (const path of [paths.text, paths.gzip, paths.meta]) {
-      try {
-        rmSync(path, { force: true });
-      } catch {
-        // Cleanup is best effort and must not block command execution.
+  pruneStateDir(dir, {
+    match: (name) => /^[a-f0-9]{24}\.json$/.test(name),
+    maxAgeMs: limits.maxAgeMs ?? DEFAULT_MAX_AGE_MS,
+    maxFiles: Math.max(1, limits.maxEntries ?? DEFAULT_MAX_ENTRIES),
+    remove: (path) => {
+      const hash = basename(path, ".json");
+      for (const target of Object.values(artifactPaths(dir, hash))) {
+        rmSync(target, { force: true });
       }
-    }
-  }
+    },
+  });
 }
 
 /** Bounded byte-faithful shell capture. Bytes beyond the ceiling are counted but not stored, and the reference is explicitly incomplete. */

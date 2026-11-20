@@ -1,9 +1,12 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
-import { toPosixPath } from "@reasonix/core-utils/path-utils";
+import {
+  relativeDisplayPath as displayRel,
+  pathIsUnder,
+  toPosixPath,
+} from "@reasonix/core-utils/path-utils";
 import { looksBinary } from "./binary.js";
 import { getRegexRunner } from "./regex-runner.js";
-import { displayRel } from "./rel.js";
 import { GLOB_METACHARS, rgRelOf, ripgrepAvailable, runRipgrep } from "./rg.js";
 import { throwIfAborted, walkDir } from "./walk.js";
 
@@ -232,7 +235,7 @@ export async function searchContent(
   if (ripgrepAvailable()) {
     const absRoot = pathMod.resolve(ctx.rootDir);
     const relToRoot = pathMod.relative(absRoot, startAbs);
-    if (relToRoot === "" || (!relToRoot.startsWith("..") && !pathMod.isAbsolute(relToRoot))) {
+    if (pathIsUnder(startAbs, absRoot)) {
       const globArg = typeof args.glob === "string" && args.glob.length > 0 ? args.glob : null;
       const metaGlob = globArg !== null && GLOB_METACHARS.test(globArg);
       const excludeGlobs: string[] = [];

@@ -3,9 +3,9 @@
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { toPosixPath } from "@reasonix/core-utils/path-utils";
+import { TtlLruCache } from "@reasonix/core-utils";
+import { pathIsUnder, toPosixPath } from "@reasonix/core-utils/path-utils";
 import ignore, { type Ignore } from "ignore";
-import { TtlLruCache } from "./core/lru.js";
 
 export interface GitignoreLayer {
   /** Absolute dir the .gitignore lives in. Patterns evaluate relative to this. */
@@ -53,8 +53,9 @@ export function ignoredByLayers(
   isDir: boolean,
 ): boolean {
   for (const layer of layers) {
+    if (!pathIsUnder(abs, layer.dirAbs)) continue;
     const rel = toPosixPath(path.relative(layer.dirAbs, abs));
-    if (!rel || rel.startsWith("..")) continue;
+    if (!rel) continue;
     if (layer.ig.ignores(isDir ? `${rel}/` : rel)) return true;
   }
   return false;

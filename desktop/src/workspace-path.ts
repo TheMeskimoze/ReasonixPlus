@@ -1,5 +1,4 @@
-import { toPosixPath, workspacePathKey } from "@reasonix/core-utils";
-import { LruCache } from "./cache";
+import { LruCache, toPosixPath, workspacePathKey } from "@reasonix/core-utils";
 import { t } from "./i18n";
 
 function isWindowsPath(path: string): boolean {

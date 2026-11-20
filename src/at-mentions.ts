@@ -3,9 +3,8 @@
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { AT_MENTION_PATTERN, stripTrailingMentionDots } from "@reasonix/core-utils";
-import { toPosixPath } from "@reasonix/core-utils/path-utils";
-import { TtlLruCache } from "./core/lru.js";
+import { AT_MENTION_PATTERN, TtlLruCache, stripTrailingMentionDots } from "@reasonix/core-utils";
+import { pathIsUnder, toPosixPath } from "@reasonix/core-utils/path-utils";
 import {
   type GitignoreLayer,
   ignoredByLayers,
@@ -280,7 +279,7 @@ export async function listDirectory(
   const rootAbs = resolve(root);
   const dirAbs = resolve(rootAbs, relDir);
   const rel = relative(rootAbs, dirAbs);
-  if (rel.startsWith("..") || isAbsolute(rel)) return [];
+  if (!pathIsUnder(dirAbs, rootAbs)) return [];
 
   const cacheKey = `${dirAbs}\u0000${respectGi ? "g" : ""}\u0000${[...ignoreDirs].sort().join(",")}`;
   const cached = listDirectoryCache.get(cacheKey);
@@ -603,8 +602,7 @@ function resolveMention(
   }
   const resolved = resolve(root, rawPath);
   // Sandbox escape: after resolution the path must still be inside root.
-  const rel = relative(root, resolved);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (!pathIsUnder(resolved, root)) {
     return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "escape" };
   }
   if (!fs.exists(resolved)) {

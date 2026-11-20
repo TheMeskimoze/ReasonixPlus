@@ -3,7 +3,12 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import { formatBytes } from "@reasonix/core-utils";
-import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
+import {
+  relativeDisplayPath as displayRel,
+  looksLikeAbsoluteSystemPath,
+  pathIsUnder,
+  resolveToolPath,
+} from "@reasonix/core-utils/path-utils";
 import picomatch from "picomatch";
 import { grammarForPath } from "../code-query/grammar-map.js";
 import type { SymbolKind } from "../code-query/symbols.js";
@@ -39,12 +44,11 @@ import {
 import { globFiles } from "./fs/glob.js";
 import { createOutlineCollector, formatOutline } from "./fs/outline.js";
 import { inspectTextFile, readLineTail, readLineWindow } from "./fs/read.js";
-import { displayRel } from "./fs/rel.js";
 import { GLOB_METACHARS, ripgrepAvailable } from "./fs/rg.js";
 import { searchContent, searchFiles } from "./fs/search.js";
 import { markOutputRecoveryRead } from "./output-recovery.js";
 
-export { displayRel } from "./fs/rel.js";
+export { relativeDisplayPath as displayRel } from "@reasonix/core-utils/path-utils";
 
 export { lineDiff } from "./fs/edit.js";
 
@@ -291,13 +295,8 @@ export function registerFilesystemTools(
     }
     // Sandbox-root semantics: leading `/` or `\` means "from project root", not "from filesystem root".
     // Model routinely writes `path: "/src/foo.ts"` intending rootDir-relative.
-    let normalized = raw;
-    while (normalized.startsWith("/") || normalized.startsWith("\\")) {
-      normalized = normalized.slice(1);
-    }
-    if (normalized.length === 0) normalized = ".";
-    const resolved = pathMod.resolve(rootDir, normalized);
-    if (!pathIsUnder(resolved, normRoot)) {
+    const { abs: resolved, inside } = resolveToolPath(rootDir, raw);
+    if (!inside) {
       throw new Error(
         `path escapes sandbox root (${normRoot}): ${raw} : use an absolute system path like /Users/foo or C:\\Users\\foo to request approved outside-sandbox access`,
       );

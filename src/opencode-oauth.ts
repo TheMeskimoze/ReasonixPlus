@@ -3,7 +3,13 @@
 
 import { clearOpencodeOAuth, defaultConfigPath, readConfig, saveOpencodeOAuth } from "./config.js";
 import { singleFlight } from "./core/lazy.js";
-import { OAUTH_FLOW_TIMEOUT_MS, envOr, fetchUserEmail, isTokenFresh } from "./oauth-shared.js";
+import {
+  OAUTH_FLOW_TIMEOUT_MS,
+  credsFromToken,
+  envOr,
+  fetchUserEmail,
+  isTokenFresh,
+} from "./oauth-shared.js";
 import {
   type OpencodeOAuthCreds,
   forgetOpencodeOAuth,
@@ -103,9 +109,7 @@ async function buildCreds(server: string, token: DeviceTokenResponse): Promise<O
     /* orgs are optional metadata */
   }
   return {
-    accessToken,
-    refreshToken: token.refresh_token ?? "",
-    expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
+    ...credsFromToken(token, { fallbackRefresh: "", defaultExpiresInSec: 3600 }),
     account,
     orgId,
     orgName,
@@ -197,9 +201,7 @@ async function refreshOpencodeToken(
   }
   const next: OpencodeOAuthCreds = {
     ...creds,
-    accessToken: token.access_token,
-    refreshToken: token.refresh_token ?? creds.refreshToken,
-    expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
+    ...credsFromToken(token, { fallbackRefresh: creds.refreshToken, defaultExpiresInSec: 3600 }),
   };
   if (!storeOpencodeSession(next, path, epoch)) return undefined;
   return next;

@@ -2,6 +2,7 @@
 
 import * as pathMod from "node:path";
 import { tailLines } from "@reasonix/core-utils";
+import { pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { addGlobalShellAllowed, addProjectShellAllowed } from "../config.js";
 import {
   type PauseAskContext,
@@ -645,8 +646,7 @@ function resolveCwdInsideRoot(rootDir: string, raw: string | undefined): string 
   const root = pathMod.resolve(rootDir);
   if (!raw || !raw.trim()) return root;
   const resolved = pathMod.resolve(root, raw);
-  const rel = pathMod.relative(root, resolved);
-  if (rel.startsWith("..") || pathMod.isAbsolute(rel)) {
+  if (!pathIsUnder(resolved, root)) {
     throw new Error(
       `run_background: cwd "${raw}" resolves outside the workspace root (${root}). Pass a workspace-relative path.`,
     );

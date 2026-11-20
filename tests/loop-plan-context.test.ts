@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { PlanRepository, planRepository } from "../src/code/plans.js";
@@ -8,18 +6,18 @@ import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
 import { withoutClockStamp } from "./support/clock-stamp.js";
+import { useTempHome } from "./support/env-sandbox.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 let home: string;
-let previous: [string | undefined, string | undefined];
+let restoreHome: () => void;
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "loop-plan-"));
-  previous = [process.env.HOME, process.env.USERPROFILE];
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
+  home = makeTempDir("loop-plan-");
+  restoreHome = useTempHome(home);
 });
 afterEach(() => {
-  [process.env.HOME, process.env.USERPROFILE] = previous;
-  rmSync(home, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(home);
 });
 /** One loop over `workspace`, optionally with the `add` tool the turn-level tests drive. */
 function buildLoop(workspace: string, responses: FakeResponseShape[] = [], withAddTool = false) {

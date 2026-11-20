@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { type ProviderSpec, providerSpec, providerSpecsInOrder } from "@reasonix/core-utils";
+import { credentialFingerprint } from "@reasonix/core-utils/fingerprint";
 import { readJsonFileSilently, writeJsonFileSilently } from "./core/json-file.js";
 import { modelWindowsPath, recordModelWindow } from "./model-windows.js";
 import { reasonixHome } from "./reasonix-home.js";
@@ -60,9 +60,7 @@ function validCache(value: unknown): value is CacheEntry {
   );
 }
 export function catalogScope(provider: CatalogProvider, baseUrl: string, apiKey?: string): string {
-  return createHash("sha256")
-    .update(JSON.stringify([provider, baseUrl, apiKey ?? ""]))
-    .digest("hex");
+  return credentialFingerprint({ provider, baseUrl, apiKey }, 64);
 }
 function cachePath(scope: string, homeDir?: string): string {
   return join(reasonixHome(homeDir), "provider-models", `${scope}.json`);

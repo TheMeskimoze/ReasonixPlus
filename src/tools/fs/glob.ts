@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
+import { relativeDisplayPath as displayRel } from "@reasonix/core-utils/path-utils";
 import picomatch from "picomatch";
-import { displayRel } from "./rel.js";
 import { walkDir } from "./walk.js";
 
 export interface GlobContext {

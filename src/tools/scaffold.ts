@@ -298,9 +298,11 @@ function buildSpecString(
       };
     }
     const { command, args } = catalogStdioCommand(entry);
-    const tail = userArgs.map(quoteIfNeeded).join(" ");
-    const body = `${command} ${args.join(" ")}${tail ? ` ${tail}` : ""}`;
-    return { spec: `${input.name}=${body}`, note: entry.note };
+    const args2 = [...args, ...userArgs];
+    return {
+      spec: specToRaw({ transport: "stdio", name: input.name, command, args: args2 }),
+      note: entry.note,
+    };
   }
 
   const transport = input.transport;
@@ -311,20 +313,20 @@ function buildSpecString(
     if (!input.command || !input.command.trim()) {
       return { error: "stdio transport requires 'command'" };
     }
-    const tail = (input.argv ?? []).map(quoteIfNeeded).join(" ");
-    const body = `${quoteIfNeeded(input.command.trim())}${tail ? ` ${tail}` : ""}`;
-    return { spec: `${input.name}=${body}` };
+    return {
+      spec: specToRaw({
+        transport: "stdio",
+        name: input.name,
+        command: input.command.trim(),
+        args: input.argv ?? [],
+      }),
+    };
   }
   if (transport === "sse" || transport === "streamable-http") {
     if (!input.url || !/^https?:\/\//i.test(input.url)) {
       return { error: `${transport} transport requires an http(s):// 'url'` };
     }
-    const prefix = transport === "streamable-http" ? "streamable+" : "";
-    return { spec: `${input.name}=${prefix}${input.url.trim()}` };
+    return { spec: specToRaw({ transport, name: input.name, url: input.url.trim() }) };
   }
   return { error: `unknown transport: ${JSON.stringify(transport)}` };
-}
-
-function quoteIfNeeded(s: string): string {
-  return /\s|"/.test(s) ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : s;
 }

@@ -345,7 +345,7 @@ describe("loop-error", () => {
       expect(healed[1]).toEqual(messages[1]); // assistant untouched
       expect(typeof healed[2]!.content).toBe("string");
       expect((healed[2]!.content as string).length).toBeLessThan(33_000);
-      expect(healed[2]!.content).toContain("truncated");
+      expect(healed[2]!.content).toContain("omitted");
       expect(healed[3]).toEqual(messages[3]); // trailing assistant untouched
     });
 

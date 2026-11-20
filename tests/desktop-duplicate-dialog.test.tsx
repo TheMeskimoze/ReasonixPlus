@@ -2,37 +2,23 @@
 // Mounts the full App against a mocked Tauri bridge: the header's Duplicate button must
 // raise the SAME centered capability dialog the session-start gate uses, pre-filled with
 // what this chat runs with, and hand the daemon the set the user confirmed.
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../desktop/src/App";
-
-const WS = "C:\\ws";
-const handlers = new Map<string, (e: { payload: unknown }) => void>();
-/** Every command the app pushed to the daemon, in order. */
-const sent: Record<string, unknown>[] = [];
+import {
+  WS,
+  feed,
+  mockDesktopHost,
+  resetDesktopHost,
+  sent,
+  settle,
+} from "./support/desktop-harness";
 
 const rows = [
   { name: "playwright", enabled: true, builtin: true },
   { name: "ghidra", enabled: false, builtin: false },
 ];
-
-async function feed(ev: Record<string, unknown>, tabId?: string) {
-  const h = handlers.get("rpc:event");
-  if (!h) throw new Error("rpc:event handler not registered yet");
-  const line = JSON.stringify(tabId ? { ...ev, tabId } : ev);
-  await act(async () => {
-    h({ payload: { data: line } });
-  });
-}
-
-const settle = (ms = 40) =>
-  act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
 
 /** One active tab on session "A", which has a transcript and two configured servers. */
 async function boot(capabilityPrefill = rows, subagents = false) {
@@ -108,55 +94,11 @@ function openDuplicate(): HTMLElement {
 
 describe("desktop — Duplicate capability dialog", () => {
   beforeEach(() => {
-    handlers.clear();
-    sent.length = 0;
-    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-    (Element.prototype as unknown as { scrollTo: () => void }).scrollTo = () => {};
-    if (!window.matchMedia) {
-      (window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-        matches: false,
-        addEventListener() {},
-        removeEventListener() {},
-        addListener() {},
-        removeListener() {},
-      });
-    }
-    (listen as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string, cb: (e: { payload: unknown }) => void) => {
-        handlers.set(name, cb);
-        return () => handlers.delete(name);
-      },
-    );
-    (invoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (cmd: string, args?: { line?: string }) => {
-        if (cmd === "rpc_send" && args?.line) sent.push(JSON.parse(args.line));
-        return undefined;
-      },
-    );
-    (getCurrentWindow as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isMaximized: vi.fn(async () => false),
-      isFocused: vi.fn(async () => true),
-      isVisible: vi.fn(async () => true),
-      isMinimized: vi.fn(async () => false),
-      listen: vi.fn(async () => () => {}),
-      close: vi.fn(),
-      minimize: vi.fn(),
-      toggleMaximize: vi.fn(),
-      maximize: vi.fn(),
-      unmaximize: vi.fn(),
-      setTitle: vi.fn(),
-      onCloseRequested: vi.fn(async () => () => {}),
-      onResized: vi.fn(async () => () => {}),
-    });
+    mockDesktopHost();
   });
 
   afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+    resetDesktopHost();
   });
 
   it("raises the same centered, backdrop-dimmed dialog the session gate uses", async () => {

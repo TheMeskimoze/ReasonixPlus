@@ -51,16 +51,25 @@ export function rotateOpencodeIdentity(): OpencodeIdentity {
   return current;
 }
 
+/** Session headers every OpenCode request carries. One spelling per name: two
+ *  casings of x-session-id survive as separate object keys and fetch folds them
+ *  into a single comma-joined header. */
+export function opencodeSessionHeaders(session: string): Record<string, string> {
+  return {
+    "x-opencode-session": session,
+    "x-opencode-session-id": session,
+    "x-session-affinity": session,
+    "x-session-id": session,
+    "x-opencode-client": OPENCODE_CLIENT,
+  };
+}
+
 /** Every identity header one model request carries. */
 export function opencodeIdentityHeaders(identity: OpencodeIdentity): Record<string, string> {
   return {
-    "x-opencode-session-id": identity.session,
-    "x-session-affinity": identity.session,
-    "X-Session-Id": identity.session,
-    "User-Agent": OPENCODE_USER_AGENT,
+    ...opencodeSessionHeaders(identity.session),
+    "user-agent": OPENCODE_USER_AGENT,
     "x-opencode-project": identity.project,
-    "x-opencode-session": identity.session,
-    "x-opencode-client": OPENCODE_CLIENT,
   };
 }
 

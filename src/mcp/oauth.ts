@@ -8,6 +8,7 @@ import {
   type LocalhostOAuthFlow,
   type TokenResponse,
   beginLocalhostOAuthFlow,
+  buildPkceAuthorizeUrl,
   isTokenFresh,
   makePkcePair,
   postTokenForm,
@@ -230,16 +231,15 @@ export function mcpAuthorizeUrl(p: {
   resource?: string;
   scope?: string;
 }): string {
-  const url = new URL(p.authorizationEndpoint);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", p.clientId);
-  url.searchParams.set("redirect_uri", p.redirectUri);
-  url.searchParams.set("state", p.state);
-  url.searchParams.set("code_challenge", p.codeChallenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  if (p.scope) url.searchParams.set("scope", p.scope);
-  if (p.resource) url.searchParams.set("resource", p.resource);
-  return url.toString();
+  return buildPkceAuthorizeUrl({
+    endpoint: p.authorizationEndpoint,
+    clientId: p.clientId,
+    redirectUri: p.redirectUri,
+    state: p.state,
+    codeChallenge: p.codeChallenge,
+    scope: p.scope,
+    extra: p.resource ? { resource: p.resource } : undefined,
+  });
 }
 
 /** Register a public client for the loopback redirect (RFC 7591). The authorization

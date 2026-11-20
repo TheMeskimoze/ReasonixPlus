@@ -2,7 +2,6 @@
  *  sessions may run two plans in one workspace in parallel. A deleted session holds none. */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { setLiveSessionProbe } from "../src/code/plan-claim.js";
@@ -14,7 +13,9 @@ import { deleteSession, ensureSessionDir } from "../src/memory/session.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerPlanTool } from "../src/tools/plan.js";
 import type { ChatMessage } from "../src/types.js";
+import { useTempHome } from "./support/env-sandbox.js";
 import { makeFakeClient } from "./support/fake-client.js";
+import { makeTempDir, removeTempDir } from "./support/temp-dir.js";
 
 /** Exactly the request the loop would send right now — production's own nextRequest. */
 function requestMessages(loop: CacheFirstLoop): ChatMessage[] {
@@ -22,19 +23,17 @@ function requestMessages(loop: CacheFirstLoop): ChatMessage[] {
 }
 
 let home: string;
-let previous: [string | undefined, string | undefined];
+let restoreHome: () => void;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "plan-ownership-"));
-  previous = [process.env.HOME, process.env.USERPROFILE];
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
+  home = makeTempDir("plan-ownership-");
+  restoreHome = useTempHome(home);
 });
 
 afterEach(() => {
   setLiveSessionProbe(null);
-  [process.env.HOME, process.env.USERPROFILE] = previous;
-  rmSync(home, { recursive: true, force: true });
+  restoreHome();
+  removeTempDir(home);
 });
 
 const steps = [

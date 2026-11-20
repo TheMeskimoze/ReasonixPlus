@@ -137,6 +137,10 @@ export {
 export type {
   ConfirmationChoice,
   RuleScope,
+  RuleMode,
+  RuleEffect,
+  RuleKind,
+  RuleMatch,
   PlanVerdict,
   CheckpointVerdict,
   RevisionVerdict,
@@ -144,7 +148,9 @@ export type {
   ReasoningEffort,
   ChoiceOption,
   PlanStep,
+  PlanStepRisk,
 } from "./permission-types.js";
+export { LruCache, TtlLruCache } from "./lru.js";
 export {
   REASONING_EFFORT_ORDER,
   PROVIDER_IDS,
@@ -261,6 +267,7 @@ export {
   resolveApprovalPrompt,
 } from "./approval-prompt.js";
 export {
+  capWithMarker,
   clipIndexDescription,
   clipText,
   compactionCardText,
@@ -275,7 +282,7 @@ export {
   stripAnsi,
   tailLines,
 } from "./text.js";
-export type { SanitizeFilenameOptions } from "./text.js";
+export type { CapWithMarkerOptions, SanitizeFilenameOptions } from "./text.js";
 export type {
   ApprovalPrompt,
   ApprovalAction,

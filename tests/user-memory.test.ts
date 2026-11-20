@@ -234,7 +234,7 @@ describe("user-memory", () => {
       writeFileSync(join(dir, "MEMORY.md"), "x".repeat(MEMORY_INDEX_MAX_CHARS + 256), "utf8");
       const idx = store.loadIndex("global");
       expect(idx?.truncated).toBe(true);
-      expect(idx?.content).toMatch(/truncated \d+ chars/);
+      expect(idx?.content).toMatch(/\d+ chars omitted/);
       expect(idx?.content.length).toBeLessThan(MEMORY_INDEX_MAX_CHARS + 64);
     });
 

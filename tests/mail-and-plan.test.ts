@@ -75,6 +75,7 @@ import {
   type StepCompletion,
   registerPlanTool,
 } from "../src/tools/plan.js";
+import { jsonResponse } from "./support/fake-client.js";
 
 describe("gmail-mail-mcp", () => {
   describe("managed Gmail MCP", () => {
@@ -1165,10 +1166,6 @@ describe("changelog-fetch", () => {
       entries: [{ hash: "deadbee", kind: "fix", text: "cached work", breaking: false }],
       unreleased: false,
     };
-  }
-
-  function jsonResponse(payload: unknown): Response {
-    return new Response(JSON.stringify(payload), { status: 200 });
   }
 
   describe("changelog fetch", () => {

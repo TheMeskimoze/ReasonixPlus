@@ -17,9 +17,9 @@ import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { loadSessionMessages } from "../src/memory/session.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
-import { estimateConversationTokens } from "../src/tokenizer.js";
+import { estimateConversationTokens, estimateRequestTokens } from "../src/tokenizer.js";
 import type { ChatMessage, ToolCall } from "../src/types.js";
-import { jsonOkResponse, makeFakeClient } from "./support/fake-client.js";
+import { jsonResponse, makeFakeClient } from "./support/fake-client.js";
 
 function call(id: string, name: string, args: Record<string, unknown>): ToolCall {
   return { id, type: "function", function: { name, arguments: JSON.stringify(args) } };
@@ -235,8 +235,16 @@ describe("CacheFirstLoop auto-compaction", () => {
     });
     seedLogTo(loop, AUTO_COMPACT_TRIGGER_RATIO * DEFAULT_CONTEXT_TOKENS + 2_000, "auto");
 
-    const events = await drain(loop.step("continue please"));
+    const requestTokens = estimateRequestTokens(
+      [...loop.prefix.toMessages(), ...loop.log.entries],
+      loop.prefix.tools(),
+    );
+    expect(loop.getContextTokens()).toBe(requestTokens);
+    expect(requestTokens).toBeGreaterThanOrEqual(
+      AUTO_COMPACT_TRIGGER_RATIO * DEFAULT_CONTEXT_TOKENS,
+    );
 
+    const events = await drain(loop.step("continue please"));
     const startIdx = events.findIndex((e) => e.role === "compaction_start");
     expect(startIdx).toBeGreaterThanOrEqual(0);
     expect(events[startIdx]!.compactionTrigger).toBe("auto");
@@ -348,7 +356,7 @@ describe("CacheFirstLoop overflow recovery", () => {
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
-      return jsonOkResponse({
+      return jsonResponse({
         choices: [
           {
             index: 0,

@@ -18,6 +18,7 @@ import {
   signOutAntigravity,
 } from "../src/antigravity-oauth.js";
 import { readConfig, saveAntigravityOAuth } from "../src/config.js";
+import { jsonResponse } from "./support/fake-client.js";
 
 const ENV_KEYS = [
   "ANTIGRAVITY_OAUTH_SCOPE",
@@ -28,13 +29,6 @@ const ENV_KEYS = [
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]));
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 describe("antigravity-oauth", () => {
   let dir: string;
@@ -154,6 +148,16 @@ describe("antigravity-oauth", () => {
 
     await expect(resolveAntigravityToken(path)).rejects.toThrow("obsolete client");
     expect(readConfig(path).antigravityOAuth).toBeUndefined();
+  });
+
+  it("resolveAntigravityToken reports no session before it judges an empty record obsolete", async () => {
+    saveAntigravityOAuth(
+      { accessToken: "", refreshToken: "rt", expiresAt: Date.now() + 60_000 },
+      path,
+    );
+
+    await expect(resolveAntigravityToken(path)).resolves.toBeUndefined();
+    expect(readConfig(path).antigravityOAuth?.refreshToken).toBe("rt");
   });
 
   it("resolveAntigravityToken surfaces refresh failures", async () => {

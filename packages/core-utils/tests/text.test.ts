@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeTerminalText, stripAnsi } from "../src/text.js";
+import { capWithMarker, sanitizeTerminalText, stripAnsi } from "../src/text.js";
 
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
@@ -38,5 +38,47 @@ describe("sanitizeTerminalText", () => {
     expect(sanitizeTerminalText("Tests 4 passed (4)\n  Duration 1.2s")).toBe(
       "Tests 4 passed (4)\n  Duration 1.2s",
     );
+  });
+});
+
+describe("capWithMarker", () => {
+  it("returns the text untouched under the cap", () => {
+    expect(capWithMarker("hello", 10)).toEqual({
+      text: "hello",
+      truncated: false,
+      droppedChars: 0,
+    });
+  });
+
+  it("keeps the head and reports the dropped chars", () => {
+    const capped = capWithMarker("x".repeat(100), 10);
+    expect(capped.truncated).toBe(true);
+    expect(capped.droppedChars).toBe(90);
+    expect(capped.text.startsWith("x".repeat(10))).toBe(true);
+    expect(capped.text).toContain("[… 90 chars omitted …]");
+  });
+
+  it("keeps the tail when asked", () => {
+    const capped = capWithMarker(`head${"x".repeat(100)}tail`, 4, { keep: "tail" });
+    expect(capped.text.endsWith("tail")).toBe(true);
+    expect(capped.text.startsWith("[… ")).toBe(true);
+    expect(capped.text).toContain("chars omitted");
+  });
+
+  it("keeps both ends in head-tail mode and puts the hint in the marker", () => {
+    const capped = capWithMarker(`start${"x".repeat(200)}END`, 40, {
+      keep: "head-tail",
+      hint: "narrow the scope",
+    });
+    expect(capped.text.startsWith("start")).toBe(true);
+    expect(capped.text.endsWith("END")).toBe(true);
+    expect(capped.text).toContain("chars omitted: narrow the scope");
+    expect(capped.droppedChars).toBeGreaterThan(0);
+  });
+
+  it("keeps a surrogate pair whole at the cut", () => {
+    const emoji = String.fromCodePoint(0x1f600);
+    const capped = capWithMarker(`a${emoji.repeat(10)}`, 2);
+    expect(capped.text.split("\n\n")[0]).toBe("a");
   });
 });

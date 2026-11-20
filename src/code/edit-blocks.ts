@@ -12,7 +12,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
+import { pathIsUnder, resolveToolPath } from "@reasonix/core-utils/path-utils";
 import { atomicReplaceFileSync } from "../core/atomic-write.js";
 import { decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
@@ -69,15 +69,7 @@ export function parseEditBlocks(text: string): EditBlock[] {
 }
 
 function resolveEditPath(rootDir: string, rawPath: string): string {
-  const absRoot = resolve(rootDir);
-  if (looksLikeAbsoluteSystemPath(rawPath)) {
-    return resolve(rawPath);
-  }
-  let rooted = rawPath;
-  while (rooted.startsWith("/") || rooted.startsWith("\\")) {
-    rooted = rooted.slice(1);
-  }
-  return resolve(absRoot, rooted || ".");
+  return resolveToolPath(rootDir, rawPath).abs;
 }
 
 export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {

@@ -1,5 +1,6 @@
 import {
   MAX_IMAGE_BYTES,
+  capWithMarker,
   formatBytes,
   messageOf,
   sliceAlignedToCodepoint,
@@ -9,13 +10,19 @@ import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
 import { normalizeImageToDataUrls } from "../image-format.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
-import { WIRE_TOOL_NAME_MAX, sanitizeWireToolName, toolNameDisambiguator } from "../tool-name.js";
+import {
+  WIRE_TOOL_NAME_MAX,
+  mcpServerName,
+  sanitizeWireToolName,
+  toolNameDisambiguator,
+} from "../tool-name.js";
 import { ToolRegistry } from "../tools.js";
 import type { ToolCallContext } from "../tools.js";
 import { fitsSpecBudgetBytes, resolveMcpServerSpecBytes, specBytes } from "../tools/spec-budget.js";
 import type { JSONSchema, UserContentPart } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
+import { mcpTextContent } from "./result-text.js";
 import { derefJsonSchema } from "./schema-deref.js";
 import {
   MAX_TOOL_DESCRIPTION_CHARS,
@@ -206,7 +213,7 @@ function registerCanonicalMcpTool(stableTool: McpTool, env: BridgeEnv): string {
       name: registeredName,
       description:
         withDescriptionSuffix(stableTool.description, env.descriptionSuffix, stableTool.name) ??
-        `MCP tool ${stableTool.name} from the ${env.serverName ?? (env.prefix.replace(/_$/, "") || "MCP")} server (no description supplied by the server; read the parameter schema).`,
+        `MCP tool ${stableTool.name} from the ${env.serverName || mcpServerName(env.prefix, "MCP")} server (no description supplied by the server; read the parameter schema).`,
       parameters: { ...schema, properties },
       readOnly: env.readOnlyTool?.(stableTool.name) || undefined,
       fn: async (args: Record<string, unknown>, ctx) => {
@@ -226,7 +233,7 @@ function registerCanonicalMcpTool(stableTool: McpTool, env: BridgeEnv): string {
           await waitForReady(
             env.ready,
             env.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
-            env.serverName ?? (env.prefix.replace(/_$/, "") || "anon"),
+            env.serverName || mcpServerName(env.prefix),
             ctx?.signal,
           );
         }
@@ -282,7 +289,7 @@ function registerCanonicalMcpTool(stableTool: McpTool, env: BridgeEnv): string {
         }
       },
     },
-    { origin: env.origin ?? `mcp:${env.serverName ?? "anon"}` },
+    { origin: env.origin ?? `mcp:${env.serverName || mcpServerName(env.prefix)}` },
   );
   if (!registered) {
     // A refused registration leaves no tool behind, so the toggle map must not claim it either.
@@ -339,7 +346,7 @@ export async function bridgeMcpTools(
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const result: BridgeResult = { registry, registeredNames: [], skipped: [] };
 
-  const serverName = opts.serverName ?? prefix.replace(/_$/, "") ?? "anon";
+  const serverName = opts.serverName || mcpServerName(prefix);
   const tracker = opts.onSlow
     ? new LatencyTracker(serverName, { thresholdMs: opts.slowThresholdMs, onSlow: opts.onSlow })
     : null;
@@ -537,11 +544,7 @@ export async function mcpResultToToolResult(
     return cappedText([text, ...notes].filter(Boolean).join("\n"), opts);
   }
 
-  const text = result.content
-    .filter((block): block is Extract<McpContentBlock, { type: "text" }> => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
+  const text = mcpTextContent(result);
   const header = [text, ...notes].filter(Boolean).join("\n") || "Image attached.";
   return [{ type: "text", text: cappedText(header, opts) }, ...parts];
 }
@@ -580,14 +583,11 @@ function validateResultShape(result: CallToolResult): void {
 
 /** Head + 1KB tail so error messages at end of stack traces aren't lost. */
 export function truncateForModel(s: string, maxChars: number, extraNote?: string): string {
-  if (s.length <= maxChars) return s;
-  const tailBudget = Math.min(1024, Math.floor(maxChars * 0.1));
-  const headBudget = Math.max(0, maxChars - tailBudget);
-  const head = sliceAlignedToCodepoint(s, headBudget);
-  const tail = sliceSuffixAlignedToCodepoint(s, tailBudget);
-  const dropped = s.length - head.length - tail.length;
-  const note = extraNote ? `: ${extraNote}` : "";
-  return `${head}\n\n[…truncated ${dropped} chars: raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
+  return capWithMarker(s, maxChars, {
+    keep: "head-tail",
+    tailChars: Math.min(1024, Math.floor(maxChars * 0.1)),
+    hint: `raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)${extraNote ? `: ${extraNote}` : ""}`,
+  }).text;
 }
 
 /** Never tokenizes full input — pathological repetitive text (`AAAA…`) costs 30s+ on the pure-TS BPE port. */

@@ -94,6 +94,21 @@ describe("code-query tools", () => {
       expect(parsed.error).toMatch(/language not supported/);
     });
 
+    it("refuses a path outside the project root", async () => {
+      const outside = mkdtempSync(join(tmpdir(), "reasonix-code-outside-"));
+      try {
+        writeFileSync(join(outside, "a.ts"), "function f(){}\n");
+        const raw = await registry.dispatch(
+          "find_in_code",
+          JSON.stringify({ path: join(outside, "a.ts"), name: "f" }),
+        );
+        const parsed = JSON.parse(raw) as { error?: string };
+        expect(parsed.error).toMatch(/outside the project root/);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
     it("finds call sites in Rust", async () => {
       writeFileSync(join(tmp, "a.rs"), "fn helper(){}\nfn main(){ helper(); helper(); }\n");
       const raw = await registry.dispatch(

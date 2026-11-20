@@ -62,6 +62,7 @@ import {
   opencodeOAuthSession,
   rememberOpencodeOAuth,
 } from "../src/opencode-session.js";
+import { jsonResponse } from "./support/fake-client.js";
 describe("opencode-models", () => {
   const TEST_DIR = join(process.cwd(), ".tmp-test-opencode-models");
 
@@ -432,13 +433,6 @@ describe("opencode-oauth", () => {
   const TEST_DIR = join(process.cwd(), ".tmp-test-opencode-oauth");
   const CONFIG_PATH = join(TEST_DIR, "config.json");
   const previousConfig = process.env.REASONIX_CONFIG;
-
-  function jsonResponse(body: unknown): Response {
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }
 
   describe("opencode-oauth", () => {
     beforeEach(() => {
@@ -840,14 +834,6 @@ describe("mimo-auth", () => {
 // *  `unsupported`, and never fabricates a percentage.
 describe("mimo-quota", () => {
   const SESSION = { serviceToken: "svc-token", userId: "user-1" };
-
-  function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   describe("fetchMiMoQuota", () => {
     it("reports unsupported with no console session (never a fabricated number)", async () => {
       expect(await fetchMiMoQuota(undefined)).toEqual({

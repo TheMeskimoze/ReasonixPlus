@@ -1,8 +1,8 @@
 /** Canonical path to the Reasonix+ state directory: `~/.reasonix`. */
 
 import { homedir } from "node:os";
-import { join, parse, relative, resolve } from "node:path";
-import { toPosixPath } from "@reasonix/core-utils/path-utils";
+import { join, parse, resolve } from "node:path";
+import { relativeDisplayPath, toPosixPath } from "@reasonix/core-utils/path-utils";
 
 /** Returns `~/.reasonix` — the single source of truth for the Reasonix+ state directory. */
 export function reasonixHome(homeDirOverride?: string): string {
@@ -28,5 +28,5 @@ export function reasonixStateDir(rootDir: string, name?: string): string {
  *  `rootDir` is usable, otherwise the absolute path with forward slashes. */
 export function projectRelativeDisplayPath(rootDir: string, absolute: string): string {
   if (isUnusableRootDir(rootDir)) return toPosixPath(absolute);
-  return toPosixPath(relative(resolve(rootDir), absolute));
+  return relativeDisplayPath(rootDir, absolute);
 }

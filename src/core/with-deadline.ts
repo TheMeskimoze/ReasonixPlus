@@ -2,6 +2,43 @@
 
 import { abortReason } from "@reasonix/core-utils";
 
+export interface DeadlineSignal {
+  /** Combined parent + deadline signal to hand to the work. */
+  signal: AbortSignal;
+  /** True once the deadline fired, as opposed to a parent abort. */
+  timedOut: () => boolean;
+  /** Raw timer, for callers that must clear at a specific point. Prefer cancel(). */
+  timer: ReturnType<typeof setTimeout>;
+  /** Clear the timer without aborting, for a caller whose signal stays live for a body read. */
+  clearTimer: () => void;
+  /** Clear the timer and abort the deadline branch. Safe to call more than once. */
+  cancel: () => void;
+}
+
+/** One timer, one controller: the shape every request timeout in the codebase needs. */
+export function deadlineSignal(
+  deadlineMs: number,
+  timeoutMessage: string,
+  parentSignal?: AbortSignal,
+): DeadlineSignal {
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort(new Error(timeoutMessage));
+  }, deadlineMs);
+  return {
+    signal: parentSignal ? AbortSignal.any([parentSignal, ctrl.signal]) : ctrl.signal,
+    timedOut: () => timedOut,
+    timer,
+    clearTimer: () => clearTimeout(timer),
+    cancel: () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    },
+  };
+}
+
 // Run `task` under a wall-clock deadline. The deadline aborts its own
 // AbortController (combined via AbortSignal.any) and rejects with
 // `new Error(timeoutMessage)`; the timer always clears and the controller
@@ -16,19 +53,20 @@ export async function withDeadline<T>(
   timeoutMessage: string,
   parentSignal?: AbortSignal,
 ): Promise<T> {
-  const deadlineCtrl = new AbortController();
-  const signal = parentSignal
-    ? AbortSignal.any([parentSignal, deadlineCtrl.signal])
-    : deadlineCtrl.signal;
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = deadlineSignal(deadlineMs, timeoutMessage, parentSignal);
   let onParentAbort: (() => void) | undefined;
   const deadlinePromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      timedOut = true;
-      deadlineCtrl.abort(new Error(timeoutMessage));
+    if (deadline.timedOut()) {
       reject(new Error(timeoutMessage));
-    }, deadlineMs);
+      return;
+    }
+    deadline.signal.addEventListener(
+      "abort",
+      () => {
+        if (deadline.timedOut()) reject(new Error(timeoutMessage));
+      },
+      { once: true },
+    );
   });
   const parentAbortPromise =
     parentSignal !== undefined
@@ -42,7 +80,7 @@ export async function withDeadline<T>(
         })
       : null;
   try {
-    const result = task(signal);
+    const result = task(deadline.signal);
     return await Promise.race(
       parentAbortPromise
         ? [result, deadlinePromise, parentAbortPromise]
@@ -51,11 +89,10 @@ export async function withDeadline<T>(
   } catch (err) {
     // Whichever promise wins, preserve the terminal timeout identity instead of
     // misclassifying the abort as a transient provider drop.
-    if (timedOut) throw new Error(timeoutMessage);
+    if (deadline.timedOut()) throw new Error(timeoutMessage);
     throw err;
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
     if (onParentAbort && parentSignal) parentSignal.removeEventListener("abort", onParentAbort);
-    deadlineCtrl.abort();
+    deadline.cancel();
   }
 }

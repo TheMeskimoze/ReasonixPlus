@@ -5,7 +5,7 @@ import { CardHead } from "./card-head";
 import { useJumpOpen } from "./jump-expand";
 import { RowScroll, useInRowWindow } from "./row-scroll";
 
-export type ApprovalTone = "ok" | "warn" | "danger" | "info" | "brand" | "ghost";
+export type CardTone = "ok" | "warn" | "danger" | "info" | "brand" | "ghost";
 
 export function ApprovalCard({
   kind,
@@ -29,7 +29,7 @@ export function ApprovalCard({
   anchor,
 }: {
   kind: string;
-  tone?: ApprovalTone;
+  tone?: CardTone;
   title: ReactNode;
   /** Short value that rides the title row, right-aligned (a path, "2 options"). */
   chip?: string;

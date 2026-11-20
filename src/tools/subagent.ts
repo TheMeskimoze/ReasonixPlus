@@ -1,7 +1,7 @@
 /** Isolated child loop. Inherits the parent registry minus delegation entry points and
  *  every plan tool; inherits the parent's hooks and loop policy, bar forced invariants. */
 
-import { PLAN_TOOL_NAMES } from "@reasonix/core-utils";
+import { PLAN_TOOL_NAMES, capWithMarker } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "../client.js";
 import {
   type ReasoningEffort,
@@ -688,10 +688,9 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const turns = childLoop.stats.turns.length;
   const usage = aggregateChildUsage(childLoop);
 
-  const truncated =
-    final.length > maxResultChars
-      ? `${final.slice(0, maxResultChars)}\n\n[…truncated ${final.length - maxResultChars} chars; ask the subagent for a tighter summary if you need more.]`
-      : final;
+  const truncated = capWithMarker(final, maxResultChars, {
+    hint: "ask the subagent for a tighter summary if you need more",
+  }).text;
 
   emit({
     kind: "end",

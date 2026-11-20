@@ -48,7 +48,12 @@ import {
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
 import { loadDotMcpJson } from "./mcp/dot-mcp-json.js";
-import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
+import {
+  type McpServerSpec,
+  classifyEndpointUrl,
+  normalizeStringRecord,
+  parseMcpSpec,
+} from "./mcp/spec.js";
 import { BUILTIN_MEMORY_TYPES } from "./memory/builtin-types.js";
 import { clampWindowTokens } from "./model-windows.js";
 import { ollamaThinkingFor } from "./ollama-thinking.js";
@@ -693,10 +698,16 @@ import type {
   ProviderID,
   QuickSend,
   ReasoningEffort,
+  RuleEffect,
+  RuleKind,
+  RuleMatch,
+  RuleMode,
+  RuleScope,
   StatusBarToggles,
 } from "@reasonix/core-utils";
 /** Single trust dial: read-only blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch; follow auto-approves reads and allowlisted shell but asks for every write and non-allowlisted command; ignore auto-approves everything. */
 export type { EditMode, OllamaGenerationPatch, OllamaGenerationSettings, ReasoningEffort };
+export type { RuleEffect, RuleKind, RuleMatch, RuleMode, RuleScope };
 
 export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = REASONING_EFFORT_ORDER;
 
@@ -1644,14 +1655,7 @@ export function mcpEnvFor(
   cfg: ReasonixConfig,
 ): Record<string, string> | undefined {
   if (!serverName) return undefined;
-  const entry = cfg.mcpEnv?.[serverName];
-  if (!entry) return undefined;
-  // Coerce to string and drop empty values — JSON config could be sloppy.
-  const filtered: Record<string, string> = {};
-  for (const [k, v] of Object.entries(entry)) {
-    if (typeof v === "string" && v.length > 0) filtered[k] = v;
-  }
-  return Object.keys(filtered).length > 0 ? filtered : undefined;
+  return normalizeStringRecord(cfg.mcpEnv?.[serverName]);
 }
 
 function inferMcpTransport(cfg: McpServerConfig): "stdio" | "sse" | "streamable-http" {
@@ -1659,19 +1663,7 @@ function inferMcpTransport(cfg: McpServerConfig): "stdio" | "sse" | "streamable-
   const declared = cfg.transport ?? cfg.type;
   if (declared === "http") return "streamable-http";
   if (declared) return declared;
-  const url = cfg.url?.trim() ?? "";
-  if (/^streamable\+https?:\/\//i.test(url)) return "streamable-http";
-  if (/^https?:\/\//i.test(url)) return "sse";
-  return "stdio";
-}
-
-function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (typeof v === "string" && v.length > 0) out[k] = v;
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
+  return classifyEndpointUrl(cfg.url ?? "")?.transport ?? "stdio";
 }
 
 export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
@@ -1723,8 +1715,8 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
       upsertSpec(name, spec);
     } else {
       let url = (serverCfg as McpServerConfig).url ?? "";
-      const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
-      if (streamMatch) url = streamMatch[1]!;
+      const endpoint = classifyEndpointUrl(url);
+      if (endpoint) url = endpoint.url;
       const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
       if (transport === "sse") {
         const spec: McpServerSpec = {
@@ -2417,18 +2409,13 @@ export function loadAllPathAllowed(rootDir?: string, path: string = defaultConfi
   return Array.from(set);
 }
 
-export type RuleMode = "follow" | "never-ask";
-export type RuleEffect = "allow" | "ask" | "deny" | "ignore";
-export type RuleKind = "shell" | "path";
-export type RuleScope = "workspace" | "global";
-
 /** A rule as stored. Its scope is implied by where it lives: top-level means global. */
 export interface StoredRule {
   mode: RuleMode;
   effect: RuleEffect;
   kind: RuleKind;
   pattern: string;
-  match?: "pattern" | "regex";
+  match?: RuleMatch;
 }
 
 /** A rule as the UI and the wire see it, with the scope named explicitly. */

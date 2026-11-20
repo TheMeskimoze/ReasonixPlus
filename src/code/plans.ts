@@ -17,6 +17,7 @@ import { isWorkingPlanStatus, messageOf } from "@reasonix/core-utils";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
 import {
+  legacyWorkspaceStorageKey,
   listSessionNamesForWorkspace,
   listSessionNamesForWorkspaceFromIndex,
   normalizeWorkspace,
@@ -167,17 +168,20 @@ function validate(value: unknown): History {
   return history;
 }
 
-/** Stable, filesystem-safe key for a workspace: sanitized basename plus a short
- *  hash of the normalized absolute path, so two distinct workspaces never collide. */
-function workspaceKey(workspace: string): string {
-  const normalized = normalizeWorkspace(workspace);
+/** Folder name for a workspace: sanitized basename plus a short hash, so two
+ *  distinct workspaces never collide. */
+function planDirName(normalized: string): string {
   const hash = createHash("sha1").update(normalized).digest("hex").slice(0, 16);
   return `${sanitizeName(basename(normalized) || "workspace")}-${hash}`;
 }
 
 /** Workspace-scoped plan storage — one folder per workspace under `~/.reasonix/workspaces/`. */
 export function workspacePlansDir(workspace: string): string {
-  return join(workspacesRootDir(), workspaceKey(workspace), "plans");
+  const root = workspacesRootDir();
+  const current = join(root, planDirName(normalizeWorkspace(workspace)), "plans");
+  if (existsSync(current)) return current;
+  const legacy = join(root, planDirName(legacyWorkspaceStorageKey(workspace)), "plans");
+  return existsSync(legacy) ? legacy : current;
 }
 
 const repositories = new Map<string, PlanRepository>();

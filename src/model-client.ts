@@ -20,6 +20,7 @@ import {
 import { resolveOpenAIToken } from "./oauth.js";
 import { opencodeAppCredential } from "./opencode-app-credential.js";
 import { opencodeSessionId } from "./opencode-free-session.js";
+import { opencodeSessionHeaders } from "./opencode-identity.js";
 import { isOpencodeFreeModel } from "./opencode-models.js";
 import { resolveOpencodeToken } from "./opencode-oauth.js";
 import {
@@ -160,14 +161,7 @@ function freeModelAccount(wireModel: string): string | undefined {
 
 /** Free calls must name a session in the gateway's own id shape, or they 429. */
 export function freeTierSessionHeaders(sessionId: string | undefined): Record<string, string> {
-  const session = opencodeSessionId(sessionId);
-  return {
-    "x-opencode-session": session,
-    "x-opencode-session-id": session,
-    "x-session-affinity": session,
-    "x-session-id": session,
-    "x-opencode-client": "cli",
-  };
+  return opencodeSessionHeaders(opencodeSessionId(sessionId));
 }
 
 /** Free OpenCode models only work through the relay; without it the request fails. */

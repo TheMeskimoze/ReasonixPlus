@@ -82,8 +82,8 @@ describe("opencodeIdentityHeaders", () => {
     expect(opencodeIdentityHeaders(identity)).toEqual({
       "x-opencode-session-id": identity.session,
       "x-session-affinity": identity.session,
-      "X-Session-Id": identity.session,
-      "User-Agent": OPENCODE_USER_AGENT,
+      "x-session-id": identity.session,
+      "user-agent": OPENCODE_USER_AGENT,
       "x-opencode-project": identity.project,
       "x-opencode-session": identity.session,
       "x-opencode-client": "cli",

@@ -126,7 +126,7 @@ describe("readSubdirMemoryContent", () => {
     const out = readSubdirMemoryContent(p);
     expect(out).not.toBeNull();
     expect(out!.length).toBeLessThan(8100 + 100);
-    expect(out).toContain("… (truncated 100 chars)");
+    expect(out).toContain("100 chars omitted");
   });
 });
 

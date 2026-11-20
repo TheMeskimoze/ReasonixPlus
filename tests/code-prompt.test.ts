@@ -20,6 +20,7 @@ import {
   NO_EFFORT_LIMIT_RULE,
   TIME_STAMP_RULE,
 } from "../src/prompt-fragments.js";
+import { unsetEnv } from "./support/env-sandbox.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
@@ -34,9 +35,7 @@ describe("codeSystemPrompt", () => {
     process.env.REASONIX_CONFIG = cfgPath;
   });
   afterEach(() => {
-    // `defaultConfigPath()` treats unset/undefined the same (env?.trim()), so an
-    // undefined assignment is enough to restore real-config resolution.
-    process.env.REASONIX_CONFIG = undefined;
+    unsetEnv(["REASONIX_CONFIG"]);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -66,7 +65,7 @@ describe("codeSystemPrompt", () => {
     const huge = `${"# comment ".repeat(500)}\n`; // ~5000 chars
     writeFileSync(join(root, ".gitignore"), huge, "utf8");
     const out = codeSystemPrompt(root);
-    expect(out).toMatch(/truncated \d+ chars/);
+    expect(out).toMatch(/\d+ chars omitted/);
     // A 5 KB .gitignore must be capped near the 2000-char limit — only a
     // little larger than the tiny-.gitignore baseline, not 5 KB larger.
     expect(out.length).toBeLessThan(small.length + 2500);
@@ -541,7 +540,7 @@ describe("prompt hardening", () => {
     process.env.REASONIX_CONFIG = cfgPath;
   });
   afterEach(() => {
-    process.env.REASONIX_CONFIG = undefined;
+    unsetEnv(["REASONIX_CONFIG"]);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -578,7 +577,7 @@ describe("prompt hardening", () => {
       editMode: "follow",
       systemAppend: "a".repeat(SYSTEM_APPEND_MAX_CHARS + 50),
     });
-    expect(out).toContain("(truncated 50 chars)");
+    expect(out).toContain("50 chars omitted");
   });
 
   it("tracks the persisted edit mode when the host does not pass one", () => {

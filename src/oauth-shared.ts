@@ -84,6 +84,92 @@ export function isTokenFresh(
   return !refreshToken || expiresAt - Date.now() > slackMs;
 }
 
+/** The fields every provider's stored credentials share. */
+export interface TokenCreds {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+/** Map a token response onto stored credentials. `defaultExpiresInSec` is each
+ *  provider's own policy for a response that omits expires_in; `fallbackRefresh`
+ *  is the token the caller already holds when the response does not rotate it. */
+export function credsFromToken(
+  parsed: TokenResponse,
+  opts: { fallbackRefresh?: string; defaultExpiresInSec: number },
+): TokenCreds {
+  return {
+    accessToken: parsed.access_token ?? "",
+    refreshToken: parsed.refresh_token ?? opts.fallbackRefresh ?? "",
+    expiresAt: parsed.expires_in
+      ? Date.now() + parsed.expires_in * 1000
+      : Date.now() + opts.defaultExpiresInSec * 1000,
+  };
+}
+
+export interface TokenResolution<
+  TCreds extends { accessToken?: string; refreshToken?: string; expiresAt?: number },
+> {
+  /** Read the stored credentials, or undefined when there is no session. */
+  read: () => TCreds | undefined;
+  /** Persist the refreshed credentials, with the ones they replace. */
+  save: (next: TCreds, previous: TCreds) => void;
+  /** Perform the provider's refresh exchange. */
+  refresh: (creds: TCreds) => Promise<TCreds>;
+  /** The provider's process-wide single flight, so concurrent callers refresh once. */
+  flight: (task: () => Promise<string | undefined>) => Promise<string | undefined>;
+  /** Refresh failure policy: return undefined to fall back, or throw to surface it. */
+  onRefreshError?: (error: unknown) => undefined | never;
+}
+
+/** Read, check freshness, refresh once and persist. The providers' resolve functions
+ *  differ only in these callbacks and in their failure policy. */
+export async function resolveFreshAccessToken<
+  TCreds extends { accessToken?: string; refreshToken?: string; expiresAt?: number },
+>(opts: TokenResolution<TCreds>): Promise<string | undefined> {
+  const creds = opts.read();
+  if (!creds?.accessToken) return undefined;
+  if (isTokenFresh(creds.expiresAt ?? 0, creds.refreshToken)) return creds.accessToken;
+  return opts.flight(async () => {
+    try {
+      const next = await opts.refresh(creds);
+      opts.save(next, creds);
+      return next.accessToken;
+    } catch (error) {
+      return opts.onRefreshError ? opts.onRefreshError(error) : undefined;
+    }
+  });
+}
+
+export interface PkceAuthorizeParams {
+  /** Authorization endpoint, already resolved from env defaults. */
+  endpoint: string;
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  codeChallenge?: string;
+  scope?: string;
+  /** Provider-specific query parameters appended after the PKCE core. */
+  extra?: Record<string, string>;
+}
+
+/** Assemble an RFC 7636 authorize URL. Callers own endpoint, scope and extras; the
+ *  PKCE core lives here so its parameter names cannot drift per provider. */
+export function buildPkceAuthorizeUrl(p: PkceAuthorizeParams): string {
+  const url = new URL(p.endpoint);
+  url.searchParams.set("client_id", p.clientId);
+  url.searchParams.set("redirect_uri", p.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("state", p.state);
+  if (p.codeChallenge) {
+    url.searchParams.set("code_challenge", p.codeChallenge);
+    url.searchParams.set("code_challenge_method", "S256");
+  }
+  if (p.scope) url.searchParams.set("scope", p.scope);
+  for (const [key, value] of Object.entries(p.extra ?? {})) url.searchParams.set(key, value);
+  return url.toString();
+}
+
 /** Account email from an OIDC userinfo endpoint, for the settings card. Undefined on failure. */
 export async function fetchUserEmail(
   userinfoUrl: string,

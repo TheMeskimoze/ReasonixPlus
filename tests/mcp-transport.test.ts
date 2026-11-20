@@ -1820,7 +1820,7 @@ describe("mcp", () => {
         { maxChars: 10_000 },
       );
       expect(out.length).toBeLessThan(11_000); // cap + a small envelope
-      expect(out).toContain("truncated");
+      expect(out).toContain("omitted");
       // tail preservation: the distinctive END_MARKER at the original's end must survive
       expect(out).toContain("END_MARKER");
       // head preservation: first chars must survive
@@ -1936,7 +1936,7 @@ describe("mcp", () => {
       const { registry } = await bridgeMcpTools(client, { namePrefix: "x_" });
       const out = await registry.dispatch("x_dump", "{}");
       expect(out.length).toBeLessThan(33_000);
-      expect(out).toContain("truncated");
+      expect(out).toContain("omitted");
       // Sanity-silence TS about the unused transport binding.
       void transport;
     });

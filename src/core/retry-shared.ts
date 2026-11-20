@@ -12,13 +12,27 @@ export function isRetryableHttpStatus(status: number): boolean {
   return (RETRYABLE_HTTP_STATUSES as readonly number[]).includes(status);
 }
 
+/** A 5xx that reads as a server fault: the 5xx members of the retryable set. */
+export function isServerFaultStatus(status: number): boolean {
+  return status >= 500 && isRetryableHttpStatus(status);
+}
+
 /** Provider brands persisted in thrown HTTP errors ("<Brand> <status>: <body>").
  *  Derived from each provider's declared `errors.brands`, so adding a provider
  *  needs no edit here; "Upstream" catches failures relayed without a brand. */
 export const PROVIDER_ERROR_BRANDS = `${errorBrandPattern()}|Upstream`;
 
-/** Status line "<Brand> <status>: ..." shared by every provider's thrown errors. */
-const PROVIDER_STATUS_LINE = new RegExp(`^(?:${PROVIDER_ERROR_BRANDS}) (\\d{3}):`);
+/** Status line "<Brand> <status>: <body>" shared by every provider's thrown errors. */
+const PROVIDER_ERROR_LINE = new RegExp(`^(${PROVIDER_ERROR_BRANDS}) (\\d{3}):\\s*([\\s\\S]*)$`);
+
+/** Split a provider error message once, for every classifier that needs its parts. */
+export function parseProviderError(
+  message: string,
+): { brand: string; status: string; body: string } | null {
+  const match = PROVIDER_ERROR_LINE.exec(message.trim());
+  if (!match) return null;
+  return { brand: match[1]!, status: match[2]!, body: match[3]! };
+}
 
 // Upstream-relayed failure phrases marking a transient provider-side fault
 // (OpenCode Zen relaying its upstreams), with or without a status code.
@@ -35,8 +49,8 @@ const TERMINAL_FAILURE_PHRASES = /free usage limit|freeusagelimiterror/i;
 // deterministic error.
 export function isRetryableProviderFailure(message: string): boolean {
   if (TERMINAL_FAILURE_PHRASES.test(message)) return false;
-  const status = PROVIDER_STATUS_LINE.exec(message.trim())?.[1];
-  if (status !== undefined) return isRetryableHttpStatus(Number(status));
+  const parsed = parseProviderError(message);
+  if (parsed) return isRetryableHttpStatus(Number(parsed.status));
   return RETRYABLE_FAILURE_PHRASES.test(message);
 }
 

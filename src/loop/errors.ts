@@ -7,7 +7,8 @@ import {
 } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "../client.js";
 import type { ModelProvider } from "../config.js";
-import { PROVIDER_ERROR_BRANDS, isAbortError } from "../core/retry-shared.js";
+import { isAbortError, isServerFaultStatus, parseProviderError } from "../core/retry-shared.js";
+import { deadlineSignal } from "../core/with-deadline.js";
 import { t } from "../i18n/index.js";
 
 export interface DeepSeekProbeResult {
@@ -69,9 +70,9 @@ export function formatLoopError(
   opts?: FormatLoopErrorOptions,
 ): string {
   const msg = err.message ?? "";
-  const match = new RegExp(`^(${PROVIDER_ERROR_BRANDS}) (\\d{3}):\\s*([\\s\\S]*)$`).exec(msg);
-  const provider = resolveErrorProvider(opts?.provider, match?.[1], opts?.upstreamHost);
-  if (match && CONTEXT_OVERFLOW_RE.test(msg)) {
+  const parsed = parseProviderError(msg);
+  const provider = resolveErrorProvider(opts?.provider, parsed?.brand, opts?.upstreamHost);
+  if (parsed && CONTEXT_OVERFLOW_RE.test(msg)) {
     const requested = parseRequestedContextTokens(msg);
     return providerMessage(provider, "context", {
       requested:
@@ -81,13 +82,13 @@ export function formatLoopError(
       inner: msg,
     });
   }
-  if (!match) {
+  if (!parsed) {
     if (/timed out after/i.test(msg)) return providerMessage(provider, "timeout", { inner: msg });
     return msg;
   }
 
-  const status = match[2]!;
-  const inner = extractProviderErrorMessage(match[3]!);
+  const status = parsed.status;
+  const inner = extractProviderErrorMessage(parsed.body);
   if (status === "400" || status === "413" || status === "422") {
     if (CONTEXT_OVERFLOW_RE.test(inner)) {
       return providerMessage(provider, "context", {
@@ -114,7 +115,7 @@ export function formatLoopError(
     if (isFreeTierLimit(inner)) return formatFreeTierLimit(provider, inner);
     return providerMessage(provider, isOutOfCredits429(inner) ? "credits" : "rate", { inner });
   }
-  if (is5xxStatus(status)) {
+  if (isServerFaultStatus(Number(status))) {
     const spec = providerSpec(provider);
     if (spec?.errors.serverReport === "balance-probe") {
       return formatBalanceProbe5xx(spec.errors.i18nPrefix, status, probe);
@@ -124,28 +125,26 @@ export function formatLoopError(
   return msg;
 }
 
-const PROVIDER_ERROR_PREFIX = `(?:${PROVIDER_ERROR_BRANDS})`;
-
 export function is5xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return new RegExp(`^${PROVIDER_ERROR_PREFIX} 5\\d{2}:`).test(err.message ?? "");
+  const status = parseProviderError(err.message)?.status;
+  return status !== undefined && Number(status) >= 500;
 }
 
 export function is4xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return new RegExp(`^${PROVIDER_ERROR_PREFIX} 4\\d{2}:`).test(err.message ?? "");
+  const status = parseProviderError(err.message)?.status;
+  return status !== undefined && Number(status) >= 400 && Number(status) < 500;
 }
 
 /** True when a provider refused the call because the account's quota, credits or
  *  rate allowance is spent: replaying the same model cannot get past it, so the
  *  only way to keep an unattended run alive is a different model. */
 export function isQuotaExhaustedError(err: unknown): boolean {
-  const match = new RegExp(`^(${PROVIDER_ERROR_BRANDS}) (\\d{3}):\\s*([\\s\\S]*)$`).exec(
-    errorText(err),
-  );
-  if (!match) return false;
-  const status = match[2]!;
-  const inner = extractProviderErrorMessage(match[3]!);
+  const parsed = parseProviderError(errorText(err));
+  if (!parsed) return false;
+  const status = parsed.status;
+  const inner = extractProviderErrorMessage(parsed.body);
   // 402 means "payment required" by definition; 429 covers both a spent quota and
   // a per-key rate limit. Neither is fixed by re-sending the same request to the
   // same model, so both are failover-eligible.
@@ -242,20 +241,24 @@ export async function probeConnectivity(
   timeoutMs = 3000,
 ): Promise<boolean> {
   if (signal?.aborted) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const probeSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const deadline = deadlineSignal(
+    timeoutMs,
+    `connectivity probe timed out after ${timeoutMs}ms`,
+    signal,
+  );
   try {
-    const resp = await fetch(url, { method: "HEAD", signal: probeSignal }).catch(async (err) => {
-      if (probeSignal.aborted) throw err;
-      return await fetch(url, { method: "GET", signal: probeSignal });
-    });
+    const resp = await fetch(url, { method: "HEAD", signal: deadline.signal }).catch(
+      async (err) => {
+        if (deadline.signal.aborted) throw err;
+        return await fetch(url, { method: "GET", signal: deadline.signal });
+      },
+    );
     return resp !== undefined;
   } catch (err) {
     if (signal?.aborted) throw err;
     return false;
   } finally {
-    clearTimeout(timer);
+    deadline.cancel();
   }
 }
 
@@ -378,10 +381,6 @@ function resolveErrorProvider(
   const byBrand = prefix === undefined ? undefined : providerForErrorBrand(prefix);
   if (byBrand) return byBrand;
   return providerForErrorHost(upstreamHost) ?? "upstream";
-}
-
-function is5xxStatus(status: string): boolean {
-  return status === "500" || status === "502" || status === "503" || status === "504";
 }
 
 const OUT_OF_CREDITS_429 =

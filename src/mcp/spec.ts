@@ -83,20 +83,16 @@ export function overlayMatchedSpec(
   }
 }
 
+/** One token of the `--mcp` string form: quoted when it carries a space, tab or quote. */
+function quoteRawToken(token: string): string {
+  return /[\s"]/.test(token) ? `"${token.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : token;
+}
+
 /** Serialize a normalized spec back to the `--mcp` string format. Round-trips through `parseMcpSpec`. */
 export function specToRaw(spec: McpServerSpec): string {
   if (spec.transport === "stdio") {
-    const args = spec.args
-      .map((a) => {
-        if (a.includes(" ") || a.includes('"') || a.includes("\t")) {
-          // Double-quote and escape internal double quotes + backslashes.
-          return `"${a.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-        }
-        return a;
-      })
-      .join(" ");
-    const body = args ? `${spec.command} ${args}` : spec.command;
-    return spec.name ? `${spec.name}=${body}` : body;
+    const argv = [spec.command, ...spec.args].map(quoteRawToken).join(" ");
+    return spec.name ? `${spec.name}=${argv}` : argv;
   }
   if (spec.transport === "sse") {
     return spec.name ? `${spec.name}=${spec.url}` : spec.url;
@@ -107,6 +103,30 @@ export function specToRaw(spec: McpServerSpec): string {
 const NAME_PREFIX = /^([a-zA-Z_][a-zA-Z0-9_-]*)=(.*)$/;
 const HTTP_URL = /^https?:\/\//i;
 const STREAMABLE_PREFIX = /^streamable\+(https?:\/\/.+)$/i;
+
+export type EndpointClass =
+  | { transport: "streamable-http"; url: string }
+  | { transport: "sse"; url: string };
+
+/** Classify a declared endpoint: `streamable+https://...` opts into Streamable HTTP,
+ *  a bare http(s) URL stays SSE for back-compat. Null when it is not a URL. */
+export function classifyEndpointUrl(raw: string): EndpointClass | null {
+  const trimmed = raw.trim();
+  const streamMatch = STREAMABLE_PREFIX.exec(trimmed);
+  if (streamMatch) return { transport: "streamable-http", url: streamMatch[1]! };
+  if (HTTP_URL.test(trimmed)) return { transport: "sse", url: trimmed };
+  return null;
+}
+
+/** Keep only non-empty string values; undefined when nothing survives. */
+export function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.length > 0) out[key] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 export function parseMcpSpec(input: string): McpSpec {
   const trimmed = input.trim();
@@ -122,14 +142,8 @@ export function parseMcpSpec(input: string): McpSpec {
     throw new Error(`MCP spec has name but no command: ${input}`);
   }
 
-  const streamMatch = STREAMABLE_PREFIX.exec(body);
-  if (streamMatch) {
-    return { transport: "streamable-http", name, url: streamMatch[1]! };
-  }
-
-  if (HTTP_URL.test(body)) {
-    return { transport: "sse", name, url: body };
-  }
+  const endpoint = classifyEndpointUrl(body);
+  if (endpoint) return { transport: endpoint.transport, name, url: endpoint.url };
 
   const argv = shellSplit(body);
   if (argv.length === 0) {

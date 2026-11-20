@@ -1,9 +1,10 @@
 /** Shared scratch location for tool-generated PNGs: the workspace when there is one,
  *  the OS temp directory otherwise. */
 
-import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pruneStateDir } from "../core/state-dir.js";
 
 export const SCREENSHOTS_DIRNAME = ".reasonix/screenshots";
 
@@ -31,31 +32,9 @@ export function pruneScreenshots(
   maxFiles = 30,
   maxAgeMs = 3 * 86400 * 1000,
 ): void {
-  try {
-    const now = Date.now();
-    const files: Array<{ path: string; mtime: number }> = [];
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith(".png")) {
-        continue;
-      }
-      const fullPath = join(dir, entry.name);
-      try {
-        files.push({ path: fullPath, mtime: statSync(fullPath).mtimeMs });
-      } catch {
-        // Ignore transient stat errors
-      }
-    }
-    files.sort((a, b) => b.mtime - a.mtime);
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]!;
-      if (i < maxFiles && now - file.mtime <= maxAgeMs) continue;
-      try {
-        unlinkSync(file.path);
-      } catch {
-        // Ignore deletion error
-      }
-    }
-  } catch {
-    // Non-fatal if directory cannot be read
-  }
+  pruneStateDir(dir, {
+    match: (name) => name.startsWith(prefix) && name.endsWith(".png"),
+    maxAgeMs,
+    maxFiles,
+  });
 }

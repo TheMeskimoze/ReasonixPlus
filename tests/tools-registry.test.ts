@@ -225,7 +225,7 @@ describe("tools", () => {
       });
       const out = await reg.dispatch("bloat", "{}", { maxResultChars: 1000 });
       expect(out.length).toBeLessThan(2000);
-      expect(out).toMatch(/truncated/);
+      expect(out).toMatch(/omitted/);
     });
 
     it("passes results through unchanged when maxResultChars is absent", async () => {
