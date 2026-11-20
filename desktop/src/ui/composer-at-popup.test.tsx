@@ -303,6 +303,44 @@ describe("desktop Composer model catalog", () => {
     expect(tabs[0]!.querySelector(".model-menu-tab-tick")).toBeNull();
   });
 
+  it("shows the selected target on the pill and remembers it per session", () => {
+    const enabledModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
+    // Unique per run: the choice lives in localStorage, which outlives one test body.
+    const chatOne = `composer-target-one-${Date.now()}`;
+    const chatTwo = `composer-target-two-${Date.now()}`;
+    const props = (sessionName: string) =>
+      makeComposerBaseProps({
+        sessionName,
+        modelLabel: "deepseek-v4-flash",
+        subagentModelLabel: "deepseek-v4-pro",
+        enabledModels,
+        subagentsEnabled: true,
+        textareaRef: createRef<HTMLTextAreaElement>(),
+      });
+    const pill = (el: HTMLElement) =>
+      el.querySelector<HTMLElement>(
+        ".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)",
+      )!;
+    const { container, rerender } = render(<Composer {...props(chatOne)} />);
+
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("M");
+    expect(pill(container).textContent).toContain("deepseek-v4-flash");
+
+    // Switching the target moves the pill onto that target's model, notch included.
+    fireEvent.click(pill(container));
+    fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("S");
+    expect(pill(container).textContent).toContain("deepseek-v4-pro");
+
+    // Another chat opens on its own choice, and coming back restores the first one.
+    rerender(<Composer {...props(chatTwo)} />);
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("M");
+    expect(pill(container).textContent).toContain("deepseek-v4-flash");
+    rerender(<Composer {...props(chatOne)} />);
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("S");
+    expect(pill(container).textContent).toContain("deepseek-v4-pro");
+  });
+
   it("moves the target with the arrow keys, towards the pressed side", () => {
     const { container } = renderComposer({ enabledModels: ["deepseek-v4-flash"] });
     fireEvent.click(container.querySelector(".model-pill")!);

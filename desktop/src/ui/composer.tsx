@@ -35,6 +35,12 @@ import {
 } from "../model-catalog";
 import { type ModelCost, modelCost } from "../model-cost";
 import {
+  type ModelTarget,
+  readModelTarget,
+  resolveModelTarget,
+  writeModelTarget,
+} from "../model-target";
+import {
   BUILTIN_QUICK_SENDS,
   type EditMode,
   type QuickSend,
@@ -65,9 +71,6 @@ type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey }
 
 /** The composer's mutually-exclusive dropdowns — at most one is open at a time. */
 type MenuId = "model" | "effort" | "mode" | "quick";
-
-/** The two targets the one model pill edits through its tabs. */
-type ModelTarget = "agent" | "subagent";
 
 /** What the model menu needs for one target: its name, the model it holds and where a
  *  pick goes. One entry per target drives both the band and the list. */
@@ -431,6 +434,7 @@ export function Composer({
   modelLabel,
   subagentModelLabel = DEFAULT_MODEL,
   subagentsEnabled = false,
+  sessionName,
   reasoningEffort,
   supportedEfforts,
   onModelChange,
@@ -503,6 +507,9 @@ export function Composer({
   modelLabel: string;
   /** Subagent model shown in the menu's subagent tab. Defaults to the shared model default. */
   subagentModelLabel?: string;
+  /** The chat this composer edits. The model pill's target is remembered per session, so
+   *  switching tabs or chats restores the target that chat last used. */
+  sessionName?: string;
   /** Whether this session was minted with the subagent tool. Without the tool the
    *  subagent model has nothing to spawn, so its tab is hidden rather than
    *  disabled — the capability is frozen at chat creation, never toggled here. */
@@ -605,12 +612,21 @@ export function Composer({
   // One popup at a time from a single source of truth: `openMenu` names the only
   // menu that can be open, so opening one closes the others by itself.
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
-  // Which target the model pill's dropdown is editing. Every opening starts on the
-  // agent model, so the tab never depends on what was last changed.
-  const [modelTab, setModelTab] = useState<ModelTarget>("agent");
+  // Which target the model pill's band is on. It belongs to the chat, not the tab: the
+  // choice is stored per session, so a rebuild or a sibling tab shows the same target.
+  const [modelTab, setModelTab] = useState<ModelTarget>(() =>
+    readModelTarget(window.localStorage, sessionName),
+  );
   const menuWraps = useRef<Partial<Record<MenuId, HTMLDivElement | null>>>({});
+  const chooseModelTarget = (next: ModelTarget) => {
+    setModelTab(next);
+    writeModelTarget(window.localStorage, sessionName, next);
+  };
+  // The pill shows the target it will edit: that target's model, and the notch letter
+  // that names it, so the closed control never claims to hold the other one.
+  const modelTarget = resolveModelTarget(modelTab, subagentsEnabled);
+  const pillModel = modelTarget === "subagent" ? subagentModelLabel : modelLabel;
   const toggleMenu = (id: MenuId) => {
-    if (id === "model") setModelTab("agent");
     setOpenMenu((cur) => (cur === id ? null : id));
   };
   const closeMenu = () => setOpenMenu(null);
@@ -648,11 +664,13 @@ export function Composer({
     return () => window.removeEventListener("mousedown", onDown);
   }, [openMenu]);
 
-  // A session switch can take the subagent tab away. Reset the target so a later
-  // re-enable cannot bring the hidden tab back without a click.
+  // A session switch can take the subagent tab away. Follow the bound chat when it
+  // changes, and re-read when this tab becomes the visible one: a sibling tab on the
+  // same chat writes the same key, so the stored choice is the shared truth.
   useEffect(() => {
-    if (!subagentsEnabled) setModelTab("agent");
-  }, [subagentsEnabled]);
+    if (!shortcutsActive) return;
+    setModelTab(readModelTarget(window.localStorage, sessionName));
+  }, [sessionName, shortcutsActive]);
 
   const attachFile = async () => {
     try {
@@ -1356,17 +1374,17 @@ export function Composer({
 
           <div className="composer-foot">
             <ModelPickerPill
-              tag="M"
+              tag={modelTarget === "subagent" ? "S" : "M"}
               title={t("composer.switchModel")}
-              label={modelDisplayLabel(modelLabel, providerHints)}
-              cost={modelCost(modelLabel, providerHints, rateNow)}
+              label={modelDisplayLabel(pillModel, providerHints)}
+              cost={modelCost(pillModel, providerHints, rateNow)}
               open={openMenu === "model"}
               onToggle={() => toggleMenu("model")}
               wrapRef={anchor("model")}
               menu={
                 <ModelPickerMenu
-                  tab={modelTab}
-                  onTabChange={setModelTab}
+                  tab={modelTarget}
+                  onTabChange={chooseModelTarget}
                   subagentsEnabled={subagentsEnabled}
                   agentModel={modelLabel}
                   subagentModel={subagentModelLabel}

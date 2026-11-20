@@ -1507,21 +1507,23 @@ describe("composer-menu-headers", () => {
       expect(switched[0]!.getAttribute("aria-selected")).toBe("false");
     });
 
-    it("starts the model menu on the agent tab every time it opens", () => {
+    it("keeps the chosen target after the menu closes, on the pill and in the band", () => {
       const { container } = render(
         <Composer {...makeComposerBaseProps({ subagentsEnabled: true })} />,
       );
-      const trigger = container.querySelector<HTMLButtonElement>(".model-pill")!;
+      const trigger = container.querySelector<HTMLButtonElement>(
+        ".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)",
+      )!;
 
       fireEvent.click(trigger);
       fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
-      expect(container.querySelectorAll(".model-menu-tab")[1]?.getAttribute("aria-selected")).toBe(
-        "true",
-      );
+      fireEvent.click(trigger);
+      // The closed pill names the target it edits, notch included, instead of
+      // resetting to the agent model behind the user's back.
+      expect(trigger.getAttribute("data-pill-tag")).toBe("S");
 
       fireEvent.click(trigger);
-      fireEvent.click(trigger);
-      expect(container.querySelectorAll(".model-menu-tab")[0]?.getAttribute("aria-selected")).toBe(
+      expect(container.querySelectorAll(".model-menu-tab")[1]?.getAttribute("aria-selected")).toBe(
         "true",
       );
     });
@@ -1614,12 +1616,18 @@ describe("composer-menu-headers", () => {
       rerender(<Composer {...makeComposerBaseProps()} />);
       expect(container.querySelectorAll(".model-menu-tab")).toHaveLength(1);
       expect(container.querySelector('.popup-item[data-active="true"]')).not.toBeNull();
-
-      // Regaining the capability must not resurrect the tab the user left selected.
-      rerender(<Composer {...props} />);
+      // The closed pill cannot claim a target the chat no longer offers.
       expect(
-        container.querySelectorAll(".model-menu-tab")[0]?.getAttribute("aria-selected"),
-      ).toBe("true");
+        container
+          .querySelector(".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)")
+          ?.getAttribute("data-pill-tag"),
+      ).toBe("M");
+
+      // A chat that has the capability again restores the target it last used.
+      rerender(<Composer {...props} />);
+      expect(container.querySelectorAll(".model-menu-tab")[1]?.getAttribute("aria-selected")).toBe(
+        "true",
+      );
     });
   });
 });

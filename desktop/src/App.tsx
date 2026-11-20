@@ -5682,6 +5682,7 @@ const TabRuntime = memo(function TabRuntime({
                   state.settings?.subagentModel ?? state.settings?.model ?? DEFAULT_MODEL
                 }
                 subagentsEnabled={state.settings?.subagents ?? false}
+                sessionName={state.currentSession}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
                 supportedEfforts={state.settings?.modelEndpoint?.reasoningEfforts}
                 ollamaModels={ollamaModels}
