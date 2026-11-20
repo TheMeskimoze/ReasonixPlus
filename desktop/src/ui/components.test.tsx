@@ -13,7 +13,7 @@ import { THEME, THEME_STYLES } from "../theme";
 import { CardHead } from "./card-head";
 import { type ChangelogState, PageChangelog } from "./changelog";
 import { Composer } from "./composer";
-import { makeComposerBaseProps } from "./composer-test-fixtures";
+import { MODEL_PILL, makeComposerBaseProps } from "./composer-test-fixtures";
 import { EventsPanel, sessionEvents, turnEvents } from "./events";
 import { FitText, fitFontSize } from "./fit-text";
 import { StatusBar } from "./statusbar";
@@ -1511,9 +1511,7 @@ describe("composer-menu-headers", () => {
       const { container } = render(
         <Composer {...makeComposerBaseProps({ subagentsEnabled: true })} />,
       );
-      const trigger = container.querySelector<HTMLButtonElement>(
-        ".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)",
-      )!;
+      const trigger = container.querySelector<HTMLButtonElement>(MODEL_PILL)!;
 
       fireEvent.click(trigger);
       fireEvent.click(container.querySelectorAll(".model-menu-tab")[1]!);
@@ -1617,11 +1615,7 @@ describe("composer-menu-headers", () => {
       expect(container.querySelectorAll(".model-menu-tab")).toHaveLength(1);
       expect(container.querySelector('.popup-item[data-active="true"]')).not.toBeNull();
       // The closed pill cannot claim a target the chat no longer offers.
-      expect(
-        container
-          .querySelector(".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)")
-          ?.getAttribute("data-pill-tag"),
-      ).toBe("M");
+      expect(container.querySelector(MODEL_PILL)?.getAttribute("data-pill-tag")).toBe("M");
 
       // A chat that has the capability again restores the target it last used.
       rerender(<Composer {...props} />);

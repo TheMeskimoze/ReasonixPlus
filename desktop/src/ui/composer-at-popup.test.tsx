@@ -9,8 +9,9 @@ import {
 import { act, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeModelTarget } from "../model-target";
 import { Composer } from "./composer";
-import { makeComposerBaseProps } from "./composer-test-fixtures";
+import { MODEL_PILL, makeComposerBaseProps } from "./composer-test-fixtures";
 import { menuPopLeft } from "./menu-pop";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -317,10 +318,7 @@ describe("desktop Composer model catalog", () => {
         subagentsEnabled: true,
         textareaRef: createRef<HTMLTextAreaElement>(),
       });
-    const pill = (el: HTMLElement) =>
-      el.querySelector<HTMLElement>(
-        ".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)",
-      )!;
+    const pill = (el: HTMLElement) => el.querySelector<HTMLElement>(MODEL_PILL)!;
     const { container, rerender } = render(<Composer {...props(chatOne)} />);
 
     expect(pill(container).getAttribute("data-pill-tag")).toBe("M");
@@ -339,6 +337,33 @@ describe("desktop Composer model catalog", () => {
     rerender(<Composer {...props(chatOne)} />);
     expect(pill(container).getAttribute("data-pill-tag")).toBe("S");
     expect(pill(container).textContent).toContain("deepseek-v4-pro");
+  });
+
+  it("adopts a sibling tab's target when it becomes the visible one", () => {
+    const session = `composer-target-shared-${Date.now()}`;
+    const props = (shortcutsActive: boolean) =>
+      makeComposerBaseProps({
+        sessionName: session,
+        shortcutsActive,
+        subagentsEnabled: true,
+        modelLabel: "deepseek-v4-flash",
+        subagentModelLabel: "deepseek-v4-pro",
+        enabledModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        textareaRef: createRef<HTMLTextAreaElement>(),
+      });
+    const pill = (el: HTMLElement) => el.querySelector<HTMLElement>(MODEL_PILL)!;
+    const { container, rerender } = render(<Composer {...props(true)} />);
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("M");
+
+    // Hidden, this composer keeps what it had while the visible tab on the same chat
+    // writes the session's key.
+    rerender(<Composer {...props(false)} />);
+    writeModelTarget(localStorage, session, "subagent");
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("M");
+
+    // Shown again, it reads the shared key instead of its stale copy.
+    rerender(<Composer {...props(true)} />);
+    expect(pill(container).getAttribute("data-pill-tag")).toBe("S");
   });
 
   it("moves the target with the arrow keys, towards the pressed side", () => {

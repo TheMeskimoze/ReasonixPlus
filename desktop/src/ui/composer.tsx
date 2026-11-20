@@ -337,6 +337,8 @@ function ModelPickerMenu({
   onPickSubagent,
   listProps,
 }: {
+  /** Already resolved against the chat's capability: the band cannot open on a target
+   *  the list below does not offer. */
   tab: ModelTarget;
   onTabChange: (tab: ModelTarget) => void;
   subagentsEnabled: boolean;

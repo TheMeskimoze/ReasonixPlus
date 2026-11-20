@@ -14,7 +14,7 @@ export function modelTargetKey(session: string): string {
 }
 
 /** The target this session last chose. A chat with no stored choice, and a channel with
- *  no session yet, edit the agent model. */
+ *  no session yet, use the agent model. */
 export function readModelTarget(
   storage: Pick<Storage, "getItem">,
   session: string | undefined,

@@ -4,6 +4,9 @@ import type { ComponentProps } from "react";
 import { vi } from "vitest";
 import type { Composer } from "./composer";
 
+/** The model pill alone: the foot holds the effort and gate pills beside it. */
+export const MODEL_PILL = ".composer-foot .model-pill:not(.effort-pill):not(.mode-pill)";
+
 export function makeComposerBaseProps(
   overrides: Partial<ComponentProps<typeof Composer>> = {},
 ): ComponentProps<typeof Composer> {
