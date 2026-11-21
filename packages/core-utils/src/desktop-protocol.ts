@@ -305,6 +305,8 @@ export interface KernelSubagentProgressEvent extends KernelWireEventBase {
   task: string;
   skillName?: string;
   model?: string;
+  /** Reasoning effort the child loop ran with; also persisted on the result envelope. */
+  effort?: ReasoningEffort;
   phase?: "exploring" | "summarising";
   iter?: number;
   elapsedMs?: number;
@@ -441,7 +443,16 @@ export interface ChoiceRequiredEvent extends PickerWindow {
   allowCustom: boolean;
 }
 
-export interface PlanRequiredEvent extends PickerWindow {
+/** Identity every plan event carries, so a consumer can name the plan and the session
+ *  that owns it without reading the plan store or guessing from the transcript. */
+export interface PlanEventIdentity {
+  /** Session that owns the plan, when the event source knows it. */
+  sessionName?: string;
+  /** Store record the event belongs to, when it exists. */
+  planId?: string;
+}
+
+export interface PlanRequiredEvent extends PickerWindow, PlanEventIdentity {
   type: "$plan_required";
   id: number;
   plan: string;
@@ -451,7 +462,7 @@ export interface PlanRequiredEvent extends PickerWindow {
   callId?: string;
 }
 
-export interface CheckpointRequiredEvent {
+export interface CheckpointRequiredEvent extends PlanEventIdentity {
   type: "$checkpoint_required";
   id: number;
   stepId: string;
@@ -462,7 +473,7 @@ export interface CheckpointRequiredEvent {
   total: number;
 }
 
-export interface RevisionRequiredEvent extends PickerWindow {
+export interface RevisionRequiredEvent extends PickerWindow, PlanEventIdentity {
   type: "$revision_required";
   id: number;
   reason: string;
@@ -472,12 +483,16 @@ export interface RevisionRequiredEvent extends PickerWindow {
   summary?: string;
 }
 
-export interface StepCompletedEvent {
+export interface StepCompletedEvent extends PlanEventIdentity {
   type: "$step_completed";
   stepId: string;
   title?: string;
   result: string;
   notes?: string;
+  /** Plan status after the tool recorded this completion, when it wrote the plan. */
+  status?: string;
+  /** One-line evidence roll-up returned by the tool, so the rail need not re-read the plan. */
+  evidenceSummary?: string;
 }
 
 export interface PlanHistoryItem {
@@ -524,12 +539,14 @@ export type PlanDetailEvent = { type: "$plan_detail"; sessionName: string; plan:
 /** Seal the rail: the plan stopped being in flight (cancelled, aborted, or superseded by
  *  history on load), so its card ends. A DELETED plan is never sealed; the projection
  *  stops listing it, which is what removes the rail. */
-export type PlanClearedEvent = { type: "$plan_cleared" };
+export interface PlanClearedEvent extends PlanEventIdentity {
+  type: "$plan_cleared";
+}
 
 /** Hydrate the client's active plan from persisted disk state on session load /
  *  WebView reload — mirrors the $plan_required/step_completed shape so the
  *  ContextPanel and rail can rebuild the plan without a live turn. */
-export interface PlanRestoredEvent {
+export interface PlanRestoredEvent extends PlanEventIdentity {
   type: "$plan_restored";
   /** The store record this rail shows, so a later projection can tell a plan that still
    *  exists from one that was deleted under it. */

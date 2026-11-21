@@ -1646,6 +1646,41 @@ describe("subagent effort — the child thinks at the session's level", () => {
     await parent.dispatch("spawn_subagent", JSON.stringify({ task: "anything" }));
     expect(fake.captured[0]?.reasoning_effort).toBe("high");
   });
+
+  it("records the applied effort on every progress event and the result envelope", async () => {
+    const parent = new ToolRegistry();
+    const fake = makeFakeClient([{ content: "done" }]);
+    const { sink, events } = makeSink();
+    const result = await spawnSubagent({
+      client: fake.client,
+      parentRegistry: parent,
+      system: "review",
+      task: "say something",
+      model: "deepseek-v4-pro",
+      effort: "low",
+      sink,
+    });
+
+    expect(events.length).toBeGreaterThan(1);
+    expect(events.every((event) => event.effort === "low")).toBe(true);
+    expect(result.effort).toBe("low");
+    // The chat log keeps the tool result, not the live event stream: the envelope
+    // must carry the effort so a reloaded card can still name it.
+    expect(JSON.parse(formatSubagentResult(result)).effort).toBe("low");
+  });
+
+  it("records the constrained default when the host supplies no effort", async () => {
+    const parent = new ToolRegistry();
+    const fake = makeFakeClient([{ content: "done" }]);
+    const result = await spawnSubagent({
+      client: fake.client,
+      parentRegistry: parent,
+      system: "review",
+      task: "say something",
+      model: "deepseek-v4-pro",
+    });
+    expect(result.effort).toBe("high");
+  });
 });
 
 describe("subagent fan-out — one batch is one wave", () => {

@@ -23,6 +23,11 @@ export const REASONING_EFFORT_ORDER: readonly ReasoningEffort[] = [
 
 const EFFORT_SET: ReadonlySet<string> = new Set(REASONING_EFFORT_ORDER);
 
+/** Whether an untrusted value names a reasoning-effort level. */
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && EFFORT_SET.has(value);
+}
+
 export function modelReasoningContract(provider: string, model: string): ProviderReasoningRule {
   const spec = providerSpec(provider);
   const rule = spec?.reasoningRules.find((rule) => new RegExp(rule.pattern, "i").test(model));

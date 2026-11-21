@@ -948,11 +948,13 @@ describe("SubagentCard — model visibility", () => {
           elapsed_ms: 25223,
           cost_usd: 0.0062,
           model: "deepseek-v4-flash",
+          effort: "high",
           billing_kind: "usd",
         }),
       ),
     ).toEqual({
       model: "deepseek-v4-flash",
+      effort: "high",
       elapsedMs: 25223,
       turns: 6,
     });
@@ -980,6 +982,36 @@ describe("SubagentCard — model visibility", () => {
 
     const header = screen.getByRole("button", { name: /explore/ });
     expect(header.textContent).toContain("deepseek-v4-flash");
+  });
+
+  it("shows the model and effort each run used, in the header and its row", () => {
+    const { container } = render(
+      <SubagentCard
+        name="explore"
+        runs={[run, { ...run, runId: "run-2", effort: "high" as const }]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.querySelector(".meta-model")?.textContent).toBe("DS · deepseek-v4-flash");
+    expect(header.querySelector(".meta-effort")?.textContent).toBe("effort: high");
+    const rows = [...container.querySelectorAll(".sub-row .role")].map((el) => el.textContent);
+    expect(rows.some((text) => text?.includes("effort: high"))).toBe(true);
+  });
+
+  it("names each distinct effort when concurrent runs used different levels", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[
+          { ...run, runId: "run-low", effort: "low" as const },
+          { ...run, runId: "run-max", effort: "max" as const },
+        ]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.querySelector(".meta-effort")?.textContent).toBe("effort: low + effort: max");
   });
 
   it("shows the last 3 rows of thinking and process when subagent is running", () => {

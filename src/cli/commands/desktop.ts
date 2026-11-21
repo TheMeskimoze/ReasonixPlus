@@ -77,6 +77,7 @@ import type {
   OutputRateEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
+  PlanEventIdentity,
   PlanHistoryItem,
   PlanRequiredEvent,
   PlanRestoredEvent,
@@ -1112,6 +1113,7 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
         : redactDesktopDiagnosticMessage(ev.task, 120),
     ...(ev.skillName ? { skillName: redactDesktopDiagnosticMessage(ev.skillName, 80) } : {}),
     ...(ev.model ? { model: redactDesktopDiagnosticMessage(ev.model, 80) } : {}),
+    ...(ev.effort ? { effort: ev.effort } : {}),
     ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
     ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
     ...(ev.contextTokens !== undefined ? { contextTokens: ev.contextTokens } : {}),
@@ -1334,10 +1336,25 @@ function activePlanForTab(
   }
 }
 
+/** Identity every plan event shares. Unknown fields stay absent instead of being
+ *  serialized as `undefined`, so consumers can distinguish them from empty values. */
+function planEventIdentity(sessionName: string | undefined, planId?: string): PlanEventIdentity {
+  return {
+    ...(sessionName ? { sessionName } : {}),
+    ...(planId ? { planId } : {}),
+  };
+}
+
 /** Project an accepted mark_step_complete result into the rail's progress tick.
  *  Only JSON results carry a stepId; error/stop strings parse to nothing. */
 function emitAcceptedStep(tab: Tab, result: string): void {
-  let parsed: { stepId?: unknown; result?: unknown };
+  let parsed: {
+    stepId?: unknown;
+    result?: unknown;
+    planId?: unknown;
+    status?: unknown;
+    evidenceSummary?: unknown;
+  };
   try {
     parsed = JSON.parse(result);
   } catch {
@@ -1350,6 +1367,14 @@ function emitAcceptedStep(tab: Tab, result: string): void {
       type: "$step_completed",
       stepId: parsed.stepId,
       result: typeof parsed.result === "string" ? parsed.result : "",
+      ...planEventIdentity(
+        tab.currentSession,
+        typeof parsed.planId === "string" ? parsed.planId : undefined,
+      ),
+      ...(typeof parsed.status === "string" ? { status: parsed.status } : {}),
+      ...(typeof parsed.evidenceSummary === "string"
+        ? { evidenceSummary: parsed.evidenceSummary }
+        : {}),
     },
     tab.id,
   );
@@ -1370,6 +1395,7 @@ export function restorePlanForTab(
   return {
     type: "$plan_restored",
     planId: active.id,
+    ...planEventIdentity(tab.currentSession),
     plan: active.body,
     summary: active.summary,
     steps: active.steps,
@@ -1398,7 +1424,7 @@ function emitRestoredPlan(tab: Tab, hasPriorMessages: boolean): void {
     process.stderr.write(`reasonix: plan history read failed — ${messageOf(err)}\n`);
   }
   if (hasHistory) {
-    emit({ type: "$plan_cleared" }, tab.id);
+    emit({ type: "$plan_cleared", ...planEventIdentity(tab.currentSession) }, tab.id);
   }
 }
 
@@ -9114,7 +9140,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   function cancelPendingGates(tab: Tab): void {
-    const hadActivePlan = activePlanForTab(tab) !== null;
+    const active = activePlanForTab(tab);
+    const hadActivePlan = active !== null;
     const ids = [...tab.pendingGateIds];
     tab.pendingGateIds.clear();
     for (const id of ids) {
@@ -9123,7 +9150,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (hadActivePlan) {
       refreshPlanSummary(tab);
-      emit({ type: "$plan_cleared" }, tab.id);
+      emit({ type: "$plan_cleared", ...planEventIdentity(tab.currentSession, active?.id) }, tab.id);
     }
   }
 
@@ -9307,6 +9334,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         steps?: PlanStep[];
         summary?: string;
         callId?: string;
+        sessionName?: string;
+        planId?: string;
       };
       emit(
         {
@@ -9316,6 +9345,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           steps: payload.steps,
           summary: payload.summary,
           callId: payload.callId,
+          ...planEventIdentity(payload.sessionName || tab?.currentSession, payload.planId),
           ...countdown,
         },
         tabId,
@@ -9328,6 +9358,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         title?: string;
         result: string;
         notes?: string;
+        sessionName?: string;
+        planId?: string;
       };
       if (tab) refreshPlanSummary(tab);
       emit(
@@ -9340,6 +9372,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           notes: payload.notes,
           completed: tab ? tab.planSummary.completed : 0,
           total: tab ? tab.planSummary.total : 0,
+          ...planEventIdentity(payload.sessionName || tab?.currentSession, payload.planId),
         },
         tabId,
       );
@@ -9351,6 +9384,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         remainingSteps: PlanStep[];
         previousSteps?: PlanStep[];
         summary?: string;
+        sessionName?: string;
+        planId?: string;
       };
       emit(
         {
@@ -9360,6 +9395,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           remainingSteps: payload.remainingSteps,
           previousSteps: payload.previousSteps,
           summary: payload.summary,
+          ...planEventIdentity(payload.sessionName || tab?.currentSession, payload.planId),
           ...countdown,
         },
         tabId,
@@ -10132,8 +10168,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const tab = forgetGate(msg.id);
       if (tab && msg.response.type === "cancel") {
         // submit_plan records the cancelled verdict itself; just clear the rail.
+        const active = activePlanForTab(tab);
         refreshPlanSummary(tab);
-        emit({ type: "$plan_cleared" }, tab.id);
+        emit(
+          { type: "$plan_cleared", ...planEventIdentity(tab.currentSession, active?.id) },
+          tab.id,
+        );
       }
       pauseGate.resolve(msg.id, msg.response);
       return;

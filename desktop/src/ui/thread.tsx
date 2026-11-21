@@ -39,6 +39,7 @@ import { ZoomableImage } from "./image-preview";
 import { PdfPreview } from "./pdf-preview";
 import {
   type PlanStepChangeKind,
+  type PlanStepDiffRow,
   type PlanStepFieldChange,
   countPlanStepDiff,
   diffPlanSteps,
@@ -572,6 +573,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                       task: instruction || skillName,
                       skillName,
                       model: resultMeta.model ?? model,
+                      effort: resultMeta.effort,
                       status,
                       elapsedMs: resultMeta.elapsedMs,
                       turns: resultMeta.turns,
@@ -993,20 +995,98 @@ const PLAN_DIFF_MARK: Record<PlanStepChangeKind, string> = {
   unchanged: " ",
 };
 
-const PLAN_DIFF_TONE: Record<PlanStepChangeKind, string> = {
-  added: "var(--tone-ok)",
-  removed: "var(--tone-err)",
-  changed: "var(--tone-warn)",
-  unchanged: "var(--muted)",
-};
-
-function riskTone(risk: PlanStep["risk"]): string {
-  return risk === "high" ? "var(--tone-err)" : risk === "med" ? "var(--tone-warn)" : "var(--muted)";
+function planDiffKindLabel(kind: PlanStepChangeKind): string {
+  switch (kind) {
+    case "added":
+      return t("thread.planDiffAdded");
+    case "removed":
+      return t("thread.planDiffRemoved");
+    case "changed":
+      return t("thread.planDiffChanged");
+    case "unchanged":
+      return t("thread.planDiffUnchanged");
+  }
 }
 
-/** Render a `revise_plan` rewrite as a diff against the plan's current steps, so
- *  additions, edits and drops are visible instead of only the final list. Falls
- *  back to a plain list when the event carried no prior steps to compare. */
+function planDiffFieldLabel(field: PlanStepFieldChange["field"]): string {
+  switch (field) {
+    case "title":
+      return t("thread.planDiffFieldTitle");
+    case "action":
+      return t("thread.planDiffFieldAction");
+    case "risk":
+      return t("thread.planDiffFieldRisk");
+  }
+}
+
+function PlanRewriteColumn({
+  title,
+  rows,
+  side,
+}: {
+  title: string;
+  rows: readonly PlanStepDiffRow[];
+  side: "current" | "proposed";
+}) {
+  return (
+    <section className="plan-rewrite-col" data-side={side}>
+      <div className="plan-rewrite-head">
+        <span>{title}</span>
+        <span className="plan-rewrite-count">{rows.length}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="plan-rewrite-empty">
+          {side === "current" ? t("thread.planDiffNoPrevious") : t("thread.planDiffNoProposed")}
+        </div>
+      ) : (
+        <ul className="plan-rewrite-list">
+          {rows.map((row, index) => (
+            <li
+              key={`${row.kind}-${row.step.id}-${index}`}
+              className={`plan-diff-row plan-diff-${row.kind}`}
+              data-side={side}
+            >
+              <span className="plan-diff-mark" aria-hidden="true">
+                {PLAN_DIFF_MARK[row.kind]}
+              </span>
+              <div className="plan-diff-content">
+                <div className="plan-diff-title">{row.step.title}</div>
+                {row.step.action ? <div className="plan-diff-action">{row.step.action}</div> : null}
+                <div className="plan-diff-meta">
+                  {row.kind !== "unchanged" ? (
+                    <span className="plan-diff-kind">{planDiffKindLabel(row.kind)}</span>
+                  ) : null}
+                  {row.step.risk ? (
+                    <span className={`plan-diff-risk plan-diff-risk-${row.step.risk}`}>
+                      [{row.step.risk}]
+                    </span>
+                  ) : null}
+                </div>
+                {side === "proposed" && row.kind === "changed" && row.fields?.length ? (
+                  <ul className="plan-diff-fields">
+                    {row.fields.map((field) => (
+                      <li key={field.field}>
+                        <span className="plan-diff-field">{planDiffFieldLabel(field.field)}</span>
+                        {": "}
+                        <s>{field.from}</s>
+                        {" -> "}
+                        <span>{field.to}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Render a `revise_plan` rewrite as two columns, the plan as it stands and the plan
+ *  the tool proposes. Rows stay in each plan's own order so a reader compares the two
+ *  checklists directly instead of reconstructing them from a merged diff. */
 function PlanRewriteDiff({
   previousSteps,
   steps,
@@ -1014,106 +1094,32 @@ function PlanRewriteDiff({
   previousSteps?: PlanStep[];
   steps: PlanStep[];
 }) {
-  if (!previousSteps) {
-    return (
-      <ul style={{ margin: 0, paddingLeft: 18 }}>
-        {steps.map((s) => (
-          <li key={s.id} style={{ fontSize: 12, marginBottom: 2 }}>
-            {s.title}
-            {s.risk ? (
-              <span style={{ marginLeft: 6, fontSize: 10, color: riskTone(s.risk) }}>
-                [{s.risk}]
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  const rows = diffPlanSteps(previousSteps, steps);
+  const before = previousSteps ?? [];
+  const rows = diffPlanSteps(before, steps);
+  const byId = new Map(rows.map((row) => [row.step.id, row] as const));
+  const current = before.map((step): PlanStepDiffRow => {
+    const row = byId.get(step.id);
+    if (!row) return { kind: "removed", step };
+    return row.kind === "changed" ? { kind: "changed", step, fields: row.fields } : row;
+  });
+  const proposed = steps.map(
+    (step): PlanStepDiffRow => byId.get(step.id) ?? { kind: "added", step },
+  );
   const counts = countPlanStepDiff(rows);
-  const kindLabel = (kind: PlanStepChangeKind): string =>
-    kind === "added"
-      ? t("thread.planDiffAdded")
-      : kind === "removed"
-        ? t("thread.planDiffRemoved")
-        : kind === "changed"
-          ? t("thread.planDiffChanged")
-          : t("thread.planDiffUnchanged");
-  const fieldLabel = (field: PlanStepFieldChange["field"]): string =>
-    field === "title"
-      ? t("thread.planDiffFieldTitle")
-      : field === "action"
-        ? t("thread.planDiffFieldAction")
-        : t("thread.planDiffFieldRisk");
   return (
-    <>
-      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+    <div className="plan-rewrite">
+      <div className="plan-rewrite-summary">
         {t("thread.planDiffSummary", {
           added: counts.added,
           changed: counts.changed,
           removed: counts.removed,
         })}
       </div>
-      <ul className="plan-diff" style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-        {rows.map((row, index) => (
-          <li
-            key={`${row.kind}-${row.step.id}-${index}`}
-            className={`plan-diff-row plan-diff-${row.kind}`}
-            style={{ display: "flex", gap: 6, fontSize: 12, marginBottom: 3, lineHeight: 1.35 }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                width: 10,
-                flexShrink: 0,
-                fontFamily: "monospace",
-                color: PLAN_DIFF_TONE[row.kind],
-              }}
-            >
-              {PLAN_DIFF_MARK[row.kind]}
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <div>
-                <span
-                  className="plan-diff-title"
-                  style={{
-                    color: row.kind === "unchanged" ? "var(--muted)" : undefined,
-                    textDecoration: row.kind === "removed" ? "line-through" : undefined,
-                  }}
-                >
-                  {row.step.title}
-                </span>
-                {row.kind !== "unchanged" ? (
-                  <span style={{ marginLeft: 6, fontSize: 10, color: PLAN_DIFF_TONE[row.kind] }}>
-                    {kindLabel(row.kind)}
-                  </span>
-                ) : null}
-                {row.step.risk ? (
-                  <span style={{ marginLeft: 6, fontSize: 10, color: riskTone(row.step.risk) }}>
-                    [{row.step.risk}]
-                  </span>
-                ) : null}
-              </div>
-              {row.kind === "changed" && row.fields
-                ? row.fields.map((f) => (
-                    <div
-                      key={f.field}
-                      style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}
-                    >
-                      <span style={{ color: "var(--tone-warn)" }}>{fieldLabel(f.field)}</span>
-                      {": "}
-                      <span style={{ textDecoration: "line-through" }}>{f.from}</span>
-                      {" \u2192 "}
-                      <span>{f.to}</span>
-                    </div>
-                  ))
-                : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </>
+      <div className="plan-rewrite-grid">
+        <PlanRewriteColumn title={t("thread.planDiffCurrent")} rows={current} side="current" />
+        <PlanRewriteColumn title={t("thread.planDiffProposed")} rows={proposed} side="proposed" />
+      </div>
+    </div>
   );
 }
 

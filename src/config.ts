@@ -684,6 +684,7 @@ export function loadOllamaEndpoint(path: string = defaultConfigPath()): Resolved
 import {
   FEEDBACK_CUE_IDS,
   REASONING_EFFORT_ORDER,
+  isReasoningEffort,
   modelReasoningEfforts,
   resolveFeedbackCueAudio,
   resolveReasoningEffort,
@@ -707,19 +708,10 @@ import type {
 } from "@reasonix/core-utils";
 /** Single trust dial: read-only blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch; follow auto-approves reads and allowlisted shell but asks for every write and non-allowlisted command; ignore auto-approves everything. */
 export type { EditMode, OllamaGenerationPatch, OllamaGenerationSettings, ReasoningEffort };
+export { isReasoningEffort };
 export type { RuleEffect, RuleKind, RuleMatch, RuleMode, RuleScope };
 
 export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = REASONING_EFFORT_ORDER;
-
-export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh" ||
-    value === "max"
-  );
-}
 
 export type HistoryScrollMode = "auto" | "native" | "app";
 

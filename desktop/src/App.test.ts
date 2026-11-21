@@ -2382,6 +2382,152 @@ describe("Desktop App reducer — yolo interactive countdown", () => {
   });
 });
 
+describe("Desktop App reducer - plan event identity", () => {
+  const active = {
+    ...initialState(),
+    activePlan: {
+      planId: "plan-1",
+      plan: "P",
+      steps: [
+        { id: "s1", title: "one", action: "run" },
+        { id: "s2", title: "two", action: "run" },
+      ],
+      completedStepIds: [],
+      stepResults: {},
+      status: "active" as const,
+    },
+  };
+
+  it("keeps the plan and session identity on every gate card", () => {
+    let state = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$plan_required",
+        id: 1,
+        plan: "P",
+        sessionName: "mine",
+        planId: "plan-1",
+      },
+    });
+    expect(state.pendingPlans[0]).toMatchObject({ sessionName: "mine", planId: "plan-1" });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$checkpoint_required",
+        id: 2,
+        stepId: "s1",
+        result: "done",
+        completed: 1,
+        total: 2,
+        sessionName: "mine",
+        planId: "plan-1",
+      },
+    });
+    expect(state.pendingCheckpoints[0]).toMatchObject({ sessionName: "mine", planId: "plan-1" });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$revision_required",
+        id: 3,
+        reason: "scope changed",
+        remainingSteps: [{ id: "s2", title: "two", action: "run" }],
+        sessionName: "mine",
+        planId: "plan-1",
+      },
+    });
+    expect(state.pendingRevisions[0]).toMatchObject({ sessionName: "mine", planId: "plan-1" });
+  });
+
+  it("ignores checkpoints and revisions for a plan the rail is not showing", () => {
+    const checkpoint = reduce(active, {
+      t: "incoming",
+      event: {
+        type: "$checkpoint_required",
+        id: 20,
+        stepId: "s1",
+        result: "done",
+        completed: 1,
+        total: 2,
+        planId: "plan-2",
+      },
+    });
+    expect(checkpoint).toBe(active);
+
+    const revision = reduce(active, {
+      t: "incoming",
+      event: {
+        type: "$revision_required",
+        id: 21,
+        reason: "scope changed",
+        remainingSteps: [{ id: "s2", title: "two", action: "run" }],
+        planId: "plan-2",
+      },
+    });
+    expect(revision).toBe(active);
+
+    const matching = reduce(active, {
+      t: "incoming",
+      event: {
+        type: "$checkpoint_required",
+        id: 22,
+        stepId: "s1",
+        result: "done",
+        completed: 1,
+        total: 2,
+        planId: "plan-1",
+      },
+    });
+    expect(matching.pendingCheckpoints).toHaveLength(1);
+  });
+
+  it("hydrates the rail's id from the approved plan gate", () => {
+    const pending = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$plan_required", id: 4, plan: "P", planId: "plan-1" },
+    });
+    const approved = reduce(pending, { t: "resolve_plan", id: 4, verdict: { type: "approve" } });
+    expect(approved.activePlan?.planId).toBe("plan-1");
+  });
+
+  it("hydrates the rail's id from a step completion and ignores another plan's step", () => {
+    const activeWithoutId = {
+      ...active,
+      activePlan: { ...active.activePlan, planId: undefined },
+    };
+    const hydrated = reduce(activeWithoutId, {
+      t: "incoming",
+      event: { type: "$step_completed", stepId: "s1", result: "done", planId: "plan-1" },
+    });
+    expect(hydrated.activePlan).toMatchObject({
+      planId: "plan-1",
+      completedStepIds: ["s1"],
+      stepResults: { s1: "done" },
+    });
+
+    const stale = reduce(active, {
+      t: "incoming",
+      event: { type: "$step_completed", stepId: "s1", result: "other", planId: "plan-2" },
+    });
+    expect(stale).toBe(active);
+  });
+
+  it("ignores a clear for a plan the rail is not showing", () => {
+    const stale = reduce(active, {
+      t: "incoming",
+      event: { type: "$plan_cleared", planId: "plan-2" },
+    });
+    expect(stale).toBe(active);
+
+    const cleared = reduce(active, {
+      t: "incoming",
+      event: { type: "$plan_cleared", planId: "plan-1" },
+    });
+    expect(cleared.activePlan?.status).toBe("cancelled");
+  });
+});
+
 describe("desktop thread layout", () => {
   it("recomputes the thread cap from the latest viewport width", () => {
     const side = 244;

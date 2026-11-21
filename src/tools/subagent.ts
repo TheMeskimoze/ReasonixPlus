@@ -50,6 +50,8 @@ export interface SubagentEvent {
   task: string;
   skillName?: string;
   model?: string;
+  /** Reasoning effort the child loop ran with; mirrored in the persisted result envelope. */
+  effort?: ReasoningEffort;
   iter?: number;
   elapsedMs?: number;
   summary?: string;
@@ -184,6 +186,8 @@ export interface SubagentResult {
   toolIters: number;
   elapsedMs: number;
   model: string;
+  /** Reasoning effort handed to the child loop, after the subagent default is applied. */
+  effort?: ReasoningEffort;
   skillName?: string;
   /** Zero-filled when no API calls landed so consumers always see a valid shape. */
   usage: Usage;
@@ -340,6 +344,7 @@ function stepOrAbandon<T>(
 /** Errors captured in the result shape, never thrown — caller decides how to surface. */
 export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<SubagentResult> {
   const model = resolveSubagentModel(opts.model, opts.configPath);
+  const effort = opts.effort ?? DEFAULT_SUBAGENT_EFFORT;
   // The child inherits the parent's configured cap, so its enforced limit and the
   // denominator the UI's ctx meter displays are the same number the tab runs on.
   const contextMax = resolveContextTokens(model, opts.inherited?.ctxMaxOverride);
@@ -354,9 +359,10 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const startedAt = Date.now();
   /** Later events repeat it, so they carry a preview; START carries it whole. */
   const taskPreview = opts.task.length > 30 ? `${opts.task.slice(0, 30)}…` : opts.task;
-  const emit = (event: Omit<SubagentEvent, "parentCallId" | "parentTurn">): void => {
+  const emit = (event: Omit<SubagentEvent, "parentCallId" | "parentTurn" | "effort">): void => {
     sink?.current?.({
       ...event,
+      effort,
       ...(parentCallId ? { parentCallId } : {}),
       ...(parentTurn !== undefined ? { parentTurn } : {}),
     });
@@ -401,6 +407,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         toolIters: 0,
         elapsedMs: Date.now() - startedAt,
         model,
+        effort,
         skillName,
         usage: new Usage(),
       };
@@ -433,7 +440,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     // The child thinks on the session's current effort, so a delegated task reasons
     // as hard as the chat that commissioned it. Only a caller that hands no effort
     // down at all falls back to the constrained subagent budget.
-    reasoningEffort: opts.effort ?? DEFAULT_SUBAGENT_EFFORT,
+    reasoningEffort: effort,
     stream: true,
     session: sessionName,
     // ALWAYS on, regardless of the parent's config: a child has no operator to
@@ -718,6 +725,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     toolIters: toolIter,
     elapsedMs,
     model,
+    effort,
     skillName,
     usage,
     forcedSummary: forcedSummaryFired || undefined,
@@ -741,12 +749,13 @@ function aggregateChildUsage(loop: CacheFirstLoop): Usage {
 }
 
 export function formatSubagentResult(r: SubagentResult): string {
-  // Model metadata rides in the result envelope so the UI can render the model
-  // name even when the live `subagent.progress` event stream (which normally
-  // carries it) was never attached — e.g. after a session reload, where
+  // Model and effort metadata ride in the result envelope so the UI can render
+  // them even when the live `subagent.progress` event stream (which normally
+  // carries them) was never attached — e.g. after a session reload, where
   // `subagentRuns` is not persisted.
   const meta = {
     ...(r.model ? { model: r.model } : {}),
+    ...(r.effort ? { effort: r.effort } : {}),
     // The loop's own reason for stopping. Skipped when the forced summary body
     // already IS that text, so the parent does not read the same sentence twice.
     ...(r.stopReason && r.stopReason !== r.output ? { stop_reason: r.stopReason } : {}),

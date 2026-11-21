@@ -3,6 +3,8 @@ import {
   DEFAULT_MODEL,
   type MemoryWriteOptions,
   type PickerWindow,
+  type PlanEventIdentity,
+  type ReasoningEffort,
   type RuleRecord,
   SOUND_PACK_AUDIO_EXTENSIONS,
   compactionCardText,
@@ -340,6 +342,7 @@ export type SubagentRunProgress = {
   task: string;
   skillName?: string;
   model?: string;
+  effort?: ReasoningEffort;
   /** Dispatch wave this spawn ran in: >1 = parallel, 1 = sequential, absent = unknown. */
   waveSize?: number;
   phase?: "exploring" | "summarising";
@@ -453,7 +456,7 @@ export type PendingChoice = PickerWindow & {
   allowCustom: boolean;
 };
 
-export type PendingPlan = PickerWindow & {
+export type PendingPlan = PickerWindow & PlanEventIdentity & {
   id: number;
   plan: string;
   summary?: string;
@@ -477,7 +480,7 @@ export type ActivePlan = {
   callId?: string;
 };
 
-export type PendingCheckpoint = {
+export type PendingCheckpoint = PlanEventIdentity & {
   id: number;
   stepId: string;
   title?: string;
@@ -487,7 +490,7 @@ export type PendingCheckpoint = {
   total: number;
 };
 
-export type PendingRevision = PickerWindow & {
+export type PendingRevision = PickerWindow & PlanEventIdentity & {
   id: number;
   reason: string;
   remainingSteps: PlanStep[];
@@ -1556,6 +1559,7 @@ export function reduceAction(state: State, action: Action): State {
       if (removed && action.verdict.type === "approve") {
         const pendingSteps = (removed as PendingPlan & { steps?: PlanStep[] }).steps;
         activePlan = {
+          planId: removed.planId,
           plan: removed.plan,
           summary: removed.summary,
           steps: pendingSteps ?? [],
@@ -1593,6 +1597,9 @@ export function reduceAction(state: State, action: Action): State {
         const keptDone = activePlan.steps.filter((s) => doneIds.has(s.id));
         activePlan = {
           ...activePlan,
+          ...(activePlan.planId || removed.planId
+            ? { planId: activePlan.planId ?? removed.planId }
+            : {}),
           steps: [...keptDone, ...removed.remainingSteps],
         };
       }
@@ -2460,6 +2467,7 @@ export function applySubagentProgress(
     task: fullerSubagentTask(previous?.task, ev.task),
     skillName: ev.skillName ?? previous?.skillName,
     model: ev.model ?? previous?.model,
+    effort: ev.effort ?? previous?.effort,
     waveSize: ev.waveSize ?? previous?.waveSize,
     phase: ev.phase ?? previous?.phase,
     status: ev.action === "end" ? (ev.error ? "failed" : "done") : (previous?.status ?? "running"),
@@ -2503,6 +2511,12 @@ function dropStaleCompaction(state: State, ev: IncomingEvent): State {
     ...state,
     messages: state.messages.filter((m) => !stale(m)),
   };
+}
+
+/** Whether a plan-scoped event belongs to the rail's plan. Unknown ids on either
+ *  side cannot prove a mismatch, so those events apply and may hydrate the missing id. */
+function planEventMatchesActive(active: ActivePlan, planId?: string): boolean {
+  return planId === undefined || active.planId === undefined || planId === active.planId;
 }
 
 function applyIncomingInner(state: State, ev: IncomingEvent): State {
@@ -2721,12 +2735,15 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
             summary: ev.summary,
             countdownMs: ev.countdownMs,
             callId: ev.callId,
+            sessionName: ev.sessionName,
+            planId: ev.planId,
             ...(steps ? { steps } : {}),
           },
         ],
       };
     }
     case "$checkpoint_required":
+      if (state.activePlan && !planEventMatchesActive(state.activePlan, ev.planId)) return state;
       return {
         ...state,
         turnStatus: "waiting_user",
@@ -2741,10 +2758,13 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
             notes: ev.notes,
             completed: ev.completed,
             total: ev.total,
+            sessionName: ev.sessionName,
+            planId: ev.planId,
           },
         ],
       };
     case "$revision_required":
+      if (state.activePlan && !planEventMatchesActive(state.activePlan, ev.planId)) return state;
       return {
         ...state,
         turnStatus: "waiting_user",
@@ -2758,17 +2778,23 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
             previousSteps: ev.previousSteps,
             summary: ev.summary,
             countdownMs: ev.countdownMs,
+            sessionName: ev.sessionName,
+            planId: ev.planId,
           },
         ],
       };
     case "$step_completed": {
       if (!state.activePlan) return state;
+      if (!planEventMatchesActive(state.activePlan, ev.planId)) return state;
       const stepIds = new Set(state.activePlan.completedStepIds);
       stepIds.add(ev.stepId);
       return {
         ...state,
         activePlan: {
           ...state.activePlan,
+          ...(state.activePlan.planId || ev.planId
+            ? { planId: state.activePlan.planId ?? ev.planId }
+            : {}),
           completedStepIds: [...stepIds],
           stepResults: { ...state.activePlan.stepResults, [ev.stepId]: ev.result },
         },
@@ -2776,6 +2802,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
     }
     case "$plan_cleared": {
       if (!state.activePlan) return state;
+      if (!planEventMatchesActive(state.activePlan, ev.planId)) return state;
       const finished =
         state.activePlan.steps.length > 0 &&
         state.activePlan.completedStepIds.length >= state.activePlan.steps.length;

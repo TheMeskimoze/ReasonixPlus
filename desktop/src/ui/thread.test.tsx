@@ -770,7 +770,7 @@ describe("AssistantMsg - an open gate never stacks a second card", () => {
 describe("RevisionApprovalCard — plan rewrite diff", () => {
   const noop = () => {};
 
-  it("diffs the rewrite against the plan's current steps", () => {
+  it("renders the current and proposed plans in two columns", () => {
     const { container } = render(
       <RevisionApprovalCard
         r={{
@@ -789,21 +789,53 @@ describe("RevisionApprovalCard — plan rewrite diff", () => {
         onReject={noop}
       />,
     );
-    const kinds = [...container.querySelectorAll(".plan-diff-row")].map((el) => el.className);
-    expect(kinds).toEqual([
+    const columns = [...container.querySelectorAll(".plan-rewrite-col")];
+    expect(columns.map((el) => el.getAttribute("data-side"))).toEqual(["current", "proposed"]);
+    expect(container.textContent).toContain("Current remaining steps");
+    expect(container.textContent).toContain("Proposed remaining steps");
+
+    const left = [...columns[0]!.querySelectorAll(".plan-diff-row")].map((el) => el.className);
+    expect(left).toEqual([
       expect.stringContaining("plan-diff-unchanged"),
-      expect.stringContaining("plan-diff-added"),
       expect.stringContaining("plan-diff-removed"),
     ]);
-    expect(container.textContent).toContain("Gamma");
-    expect(container.textContent).toContain("Beta");
+    const right = [...columns[1]!.querySelectorAll(".plan-diff-row")].map((el) => el.className);
+    expect(right).toEqual([
+      expect.stringContaining("plan-diff-unchanged"),
+      expect.stringContaining("plan-diff-added"),
+    ]);
+    expect(columns[0]!.textContent).toContain("Beta");
+    expect(columns[1]!.textContent).toContain("Gamma");
+    expect(columns[1]!.textContent).toContain("c");
   });
 
-  it("falls back to a plain list when no previous steps are supplied", () => {
+  it("keeps both versions of a rewritten step and shows the changed fields", () => {
     const { container } = render(
       <RevisionApprovalCard
         r={{
           id: 2,
+          reason: "retitle",
+          previousSteps: [{ id: "s1", title: "Alpha", action: "old action" }],
+          remainingSteps: [{ id: "s1", title: "Alpha two", action: "new action" }],
+        }}
+        onAccept={noop}
+        onReject={noop}
+      />,
+    );
+    const columns = [...container.querySelectorAll(".plan-rewrite-col")];
+    expect(columns[0]!.textContent).toContain("Alpha");
+    expect(columns[0]!.textContent).toContain("old action");
+    expect(columns[1]!.textContent).toContain("Alpha two");
+    expect(columns[1]!.textContent).toContain("new action");
+    expect(columns[1]!.textContent).toContain("title: Alpha -> Alpha two");
+    expect(columns[1]!.querySelector(".plan-diff-changed")).toBeTruthy();
+  });
+
+  it("shows an empty current column when the event carried no prior steps", () => {
+    const { container } = render(
+      <RevisionApprovalCard
+        r={{
+          id: 3,
           reason: "legacy event",
           remainingSteps: [{ id: "s1", title: "Only", action: "x" }],
         }}
@@ -811,8 +843,11 @@ describe("RevisionApprovalCard — plan rewrite diff", () => {
         onReject={noop}
       />,
     );
-    expect(container.querySelectorAll(".plan-diff-row")).toHaveLength(0);
-    expect(container.textContent).toContain("Only");
+    const columns = [...container.querySelectorAll(".plan-rewrite-col")];
+    expect(columns).toHaveLength(2);
+    expect(columns[0]!.textContent).toContain("No prior steps");
+    expect(columns[1]!.textContent).toContain("Only");
+    expect(columns[1]!.querySelector(".plan-diff-added")).toBeTruthy();
   });
 });
 

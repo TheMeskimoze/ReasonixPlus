@@ -11250,3 +11250,142 @@ html[data-platform="macos"] .splash {
   background: var(--panel);
   color: var(--text);
 }
+
+/* Plan rewrite card: the current and proposed remaining steps side by side. */
+.plan-rewrite {
+  margin-top: 4px;
+}
+.plan-rewrite-summary {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.plan-rewrite-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 10px;
+}
+.plan-rewrite-col {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.plan-rewrite-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+.plan-rewrite-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 500;
+}
+.plan-rewrite-empty {
+  padding: 6px 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.plan-rewrite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plan-diff-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.plan-diff-row:last-child {
+  border-bottom: 0;
+}
+.plan-diff-mark {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 12px;
+}
+.plan-diff-content {
+  min-width: 0;
+}
+.plan-diff-title,
+.plan-diff-action {
+  overflow-wrap: anywhere;
+}
+.plan-diff-title {
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.plan-diff-action {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.plan-diff-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.plan-diff-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.plan-diff-risk {
+  font-size: 10px;
+}
+.plan-diff-risk-high {
+  color: var(--tone-err);
+}
+.plan-diff-risk-med {
+  color: var(--tone-warn);
+}
+.plan-diff-risk-low {
+  color: var(--muted);
+}
+.plan-diff-added .plan-diff-mark,
+.plan-diff-added .plan-diff-kind,
+.plan-diff-added .plan-diff-title,
+.plan-diff-added .plan-diff-action {
+  color: var(--tone-ok);
+}
+.plan-diff-removed .plan-diff-mark,
+.plan-diff-removed .plan-diff-kind,
+.plan-diff-removed .plan-diff-title,
+.plan-diff-removed .plan-diff-action {
+  color: var(--tone-err);
+}
+.plan-diff-removed .plan-diff-title,
+.plan-diff-removed .plan-diff-action {
+  text-decoration: line-through;
+}
+.plan-diff-changed .plan-diff-mark,
+.plan-diff-changed .plan-diff-kind,
+.plan-diff-changed .plan-diff-title,
+.plan-diff-changed .plan-diff-action {
+  color: var(--tone-warn);
+}
+.plan-diff-fields {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.plan-diff-field {
+  color: var(--tone-warn);
+  font-weight: 600;
+}
+.plan-diff-fields s {
+  color: var(--tone-err);
+}

@@ -2045,6 +2045,18 @@ describe("desktop-subagent-progress", () => {
       expect(later?.waveSize).toBeUndefined();
     });
 
+    it("carries the effort the child loop ran with", () => {
+      expect(
+        projectSubagentEvent({
+          kind: "start",
+          runId: "sub-1",
+          task: "review changes",
+          model: "deepseek-v4-flash",
+          effort: "high",
+        }),
+      ).toMatchObject({ action: "start", model: "deepseek-v4-flash", effort: "high" });
+    });
+
     it("still redacts credentials in the full task", () => {
       const start = projectSubagentEvent({
         kind: "start",

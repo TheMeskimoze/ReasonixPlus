@@ -1,4 +1,10 @@
-import { type NoticeSeverity, modelDisplayLabel, sanitizeTerminalText } from "@reasonix/core-utils";
+import {
+  type NoticeSeverity,
+  type ReasoningEffort,
+  isReasoningEffort,
+  modelDisplayLabel,
+  sanitizeTerminalText,
+} from "@reasonix/core-utils";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { type CSSProperties, type ReactNode, memo, useContext, useMemo, useState } from "react";
@@ -1175,15 +1181,22 @@ function dotJoin(parts: ReadonlyArray<string | number | null | undefined>): stri
     .join(" · ");
 }
 
+/** One spelling for an effort level everywhere the subagent card shows it. */
+function effortLabel(effort: ReasoningEffort): string {
+  return t("cards.subagentEffort", { effort });
+}
+
 export type SubagentResultMeta = {
   model?: string;
+  effort?: ReasoningEffort;
   elapsedMs?: number;
   turns?: number;
 };
 
-/** Recover model metadata from the subagent's persisted result envelope. The
- *  live `subagent.progress` stream carries it on `subagentRuns`, but after a session
- *  reload `subagentRuns` is not persisted — the result JSON is the reliable source. */
+/** Recover model and effort metadata from the subagent's persisted result envelope.
+ *  The live `subagent.progress` stream carries them on `subagentRuns`, but after a
+ *  session reload `subagentRuns` is not persisted, so the result JSON is the reliable
+ *  source. */
 export function extractSubagentResultMeta(result?: string): SubagentResultMeta {
   if (!result) return {};
   try {
@@ -1191,6 +1204,7 @@ export function extractSubagentResultMeta(result?: string): SubagentResultMeta {
     if (!parsed || typeof parsed !== "object") return {};
     const out: SubagentResultMeta = {};
     if (typeof parsed.model === "string") out.model = parsed.model;
+    if (isReasoningEffort(parsed.effort)) out.effort = parsed.effort;
     if (typeof parsed.elapsed_ms === "number") out.elapsedMs = parsed.elapsed_ms;
     if (typeof parsed.turns === "number") out.turns = parsed.turns;
     return out;
@@ -1399,6 +1413,9 @@ export function SubagentCard({
   const instruction = useMemo(() => subagentInstruction(args), [args]);
   const done = runs.filter((run) => run.status === "done").length;
   const models = [...new Set(runs.flatMap((run) => (run.model ? [run.model] : [])))];
+  const efforts = [
+    ...new Set(runs.flatMap((run) => (run.effort ? [effortLabel(run.effort)] : []))),
+  ];
   const contexts = runs.flatMap((run) =>
     run.contextTokens !== undefined ? [tokenLabel(run.contextTokens)] : [],
   );
@@ -1468,6 +1485,11 @@ export function SubagentCard({
           {models.length > 0 ? (
             <span className="meta-model">
               {models.map((m) => modelDisplayLabel(m)).join(" + ")}
+            </span>
+          ) : null}
+          {efforts.length > 0 ? (
+            <span className="meta-effort" title={t("cards.subagentEffortTitle")}>
+              {efforts.join(" + ")}
             </span>
           ) : null}
           {contexts.length > 0 ? (
@@ -1549,6 +1571,7 @@ export function SubagentCard({
                 <span className="role sub-run-stats">
                   {dotJoin([
                     run.model ? modelDisplayLabel(run.model) : null,
+                    run.effort ? effortLabel(run.effort) : null,
                     run.phase,
                     run.iter !== undefined ? `${run.iter} tools` : null,
                     run.elapsedMs !== undefined ? formatDuration(run.elapsedMs) : null,
