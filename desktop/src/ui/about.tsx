@@ -5,7 +5,6 @@ import { useCallback, useState } from "react";
 import { formatBytes } from "../format";
 import { t } from "../i18n";
 import { I } from "../icons";
-import { escapeHandler, useEscapeToClose } from "./keyboard";
 
 const REPO_URL = "https://github.com/Ultikynnys/ReasonixPlus";
 const RELEASES_PAGE = `${REPO_URL}/releases`;
@@ -19,8 +18,7 @@ type CheckState =
   | { kind: "installing"; latest: string }
   | { kind: "error"; message: string; source: "check" | "install" };
 
-export function AboutModal({ onClose }: { onClose: () => void }) {
-  useEscapeToClose(onClose);
+export function AboutPanel() {
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
 
   const openGitHub = useCallback(() => {
@@ -77,55 +75,40 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   return (
-    <div className="about-mask" onClick={onClose} onKeyDown={escapeHandler(onClose)} tabIndex={-1}>
-      <div
-        className="about-modal"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
+    <>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("about.version")}</div>
+        </div>
+        <code className="about-value">{__APP_VERSION__}</code>
+      </div>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("about.repo")}</div>
+        </div>
+        <button type="button" className="about-link" onClick={openGitHub}>
+          <I.link size={12} />
+          <span>Ultikynnys/ReasonixPlus</span>
+        </button>
+      </div>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("about.updates")}</div>
+        </div>
         <button
           type="button"
-          className="about-close"
-          onClick={onClose}
-          aria-label={t("about.close")}
+          className="btn small"
+          onClick={checkForUpdates}
+          disabled={
+            check.kind === "checking" || check.kind === "downloading" || check.kind === "installing"
+          }
         >
-          <I.x size={14} />
+          <I.rotate size={12} />
+          <span>{check.kind === "checking" ? t("about.checking") : t("about.checkUpdates")}</span>
         </button>
-        <div className="about-brand">
-          <div className="about-name">Reasonix+</div>
-          <div className="about-tagline">{t("about.tagline")}</div>
-        </div>
-        <div className="about-meta">
-          <div className="about-row">
-            <span className="about-label">{t("about.version")}</span>
-            <code className="about-value">{__APP_VERSION__}</code>
-          </div>
-          <div className="about-row">
-            <span className="about-label">{t("about.repo")}</span>
-            <button type="button" className="about-link" onClick={openGitHub}>
-              <I.link size={12} />
-              <span>Ultikynnys/ReasonixPlus</span>
-            </button>
-          </div>
-        </div>
-        <div className="about-actions">
-          <button
-            type="button"
-            className="about-check"
-            onClick={checkForUpdates}
-            disabled={
-              check.kind === "checking" ||
-              check.kind === "downloading" ||
-              check.kind === "installing"
-            }
-          >
-            <I.rotate size={12} />
-            <span>{check.kind === "checking" ? t("about.checking") : t("about.checkUpdates")}</span>
-          </button>
-          <CheckStatus check={check} onOpenReleases={openReleases} onInstall={installUpdate} />
-        </div>
       </div>
-    </div>
+      <CheckStatus check={check} onOpenReleases={openReleases} onInstall={installUpdate} />
+    </>
   );
 }
 

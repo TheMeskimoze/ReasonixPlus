@@ -55,8 +55,10 @@ const baseSettings: Settings = {
 
 const baseProps = {
   settings: baseSettings,
-  fontScale: "medium" as const,
-  onSetFontScale: vi.fn(),
+  textSizePx: 14,
+  themeStyle: "graphite" as const,
+  onSetThemeStyle: vi.fn(),
+  onSetTextSize: vi.fn(),
   fontFamily: "sans" as const,
   onSetFontFamily: vi.fn(),
   customFontFamily: "",
@@ -134,14 +136,18 @@ describe("PageModels default-model enum", () => {
     container.querySelectorAll<HTMLButtonElement>(".provider-head").forEach((button) => {
       if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button);
     });
-    expect(container.querySelectorAll(".setting-row-base-url")).toHaveLength(0);
+    expect(container.querySelectorAll(".provider-settings-col .setting-row-base-url")).toHaveLength(
+      0,
+    );
     const declaredKeys = PROVIDER_SPECS.reduce(
       (count, spec) =>
         count +
         spec.settings.filter((setting) => setting.kind === "secret" || setting.editable).length,
       0,
     );
-    expect(container.querySelectorAll(".setting-row-entry")).toHaveLength(declaredKeys);
+    expect(container.querySelectorAll(".provider-settings-col .setting-row-entry")).toHaveLength(
+      declaredKeys,
+    );
   });
 
   it("saves the local server URL and lists qualified server aliases", () => {
@@ -189,7 +195,9 @@ describe("PageModels default-model enum", () => {
     container.querySelectorAll<HTMLButtonElement>(".provider-head").forEach((button) => {
       if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button);
     });
-    const inputs = container.querySelectorAll<HTMLInputElement>('input[type="password"]');
+    const inputs = container.querySelectorAll<HTMLInputElement>(
+      '.provider-settings-col input[type="password"]',
+    );
     expect(inputs.length).toBeGreaterThan(2);
     for (const input of inputs) {
       const row = input.closest(".setting-row-entry") as HTMLElement;
@@ -302,21 +310,18 @@ describe("PageModels default-model enum", () => {
     expect(cleared).toBeGreaterThan(0);
   });
 
-  it("keeps provider-column button rows where the stacking rule applies", () => {
+  it("keeps provider settings rows in the page's own row vocabulary", () => {
     const { container } = render(<SettingsModal {...baseProps} initialPage="models" />);
-    container.querySelectorAll<HTMLButtonElement>(".provider-head").forEach((button) => {
+    for (const button of container.querySelectorAll<HTMLButtonElement>(".provider-head")) {
       if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button);
-    });
-    // The OpenCode/OpenAI "Sign in" and "Refresh" rows sit in the half-width
-    // settings column, so `.provider-col .setting-row:has(button)` must match
-    // them (and stack them) rather than the rule going stale against markup.
-    const buttonRows = Array.from(
-      container.querySelectorAll(".provider-col .setting-row:has(button)"),
-    );
-    expect(buttonRows.length).toBeGreaterThan(0);
-    buttonRows.forEach((row) => {
+    }
+    // The settings block now sits above the model list at the card's full width, so its
+    // rows are the same label-left / control-right rows a page uses.
+    const rows = Array.from(container.querySelectorAll(".provider-settings-col .setting-row"));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
       expect(row.firstElementChild?.className).toBe("l");
-    });
+    }
   });
 
   it("lists the enabled models and switching sets both main and subagent model", () => {
@@ -387,13 +392,13 @@ describe("PageModels default-model enum", () => {
     });
     const searches = screen.getAllByPlaceholderText("Search models") as HTMLInputElement[];
     const search = searches.find(
-      (input) => (input.closest(".provider-col")?.querySelector(".mcard") ?? null) !== null,
+      (input) => (input.closest(".provider-models-col")?.querySelector(".mcard") ?? null) !== null,
     );
     expect(search).toBeTruthy();
     // The search box sits on its own row, never inside the count / enable-all row.
     expect(search?.closest(".provider-models-search")).toBeTruthy();
     expect(search?.closest(".provider-models-head")).toBeNull();
-    const col = search?.closest(".provider-col") as HTMLElement;
+    const col = search?.closest(".provider-models-col") as HTMLElement;
     expect(col.querySelectorAll(".mcard").length).toBeGreaterThan(0);
     fireEvent.change(search as HTMLInputElement, { target: { value: "zzz-no-such-model" } });
     expect(col.querySelectorAll(".mcard")).toHaveLength(0);
@@ -421,7 +426,7 @@ describe("PageModels default-model enum", () => {
       (button) => button.textContent?.includes("Experiential Labs"),
     );
     fireEvent.click(head!);
-    const column = head?.closest(".provider-card")?.querySelector(".provider-col");
+    const column = head?.closest(".provider-card")?.querySelector(".provider-models-col");
     // The card also keeps the provider's declared ids, so the live list is a floor.
     expect(column?.querySelectorAll(".mcard").length).toBeGreaterThanOrEqual(catalog.length);
     for (const id of ["gateway-model-0", "gateway-model-299"]) {
@@ -647,24 +652,25 @@ describe("Search tab", () => {
 
   it("renders the selected engine's declared fields", () => {
     const onSave = vi.fn();
-    render(
+    const { container } = render(
       <SettingsModal
         {...baseProps}
         settings={{ ...baseSettings, webSearchEngine: "tavily" }}
         onSave={onSave}
-        initialPage="search"
+        initialPage="models"
       />,
     );
-    expect(screen.getByText("Tavily API key")).toBeTruthy();
-    const input = document.querySelector('input[type="password"]') as HTMLInputElement;
+    const tavily = cardFor(container, "tavily");
+    expect(within(tavily).getByText("Tavily API key")).toBeTruthy();
+    const input = tavily.querySelector('input[type="password"]') as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  tv-secret  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(within(tavily).getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledWith({ searchSettings: { tavily: { apiKey: "tv-secret" } } });
   });
 
   it("clears a saved search engine key", () => {
     const onSave = vi.fn();
-    render(
+    const { container } = render(
       <SettingsModal
         {...baseProps}
         settings={{
@@ -673,15 +679,15 @@ describe("Search tab", () => {
           searchSettings: { tavily: { apiKey: "tv-sec…ret" } },
         }}
         onSave={onSave}
-        initialPage="search"
+        initialPage="models"
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    fireEvent.click(within(cardFor(container, "tavily")).getByRole("button", { name: "Clear" }));
     expect(onSave).toHaveBeenCalledWith({ searchSettings: { tavily: { apiKey: "" } } });
   });
 
   it("shows a pointer note and no key input for an engine that reuses a provider key", () => {
-    render(
+    const { container } = render(
       <SettingsModal
         {...baseProps}
         settings={{
@@ -689,66 +695,74 @@ describe("Search tab", () => {
           webSearchEngine: "zai",
           providerSettings: { zai: { apiKey: "z•••key" } },
         }}
-        initialPage="search"
+        initialPage="models"
       />,
     );
     // The key is the model provider's: one variable, one input, on the Models tab.
-    expect(document.querySelector('input[type="password"]')).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(screen.getByText(/Models tab/)).toBeTruthy();
+    const zai = cardFor(container, "zai");
+    expect(zai.querySelector('input[type="password"]')).toBeNull();
+    expect(within(zai).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(within(zai).getByText(/Models tab/)).toBeTruthy();
   });
 
   it("renders the SearXNG endpoint from the declaration", () => {
-    render(
+    const { container } = render(
       <SettingsModal
         {...baseProps}
         settings={{ ...baseSettings, webSearchEngine: "searxng" }}
-        initialPage="search"
+        initialPage="models"
       />,
     );
-    expect(screen.getByText("SearXNG endpoint")).toBeTruthy();
-    const input = document.querySelector(".setting-row-base-url input") as HTMLInputElement;
+    const searx = cardFor(container, "searxng");
+    expect(within(searx).getByText("SearXNG endpoint")).toBeTruthy();
+    const input = searx.querySelector(".setting-row-base-url input") as HTMLInputElement;
     expect(input.placeholder).toBe("http://localhost:8080");
   });
 
   const searchCards = (container: HTMLElement): HTMLElement[] =>
-    Array.from(container.querySelectorAll<HTMLElement>(".provider-card"));
+    Array.from(container.querySelectorAll<HTMLElement>('[data-section="search"] .tile'));
+
+  /** The Search section, so a count never picks up the provider cards above it. */
+  const searchSection = (container: HTMLElement): HTMLElement =>
+    container.querySelector<HTMLElement>('[data-section="search"]')!;
 
   const cardFor = (container: HTMLElement, id: string): HTMLElement =>
     searchCards(container)[SEARCH_ENGINE_SPECS.findIndex((spec) => spec.id === id)]!;
 
-  it("renders one card per declared engine, titled from the declarations", () => {
+  it("renders one tile per declared engine, titled from the declarations", () => {
     const { container } = render(
       <SettingsModal
         {...baseProps}
         settings={{ ...baseSettings, webSearchEngine: "tavily" }}
-        initialPage="search"
+        initialPage="models"
       />,
     );
-    const titles = Array.from(container.querySelectorAll(".provider-head .provider-title"));
+    const titles = Array.from(searchSection(container).querySelectorAll(".tile-title"));
     expect(titles.map((title) => title.textContent)).toEqual(
       SEARCH_ENGINE_SPECS.map((spec) => spec.label),
     );
   });
 
-  it("marks the active engine in its header and expands only that card", () => {
-    const { container } = render(<SettingsModal {...baseProps} initialPage="search" />);
+  it("marks the active engine in its action slot and offers the switch nowhere else", () => {
+    const { container } = render(<SettingsModal {...baseProps} initialPage="models" />);
     const bing = cardFor(container, "bing");
-    // bing is the default engine: marked active, switch-to-self offered nowhere, card open.
+    // bing is the default engine: marked active, switch-to-self offered nowhere.
+    expect(bing.getAttribute("data-active")).toBe("true");
     expect(within(bing).getByText("✓ Active")).toBeTruthy();
     expect(within(bing).queryByRole("button", { name: "Use this engine" })).toBeNull();
     expect(
       within(bing).getByText("No setup needed: this engine works without a key or endpoint."),
     ).toBeTruthy();
-    // Every other engine's fields stay collapsed until its card is expanded.
-    expect(screen.getAllByText("✓ Active")).toHaveLength(1);
-    expect(container.querySelectorAll(".provider-body")).toHaveLength(1);
+    // Exactly one engine is active, and no tile collapses: every engine shows its own fields.
+    expect(within(searchSection(container)).getAllByText("✓ Active")).toHaveLength(1);
+    expect(searchSection(container).querySelectorAll(".provider-body")).toHaveLength(0);
+    expect(within(cardFor(container, "tavily")).getByText("Tavily API key")).toBeTruthy();
   });
 
   it("switches the active engine from another engine's card", () => {
     const onSave = vi.fn();
     const { container } = render(
-      <SettingsModal {...baseProps} onSave={onSave} initialPage="search" />,
+      <SettingsModal {...baseProps} onSave={onSave} initialPage="models" />,
     );
     const bingIntl = cardFor(container, "bing-intl");
     fireEvent.click(within(bingIntl).getByRole("button", { name: "Use this engine" }));
@@ -756,7 +770,7 @@ describe("Search tab", () => {
   });
 
   it("keeps a keyed engine unselectable until its key is set", () => {
-    const { container } = render(<SettingsModal {...baseProps} initialPage="search" />);
+    const { container } = render(<SettingsModal {...baseProps} initialPage="models" />);
     const tavily = cardFor(container, "tavily");
     const use = within(tavily).getByRole("button", { name: "Use this engine" });
     expect((use as HTMLButtonElement).disabled).toBe(true);
@@ -767,7 +781,7 @@ describe("Search tab", () => {
       <SettingsModal
         {...baseProps}
         settings={{ ...baseSettings, searchSettings: { tavily: { apiKey: "tv-secret" } } }}
-        initialPage="search"
+        initialPage="models"
       />,
     );
     const ready = within(cardFor(keyed.container, "tavily")).getByRole("button", {
@@ -781,7 +795,7 @@ describe("Search tab", () => {
       <SettingsModal
         {...baseProps}
         mcpExtensionStatus={extensionStatusWith("webkit", "missing")}
-        initialPage="search"
+        initialPage="models"
       />,
     );
     const blocked = within(cardFor(missing.container, "playwright-webkit")).getByRole("button", {
@@ -795,7 +809,7 @@ describe("Search tab", () => {
       <SettingsModal
         {...baseProps}
         mcpExtensionStatus={extensionStatusWith("webkit", "installed")}
-        initialPage="search"
+        initialPage="models"
       />,
     );
     const ready = within(cardFor(installed.container, "playwright-webkit")).getByRole("button", {
@@ -804,7 +818,7 @@ describe("Search tab", () => {
     expect((ready as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("opens the engine card that becomes active", () => {
+  it("moves the active marker to the engine that is picked", () => {
     function StatefulSearch() {
       const [settings, setSettings] = useState<Settings>(baseSettings);
       return (
@@ -814,29 +828,32 @@ describe("Search tab", () => {
           // A patch only carries keys it changes, so the merge is the state type;
           // asserted here because an empty declaration set widens the patch maps.
           onSave={(patch) => setSettings((current) => ({ ...current, ...patch }) as Settings)}
-          initialPage="search"
+          initialPage="models"
         />
       );
     }
 
     const { container } = render(<StatefulSearch />);
-    // Collapsed until it is chosen, then opened onto its own fields.
-    expect(within(cardFor(container, "bing-intl")).queryByText(/No setup needed/)).toBeNull();
+    expect(within(cardFor(container, "bing")).getByText("✓ Active")).toBeTruthy();
     fireEvent.click(
       within(cardFor(container, "bing-intl")).getByRole("button", { name: "Use this engine" }),
     );
+    expect(cardFor(container, "bing-intl").getAttribute("data-active")).toBe("true");
     expect(within(cardFor(container, "bing-intl")).getByText("✓ Active")).toBeTruthy();
-    expect(within(cardFor(container, "bing-intl")).getByText(/No setup needed/)).toBeTruthy();
+    expect(
+      within(cardFor(container, "bing")).getByRole("button", { name: "Use this engine" }),
+    ).toBeTruthy();
   });
 
-  it("expands an engine card without switching the active engine", () => {
+  it("shows every engine's own fields without a switch, and a switch only on the action", () => {
     const onSave = vi.fn();
     const { container } = render(
-      <SettingsModal {...baseProps} onSave={onSave} initialPage="search" />,
+      <SettingsModal {...baseProps} onSave={onSave} initialPage="models" />,
     );
+    // Nothing collapses, so a field is reachable without choosing the engine first.
     const tavily = cardFor(container, "tavily");
-    fireEvent.click(within(tavily).getByRole("button", { name: "Tavily" }));
     expect(within(tavily).getByText("Tavily API key")).toBeTruthy();
+    expect(tavily.querySelector('input[type="password"]')).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
   });
 });
@@ -860,9 +877,7 @@ describe("OpenCode free-tier status placement", () => {
 
   /** Renders the Models page with the OpenCode card expanded. */
   function renderOpencodeCard(props: Record<string, unknown>) {
-    const rendered = render(
-      <SettingsModal {...baseProps} initialPage="models" {...props} />,
-    );
+    const rendered = render(<SettingsModal {...baseProps} initialPage="models" {...props} />);
     fireEvent.click(screen.getByRole("button", { name: t("composer.modelOpencodeGroup") }));
     return rendered;
   }
@@ -873,9 +888,7 @@ describe("OpenCode free-tier status placement", () => {
     const { container } = renderOpencodeCard({ freeTierStatus: freeTier });
     const row = rowWith(container, t("settings.freeTierReady"));
     expect(row).toBeTruthy();
-    expect(row?.closest(".provider-card")?.textContent).toContain(
-      t("composer.modelOpencodeGroup"),
-    );
+    expect(row?.closest(".provider-card")?.textContent).toContain(t("composer.modelOpencodeGroup"));
     expect(within(row as HTMLElement).queryByRole("button")).toBeNull();
     expect(container.textContent).toContain(t("settings.freeTierAppAccount"));
   });
@@ -901,9 +914,11 @@ describe("OpenCode free-tier status placement", () => {
       onInstallBun: vi.fn(),
     });
     expect(
-      (within(installing.container).getByRole("button", {
-        name: t("settings.freeTierInstalling"),
-      }) as HTMLButtonElement).disabled,
+      (
+        within(installing.container).getByRole("button", {
+          name: t("settings.freeTierInstalling"),
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
     installing.unmount();
 
@@ -920,9 +935,9 @@ describe("OpenCode free-tier status placement", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the whole block off the General page", () => {
+  it("keeps the whole block off the Composer page", () => {
     const { container } = render(
-      <SettingsModal {...baseProps} initialPage="general" freeTierStatus={freeTier} />,
+      <SettingsModal {...baseProps} initialPage="composer" freeTierStatus={freeTier} />,
     );
     expect(rowWith(container, t("settings.freeTierReady"))).toBeUndefined();
     expect(container.textContent).not.toContain(t("settings.freeTierRuntime"));
@@ -956,19 +971,20 @@ describe("declared-empty settings surfaces", () => {
   }
 
   /** Renders the modal against empty barrels: a tree with no declarations at all. */
-  async function renderWithNoDeclarations(page: "models" | "search") {
+  async function renderWithNoDeclarations() {
     mockEmptyDeclarations();
     const { SettingsModal: EmptyDeclarationsSettings } = await import("./settings");
-    return render(<EmptyDeclarationsSettings {...baseProps} initialPage={page} />);
+    return render(<EmptyDeclarationsSettings {...baseProps} initialPage="models" />);
   }
 
   it("tells the user where to add a provider when none is declared", async () => {
-    const { container } = await renderWithNoDeclarations("models");
+    const { container } = await renderWithNoDeclarations();
     expect(container.textContent).toContain(t("settings.noProvidersDeclared"));
   });
 
   it("tells the user where to add an engine when none is declared", async () => {
-    const { container } = await renderWithNoDeclarations("search");
+    // Both lists are sections of Models now, so one render carries both messages.
+    const { container } = await renderWithNoDeclarations();
     expect(container.textContent).toContain(t("settings.noSearchEnginesDeclared"));
   });
 

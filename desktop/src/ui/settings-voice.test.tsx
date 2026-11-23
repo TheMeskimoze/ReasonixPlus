@@ -36,8 +36,10 @@ describe("VoiceInputSettings: models", () => {
 
   const baseProps = {
     settings: mockSettings,
-    fontScale: "medium" as const,
-    onSetFontScale: vi.fn(),
+    textSizePx: 14,
+    themeStyle: "graphite" as const,
+    onSetThemeStyle: vi.fn(),
+    onSetTextSize: vi.fn(),
     fontFamily: "sans" as const,
     onSetFontFamily: vi.fn(),
     customFontFamily: "",
@@ -125,7 +127,7 @@ describe("VoiceInputSettings: models", () => {
     expect(cactus).toBeTruthy();
     render(<VoiceInputSettings />);
 
-    const card = screen.getByText(cactus!.name).closest(".voice-card") as HTMLElement;
+    const card = screen.getByText(cactus!.name).closest(".tile") as HTMLElement;
     expect(within(card).getByText(cactus!.size)).toBeTruthy();
     if (cactus!.badge) expect(within(card).getByText(cactus!.badge)).toBeTruthy();
     expect(within(card).getByText("Cactus engine")).toBeTruthy();
@@ -139,7 +141,7 @@ describe("VoiceInputSettings: models", () => {
     expect(isVoiceModelAvailable(bark!)).toBe(true);
     render(<VoiceInputSettings />);
 
-    const card = screen.getByText(bark!.name).closest(".voice-card") as HTMLElement;
+    const card = screen.getByText(bark!.name).closest(".tile") as HTMLElement;
     expect(within(card).getByRole("button", { name: "Download" })).toBeTruthy();
     // The card states the one-time runtime cost before the user commits.
     expect(within(card).getByText("Python runtime")).toBeTruthy();
@@ -159,9 +161,7 @@ describe("VoiceInputSettings: models", () => {
 
     render(<VoiceInputSettings />);
 
-    const baseCard = screen
-      .getByText("Whisper Base (English)")
-      .closest(".voice-card") as HTMLElement;
+    const baseCard = screen.getByText("Whisper Base (English)").closest(".tile") as HTMLElement;
     const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {
@@ -182,9 +182,7 @@ describe("VoiceInputSettings: models", () => {
 
     render(<VoiceInputSettings />);
 
-    const baseCard = screen
-      .getByText("Whisper Base (English)")
-      .closest(".voice-card") as HTMLElement;
+    const baseCard = screen.getByText("Whisper Base (English)").closest(".tile") as HTMLElement;
     const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {
@@ -216,8 +214,8 @@ describe("VoiceInputSettings: models", () => {
     expect(downloadBtns.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders voice settings in the general tab and not in models", () => {
-    const { unmount } = render(<SettingsModal {...baseProps} initialPage="general" />);
+  it("renders voice settings in the Composer tab and not in models", () => {
+    const { unmount } = render(<SettingsModal {...baseProps} initialPage="composer" />);
     expect(screen.getByText("Voice processing model")).toBeTruthy();
     expect(screen.getByText("Audio input device")).toBeTruthy();
     unmount();
@@ -237,7 +235,7 @@ describe("VoiceInputSettings: models", () => {
       ],
     };
     render(
-      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="quickSend" />,
+      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="composer" />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Move quick send down: alpha" }));
@@ -259,7 +257,7 @@ describe("VoiceInputSettings: models", () => {
       ],
     };
     render(
-      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="quickSend" />,
+      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="composer" />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Remove quick send: alpha" }));
@@ -270,7 +268,7 @@ describe("VoiceInputSettings: models", () => {
 
   it("adds a custom quick send from the quick send settings form", () => {
     const onSave = vi.fn();
-    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="quickSend" />);
+    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="composer" />);
 
     fireEvent.change(screen.getByPlaceholderText("Shorthand (dropdown label, max 20 chars)"), {
       target: { value: "Deploy" },
@@ -293,7 +291,7 @@ describe("VoiceInputSettings: models", () => {
 
   it("enforces max length on explicit shorthand in custom quick send", () => {
     const onSave = vi.fn();
-    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="quickSend" />);
+    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="composer" />);
 
     fireEvent.change(screen.getByPlaceholderText("Shorthand (dropdown label, max 20 chars)"), {
       target: { value: "Deploy to production immediately" },
@@ -354,22 +352,24 @@ describe("VoiceInputSettings: microphone", () => {
     expect(screen.queryByText("Test microphone")).toBeNull();
   });
 
-  it("merges models and microphone into one card, models left and mic right", () => {
+  it("puts the microphone first and the models below it, as cards", () => {
     render(<VoiceInputSettings />);
 
-    expect(screen.getByText("Voice input")).toBeTruthy();
-    const cards = document.querySelectorAll(".provider-card");
-    expect(cards).toHaveLength(1);
-    const cols = Array.from(
-      cards[0]!.querySelectorAll(".provider-body > .provider-col"),
-    ) as HTMLElement[];
-    expect(cols).toHaveLength(2);
-    expect(within(cols[0]!).getByText("Voice processing model")).toBeTruthy();
-    expect(within(cols[0]!).getByText("Whisper Tiny (English)")).toBeTruthy();
-    expect(within(cols[1]!).getByText("Audio input device")).toBeTruthy();
+    const root = document.querySelector(".voice-settings") as HTMLElement;
+    const blocks = Array.from(root.children) as HTMLElement[];
+    expect(blocks).toHaveLength(2);
+
+    // The device comes first, with its consent gate.
+    expect(within(blocks[0]!).getByText("Audio input device")).toBeTruthy();
     expect(
-      within(cols[1]!).getByRole("button", { name: /allow microphone recording/i }),
+      within(blocks[0]!).getByRole("button", { name: /allow microphone recording/i }),
     ).toBeTruthy();
+
+    // The models follow as their own cards, one per model, with no collapsible shell.
+    expect(within(blocks[1]!).getByText("Voice processing model")).toBeTruthy();
+    expect(within(blocks[1]!).getByText("Whisper Tiny (English)")).toBeTruthy();
+    expect(root.querySelector(".provider-card")).toBeNull();
+    expect(root.querySelectorAll(".tile").length).toBeGreaterThan(1);
   });
 
   it("reveals the real device list and audio test after granting access", async () => {

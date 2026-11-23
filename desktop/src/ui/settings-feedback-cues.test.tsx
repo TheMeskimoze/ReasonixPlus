@@ -20,8 +20,10 @@ const baseSettings: Settings = {
 
 const baseProps = {
   settings: baseSettings,
-  fontScale: "medium" as const,
-  onSetFontScale: vi.fn(),
+  textSizePx: 14,
+  themeStyle: "graphite" as const,
+  onSetThemeStyle: vi.fn(),
+  onSetTextSize: vi.fn(),
   fontFamily: "sans" as const,
   onSetFontFamily: vi.fn(),
   customFontFamily: "",
@@ -122,24 +124,24 @@ function cueRow(table: HTMLElement, name: string): HTMLElement {
   return row;
 }
 
-describe("Sound settings page", () => {
+describe("Sound cues section", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
   });
 
-  it("is the page the sound settings live on, not the General page", () => {
-    const { unmount } = render(<SettingsModal {...baseProps} initialPage="general" />);
+  it("lives in Customization, not on another page", () => {
+    const { unmount } = render(<SettingsModal {...baseProps} initialPage="composer" />);
     expect(screen.queryByRole("button", { name: /New pack/ })).toBeNull();
     unmount();
 
-    render(<SettingsModal {...baseProps} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} initialPage="customization" />);
     expect(screen.getByRole("button", { name: /New pack/ })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Sound" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Sound cues" })).toBeTruthy();
   });
 
   it("lists the silent pack first, active on a fresh install, with no cue table", () => {
-    render(<SettingsModal {...baseProps} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} initialPage="customization" />);
     const nothing = packCard("Nothing");
     expect(within(nothing).getByText(/Active/)).toBeTruthy();
     expect(nothing.querySelector(".feedback-cues-table")).toBeNull();
@@ -150,7 +152,7 @@ describe("Sound settings page", () => {
 
   it("selects a pack persistently through onSave", () => {
     const onSave = vi.fn();
-    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="customization" />);
     fireEvent.click(within(packCard("Halo")).getByRole("button", { name: "Use this pack" }));
     expect(onSave).toHaveBeenCalledWith({ soundPackId: "halo" });
   });
@@ -160,17 +162,15 @@ describe("Sound settings page", () => {
       <SettingsModal
         {...baseProps}
         settings={{ ...baseSettings, soundPackId: "halo" }}
-        initialPage="sound"
+        initialPage="customization"
       />,
     );
     expect(within(packCard("Halo")).getByText(/Active/)).toBeTruthy();
-    expect(
-      within(packCard("Nothing")).getByRole("button", { name: "Use this pack" }),
-    ).toBeTruthy();
+    expect(within(packCard("Nothing")).getByRole("button", { name: "Use this pack" })).toBeTruthy();
   });
 
   it("gives every folder pack its own Sound / Volume / Test table", () => {
-    render(<SettingsModal {...baseProps} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} initialPage="customization" />);
     for (const label of ["Default Pack", "Halo"]) {
       const headers = Array.from(packTable(label).querySelectorAll("th")).map(
         (th) => th.textContent,
@@ -182,7 +182,7 @@ describe("Sound settings page", () => {
 
   it("stores a cue's sound and volume on the pack it belongs to", () => {
     const onSave = vi.fn();
-    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="customization" />);
 
     fireEvent.click(
       within(cueRow(packTable("Halo"), "Input required")).getByRole("button", {
@@ -211,18 +211,21 @@ describe("Sound settings page", () => {
       feedbackAudio: { default: { taskComplete: { enabled: true, volume: 0.7 } } },
     };
     render(
-      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="sound" />,
+      <SettingsModal
+        {...baseProps}
+        settings={settings}
+        onSave={onSave}
+        initialPage="customization"
+      />,
     );
     const row = cueRow(packTable("Halo"), "Task complete");
     expect(
-      within(row).getByRole("button", { name: "Enable sound for Task complete" }).getAttribute(
-        "data-on",
-      ),
+      within(row)
+        .getByRole("button", { name: "Enable sound for Task complete" })
+        .getAttribute("data-on"),
     ).toBe("false");
 
-    fireEvent.click(
-      within(row).getByRole("button", { name: "Enable sound for Task complete" }),
-    );
+    fireEvent.click(within(row).getByRole("button", { name: "Enable sound for Task complete" }));
     expect(onSave).toHaveBeenCalledWith({
       feedbackAudio: {
         default: { taskComplete: { enabled: true, volume: 0.7 } },
@@ -237,7 +240,7 @@ describe("Sound settings page", () => {
       ...baseSettings,
       feedbackAudio: { halo: { taskComplete: { enabled: true, volume: 0.7 } } },
     };
-    render(<SettingsModal {...baseProps} settings={settings} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} settings={settings} initialPage="customization" />);
     fireEvent.click(
       within(cueRow(packTable("Halo"), "Task complete")).getByRole("button", {
         name: "Play the Task complete line from Halo",
@@ -253,7 +256,12 @@ describe("Sound settings page", () => {
       feedbackAudio: { halo: { planComplete: { enabled: true, volume: 0.4 } } },
     };
     render(
-      <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="sound" />,
+      <SettingsModal
+        {...baseProps}
+        settings={settings}
+        onSave={onSave}
+        initialPage="customization"
+      />,
     );
 
     // The pack's own switch is the only per-cue toggle set: no table carries a Notify column
@@ -283,7 +291,7 @@ describe("Sound settings page", () => {
   });
 
   it("opens the pack wizard from the New pack button", () => {
-    render(<SettingsModal {...baseProps} initialPage="sound" />);
+    render(<SettingsModal {...baseProps} initialPage="customization" />);
     expect(screen.queryByRole("dialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /New pack/ }));
@@ -298,7 +306,7 @@ describe("Sound settings page", () => {
         {...baseProps}
         settings={{ ...baseSettings, soundPacks: [userPack] }}
         onRemoveSoundPack={onRemoveSoundPack}
-        initialPage="sound"
+        initialPage="customization"
       />,
     );
 
@@ -323,7 +331,7 @@ describe("Sound settings page", () => {
         {...baseProps}
         settings={{ ...baseSettings, soundPackId: "night-shift", soundPacks: [userPack] }}
         onSave={onSave}
-        initialPage="sound"
+        initialPage="customization"
       />,
     );
 
@@ -338,7 +346,7 @@ describe("Sound settings page", () => {
         {...baseProps}
         settings={{ ...baseSettings, soundPacks: [userPack] }}
         onSave={onSave}
-        initialPage="sound"
+        initialPage="customization"
       />,
     );
 

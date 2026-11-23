@@ -146,17 +146,13 @@ import {
 import {
   FONT_FAMILY,
   FONT_FAMILY_STACK,
-  FONT_SCALE,
-  FONT_SCALE_ZOOM,
   type FontFamily,
-  type FontScale,
   type Theme,
   type ThemeStyle,
   isFontFamily,
-  isFontScale,
   themeForStyle,
 } from "./theme";
-import { AboutModal } from "./ui/about";
+import { readStoredTextSize, storeTextSize } from "./typography";
 import {
   type StatusWait,
   type TurnStatus,
@@ -3705,8 +3701,8 @@ interface TabRuntimeProps {
   theme: Theme;
   themeStyle: ThemeStyle;
   onSetThemeStyle: (style: ThemeStyle) => void;
-  fontScale: FontScale;
-  onSetFontScale: (scale: FontScale) => void;
+  textSizePx: number;
+  onSetTextSize: (size: number) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
   customFontFamily: string;
@@ -3790,8 +3786,8 @@ const TabRuntime = memo(function TabRuntime({
   theme,
   themeStyle,
   onSetThemeStyle,
-  fontScale,
-  onSetFontScale,
+  textSizePx,
+  onSetTextSize,
   fontFamily,
   onSetFontFamily,
   customFontFamily,
@@ -3914,10 +3910,9 @@ const TabRuntime = memo(function TabRuntime({
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [settingsPage, setSettingsPage] = useState<SettingsPageId>("composer");
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
   // The header's Duplicate button asks this tab's ONE capability dialog, the same one the
   // session-start gate raises; `$mcpSetup` outranks it because a gated chat has no
   // messages, so the two never compete for the screen.
@@ -3952,7 +3947,7 @@ const TabRuntime = memo(function TabRuntime({
       text,
     });
   }, []);
-  const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
+  const openSettingsAt = useCallback((page: SettingsPageId = "composer") => {
     setSettingsPage(page);
     setSettingsOpen(true);
   }, []);
@@ -5035,7 +5030,7 @@ const TabRuntime = memo(function TabRuntime({
       } else if (mod && e.key === ",") {
         e.preventDefault();
         if (settingsOpen) setSettingsOpen(false);
-        else openSettingsAt("general");
+        else openSettingsAt("composer");
       } else if (mod && (e.key === "j" || e.key === "J")) {
         e.preventDefault();
         setJobsOpen((v) => !v);
@@ -5043,7 +5038,7 @@ const TabRuntime = memo(function TabRuntime({
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
         // A modal is open — let its own Esc handler close it (#1670).
-        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
+        if (settingsOpen || jobsOpen || wdOpen) return;
         e.preventDefault();
         abort();
       }
@@ -5057,7 +5052,6 @@ const TabRuntime = memo(function TabRuntime({
     abort,
     newChat,
     settingsOpen,
-    aboutOpen,
     jobsOpen,
     wdOpen,
     openSettingsAt,
@@ -5377,8 +5371,7 @@ const TabRuntime = memo(function TabRuntime({
     [sessionsMutation],
   );
 
-  const openSettings = useCallback(() => openSettingsAt("general"), [openSettingsAt]);
-  const openAbout = useCallback(() => setAboutOpen(true), []);
+  const openSettings = useCallback(() => openSettingsAt("composer"), [openSettingsAt]);
   const toggleJobs = useCallback(() => setJobsOpen((v) => !v), []);
 
   const readMemory = useCallback(
@@ -5467,7 +5460,6 @@ const TabRuntime = memo(function TabRuntime({
           activeSessionHasMessages={state.messages.length > 0}
           onOpenWorkdir={openWorkdir}
           onOpenSettings={openSettings}
-          onOpenAbout={openAbout}
         />
 
         {!sideCollapsed ? (
@@ -5652,7 +5644,7 @@ const TabRuntime = memo(function TabRuntime({
                               padding: 12,
                               color: "var(--muted)",
                               fontFamily: "Geist Mono, monospace",
-                              fontSize: 11,
+                              fontSize: "var(--fs-11)",
                             }}
                           >
                             {t("app.connecting")}
@@ -5846,12 +5838,9 @@ const TabRuntime = memo(function TabRuntime({
           usage={view.usage}
           busy={view.busy}
           ready={view.ready}
-          theme={theme}
-          themeStyle={themeStyle}
           jobs={view.jobs}
           jobsOpen={jobsOpen}
           onToggleJobs={toggleJobs}
-          onSetThemeStyle={onSetThemeStyle}
           onOpenWorkdir={openWorkdir}
         />
 
@@ -5875,8 +5864,6 @@ const TabRuntime = memo(function TabRuntime({
           onRemove={onRemoveWorkspace}
           onBrowse={pickWorkspace}
         />
-
-        {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
 
         {state.mcpSetup || duplicateAsk ? (
           <CapabilityDialog
@@ -5923,8 +5910,10 @@ const TabRuntime = memo(function TabRuntime({
         {settingsOpen && state.settings ? (
           <SettingsModal
             settings={state.settings}
-            fontScale={fontScale}
-            onSetFontScale={onSetFontScale}
+            textSizePx={textSizePx}
+            onSetTextSize={onSetTextSize}
+            themeStyle={themeStyle}
+            onSetThemeStyle={onSetThemeStyle}
             fontFamily={fontFamily}
             onSetFontFamily={onSetFontFamily}
             customFontFamily={customFontFamily}
@@ -6557,10 +6546,12 @@ function EmptyPanel({
       }}
     >
       <div className="empty-mark" />
-      <div style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}>
+      <div
+        style={{ fontSize: "var(--fs-18)", fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}
+      >
         {title}
       </div>
-      <div style={{ fontSize: 12, marginBottom: 18 }}>{hint}</div>
+      <div style={{ fontSize: "var(--fs-12)", marginBottom: 18 }}>{hint}</div>
       {children}
     </div>
   );
@@ -6610,7 +6601,7 @@ function EmptyState({
             key={s}
             type="button"
             className="btn"
-            style={{ fontSize: 11.5 }}
+            style={{ fontSize: "var(--fs-11-5)" }}
             onClick={() => onPick(s)}
           >
             {s}
@@ -6645,15 +6636,22 @@ function NeedsSetupView({
         gap: 18,
       }}
     >
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{t("app.setup.welcome")}</div>
-      <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 460, textAlign: "center" }}>
+      <div style={{ fontSize: "var(--fs-18)", fontWeight: 600 }}>{t("app.setup.welcome")}</div>
+      <div
+        style={{
+          fontSize: "var(--fs-12-5)",
+          color: "var(--muted)",
+          maxWidth: 460,
+          textAlign: "center",
+        }}
+      >
         {t("app.setup.description")}
       </div>
       {message ? (
         <div
           role="alert"
           style={{
-            fontSize: 12.5,
+            fontSize: "var(--fs-12-5)",
             color: "var(--danger)",
             maxWidth: 460,
             textAlign: "center",
@@ -6979,10 +6977,8 @@ export function App() {
   // never mixes them up. Entries are seeded on $tab_opened and dropped on
   // $tab_closed; the active tab's entry drives document.documentElement.
   const [tabThemes, setTabThemes] = useState<Record<string, TabTheme>>({});
-  const [fontScale, setFontScale] = useState<FontScale>(() => {
-    const v = localStorage.getItem("reasonix.fontScale");
-    return isFontScale(v) ? v : FONT_SCALE.MEDIUM;
-  });
+  // The thread's text size in px: the whole type ladder is relative to it.
+  const [textSizePx, setTextSizePx] = useState<number>(readStoredTextSize);
   const [fontFamily, setFontFamily] = useState<FontFamily>(() => {
     const v = localStorage.getItem("reasonix.fontFamily");
     return isFontFamily(v) ? v : FONT_FAMILY.SANS;
@@ -7062,10 +7058,13 @@ export function App() {
   }, [requireCtxCollapsed, releaseCtxCollapsed, requireSideCollapsed, releaseSideCollapsed]);
 
   useEffect(() => {
-    // Chromium webview supports `zoom`; scales every px-based size without touching CSS rules.
-    document.documentElement.style.setProperty("zoom", String(FONT_SCALE_ZOOM[fontScale]));
-    localStorage.setItem("reasonix.fontScale", fontScale);
-  }, [fontScale]);
+    // The root font size is the whole type scale: every text size in the app is a share of
+    // it, so this one value moves the thread's text and the chrome's type together without
+    // touching a CSS rule. It replaces the root `zoom` this app used to carry, which scaled
+    // paddings, widths and `vw` along with the type.
+    document.documentElement.style.fontSize = `${textSizePx}px`;
+    storeTextSize(textSizePx);
+  }, [textSizePx]);
 
   useEffect(() => {
     const custom = customFontFamily.trim();
@@ -8003,8 +8002,8 @@ export function App() {
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
           themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
           onSetThemeStyle={onSetThemeStyle}
-          fontScale={fontScale}
-          onSetFontScale={setFontScale}
+          textSizePx={textSizePx}
+          onSetTextSize={setTextSizePx}
           fontFamily={fontFamily}
           onSetFontFamily={setFontFamily}
           customFontFamily={customFontFamily}

@@ -70,7 +70,6 @@ export function Sidebar({
   activeSessionHasMessages,
   onOpenWorkdir,
   onOpenSettings,
-  onOpenAbout,
 }: {
   sessions: SessionInfo[];
   activeName?: string;
@@ -109,7 +108,6 @@ export function Sidebar({
   activeSessionHasMessages?: boolean;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
-  onOpenAbout: () => void;
 }) {
   useLang();
   const [query, setQuery] = useState("");
@@ -255,7 +253,7 @@ export function Sidebar({
             <div
               style={{
                 padding: "12px 8px",
-                fontSize: 11,
+                fontSize: "var(--fs-11)",
                 color: "var(--muted-2)",
                 fontFamily: "Geist Mono, monospace",
               }}
@@ -266,7 +264,7 @@ export function Sidebar({
             <div
               style={{
                 padding: "12px 8px",
-                fontSize: 11,
+                fontSize: "var(--fs-11)",
                 color: "var(--muted-2)",
                 fontFamily: "Geist Mono, monospace",
               }}
@@ -389,12 +387,6 @@ export function Sidebar({
       </div>
 
       <div className="side-foot">
-        <div className="row" onClick={onOpenAbout} onKeyDown={activationHandler(onOpenAbout)}>
-          <span className="ico">
-            <I.help size={13} />
-          </span>
-          <span>{t("about.sidebarLabel")}</span>
-        </div>
         <div className="row" onClick={onOpenSettings} onKeyDown={activationHandler(onOpenSettings)}>
           <span className="ico">
             <I.cog size={13} />

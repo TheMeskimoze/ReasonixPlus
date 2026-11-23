@@ -25,8 +25,10 @@ const baseSettings: Settings = {
 
 const baseProps = {
   settings: baseSettings,
-  fontScale: "medium" as const,
-  onSetFontScale: vi.fn(),
+  textSizePx: 14,
+  themeStyle: "graphite" as const,
+  onSetThemeStyle: vi.fn(),
+  onSetTextSize: vi.fn(),
   fontFamily: "sans" as const,
   onSetFontFamily: vi.fn(),
   customFontFamily: "",
@@ -95,7 +97,7 @@ const baseProps = {
 
 function renderPage(settings: Settings, onSave: (patch: unknown) => void) {
   return render(
-    <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="fallbacks" />,
+    <SettingsModal {...baseProps} settings={settings} onSave={onSave} initialPage="models" />,
   );
 }
 
@@ -117,9 +119,13 @@ describe("PageFallbacks — backup-model list", () => {
     expect(saved?.textContent).toBe(`${RETIRED} (not enabled)`);
   });
 
-  it("is reachable as its own settings category", () => {
+  it("is a section of Models, not a category of its own", () => {
     renderPage(baseSettings, vi.fn());
-    expect(screen.getAllByText("Backup models").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Backup models" })).toBeTruthy();
+    const nav = Array.from(document.querySelectorAll(".settings-side .row:not(.kid)")).map((row) =>
+      (row.textContent ?? "").trim(),
+    );
+    expect(nav).not.toContain("Backup models");
   });
 
   it("explains that failover is off until a backup is added", () => {

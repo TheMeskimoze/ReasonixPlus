@@ -25,8 +25,10 @@ const settings: Settings = {
 
 const baseProps = {
   settings,
-  fontScale: "medium" as const,
-  onSetFontScale: vi.fn(),
+  textSizePx: 14,
+  themeStyle: "graphite" as const,
+  onSetThemeStyle: vi.fn(),
+  onSetTextSize: vi.fn(),
   fontFamily: "sans" as const,
   onSetFontFamily: vi.fn(),
   customFontFamily: "",
@@ -113,9 +115,10 @@ describe("settings Shortcuts page", () => {
   it("is reachable from the nav and lists the quick-send hotkeys there", () => {
     const { container } = render(<SettingsModal {...baseProps} />);
 
-    fireEvent.click(screen.getByText("Shortcuts"));
+    fireEvent.click(screen.getByText("About"));
 
-    expect(screen.getByText("Keyboard shortcuts overview")).toBeTruthy();
+    // The list is a section of About now, not a page of its own.
+    expect(screen.getByRole("heading", { name: "Shortcuts" })).toBeTruthy();
     expect(bindings(container)).toEqual(
       expect.arrayContaining([
         { label: "Quick send menu", keys: ["Ctrl", "Q"] },
@@ -125,7 +128,7 @@ describe("settings Shortcuts page", () => {
   });
 
   it("still lists the shell bindings next to them", () => {
-    const { container } = render(<SettingsModal {...baseProps} initialPage="shortcuts" />);
+    const { container } = render(<SettingsModal {...baseProps} initialPage="about" />);
 
     expect(bindings(container)).toEqual(
       expect.arrayContaining([
@@ -138,7 +141,7 @@ describe("settings Shortcuts page", () => {
 
   it("names the composer's own send and newline keys", () => {
     // These used to sit under the composer; this page is now their only home.
-    const { container } = render(<SettingsModal {...baseProps} initialPage="shortcuts" />);
+    const { container } = render(<SettingsModal {...baseProps} initialPage="about" />);
 
     expect(bindings(container)).toEqual(
       expect.arrayContaining([
@@ -148,17 +151,17 @@ describe("settings Shortcuts page", () => {
     );
   });
 
-  it("is its own page in the nav", () => {
+  it("lives under Composer, beside the voice settings", () => {
     render(<SettingsModal {...baseProps} />);
 
-    fireEvent.click(screen.getByText("Quick send"));
-
-    expect(screen.getByText("Composer quick actions and their hotkeys")).toBeTruthy();
+    // Both lists are sections of Composer now, and Composer is the page settings opens on.
+    expect(screen.getByRole("heading", { name: "Quick send" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Voice input" })).toBeTruthy();
     expect(screen.getByPlaceholderText("Message sent to the model")).toBeTruthy();
   });
 
   it("shows the configured quick-send order as the Ctrl+1-9 order", () => {
-    render(<SettingsModal {...baseProps} initialPage="quickSend" />);
+    render(<SettingsModal {...baseProps} initialPage="composer" />);
 
     // The ordering the dropdown and the digits share is edited on the Quick send page,
     // so that page has to name the hotkey that consumes it.

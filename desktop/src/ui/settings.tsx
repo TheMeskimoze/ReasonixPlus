@@ -19,6 +19,7 @@ import {
 } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  type CSSProperties,
   type ComponentProps,
   type ReactNode,
   useCallback,
@@ -72,7 +73,16 @@ import {
 } from "../protocol";
 import { useRateClock } from "../rate-clock";
 import { NOTHING_SOUND_PACK_ID, type SoundPackSpec, resolveSoundPackId } from "../sound-packs";
-import { FONT_FAMILY, FONT_SCALE, type FontFamily, type FontScale } from "../theme";
+import {
+  FONT_FAMILY,
+  FONT_FAMILY_STACK,
+  type FontFamily,
+  THEME,
+  THEME_STYLES,
+  type ThemeStyle,
+  themeForStyle,
+} from "../theme";
+import { TEXT_SIZE_RANGE, clampTextSizePx } from "../typography";
 import { mergeSoundPacks } from "../user-sound-packs";
 import { AudioRecorder } from "../voice/audio-recorder";
 import {
@@ -98,6 +108,7 @@ import {
 } from "../voice/model-cache";
 import { VOICE_ENGINES, VOICE_MODELS, type VoiceModelId } from "../voice/model-registry";
 import { speechTranscriber } from "../voice/transcriber";
+import { AboutPanel } from "./about";
 import { type ChangelogState, PageChangelog } from "./changelog";
 import { CostBadge } from "./cost-badge";
 import { FEEDBACK_CUES } from "./feedback-cue-copy";
@@ -106,7 +117,9 @@ import { useInventoryRequest } from "./inventory-request";
 import { activationHandler, escapeHandler } from "./keyboard";
 import { PackWizard, type SoundPackDraft } from "./pack-wizard";
 import { pluginQualifier } from "./plugin-labels";
+import { useFullBleed } from "./settings-frame";
 import { Shortcut, type ShortcutKey, localizeShortcutText } from "./shortcut";
+import { scrollToSection, useActiveSection } from "./use-active-section";
 
 /** Render i18n hint strings that embed `<code>…</code>` tags as styled fragments
  *  (no dangerouslySetInnerHTML — the markup is translator-authored, but React nodes keep it static). */
@@ -154,37 +167,120 @@ function moveInList<T>(list: readonly T[], from: number, to: number): T[] {
   return next;
 }
 
-export type PageId =
-  | "general"
-  | "sound"
-  | "quickSend"
-  | "models"
-  | "search"
-  | "fallbacks"
-  | "mcp"
-  | "plugins"
-  | "skills"
-  | "changelog"
-  | "shortcuts";
+export type PageId = "composer" | "models" | "integrations" | "customization" | "about";
 
-export const PAGE_META: ReadonlyArray<{ id: PageId; icon: keyof typeof I }> = [
-  { id: "general", icon: "cog" },
-  { id: "sound", icon: "volume" },
-  { id: "quickSend", icon: "zap" },
-  { id: "models", icon: "brain" },
-  { id: "search", icon: "search" },
-  { id: "fallbacks", icon: "layers" },
-  { id: "mcp", icon: "wrench" },
-  { id: "plugins", icon: "plug" },
-  { id: "skills", icon: "bookmark" },
-  { id: "changelog", icon: "history" },
-  { id: "shortcuts", icon: "cpu" },
+/** One section of a page, listed in that page's index while it is open. `id` is the anchor
+ *  the row scrolls to and the marker the reader's position is read from. */
+export interface PageSection {
+  id: string;
+  labelKey: TKey;
+}
+
+/** One nav entry. `sections` are the parts of this page, not separate pages: the index they
+ *  form only exists while the page is open, and it doubles as a position indicator. */
+export interface PageEntry {
+  id: PageId;
+  icon: keyof typeof I;
+  sections?: PageSection[];
+}
+
+export const PAGE_META: ReadonlyArray<PageEntry> = [
+  // Composer owns what the box under the thread does: the microphone and its models, and the
+  // quick-send list the Ctrl+Q dropdown and Ctrl+1-9 read.
+  {
+    id: "composer",
+    icon: "send",
+    sections: [
+      { id: "voice", labelKey: "settings.composerVoice" },
+      { id: "quickSend", labelKey: "settings.composerQuickSend" },
+    ],
+  },
+  // Models owns every model the app can call: the enabled ones and their providers, the backup
+  // list tried when one runs out of quota, and the web-search engines.
+  {
+    id: "models",
+    icon: "brain",
+    sections: [
+      { id: "models", labelKey: "settings.modelsSection" },
+      { id: "fallbacks", labelKey: "settings.fallbacksSection" },
+      { id: "search", labelKey: "settings.searchSection" },
+    ],
+  },
+  // Integrations owns everything the agent can reach outside the chat: the MCP tool servers,
+  // the plugins that ship skills and servers together, and the standalone skills.
+  {
+    id: "integrations",
+    icon: "plug",
+    sections: [
+      { id: "mcp", labelKey: "settings.integrationsMcp" },
+      { id: "plugins", labelKey: "settings.integrationsPlugins" },
+      { id: "skills", labelKey: "settings.integrationsSkills" },
+    ],
+  },
+  // Customization owns the look of the app: the appearance controls, the theme cards and the
+  // sound packs. Its sections are parts of one page, listed in the page's own index.
+  {
+    id: "customization",
+    icon: "layers",
+    sections: [
+      { id: "appearance", labelKey: "settings.appearanceSection" },
+      { id: "themes", labelKey: "settings.customizationThemes" },
+      { id: "soundCues", labelKey: "settings.customizationSoundCues" },
+    ],
+  },
+  {
+    id: "about",
+    icon: "help",
+    sections: [
+      { id: "version", labelKey: "settings.aboutVersion" },
+      { id: "shortcuts", labelKey: "settings.aboutShortcuts" },
+      { id: "changelog", labelKey: "settings.aboutChangelog" },
+    ],
+  },
 ];
+
+/** Label and description keys are built from the id, so a page cannot have one and not the other. */
+function pageLabelKey(id: PageId): TKey {
+  return `settings.page${id[0]!.toUpperCase()}${id.slice(1)}Label` as TKey;
+}
+
+function pageDescKey(id: PageId): TKey {
+  return `settings.page${id[0]!.toUpperCase()}${id.slice(1)}Desc` as TKey;
+}
+
+/** The heading id a section's `aria-labelledby` and the page index both read. */
+function sectionHeadingId(id: string): string {
+  return `settings-section-${id}`;
+}
+
+/** One page section: wrapper, heading and anchor id travel together, so a section cannot
+ *  render a heading whose id its index row does not scroll to. */
+function SettingsSection({
+  id,
+  labelKey,
+  children,
+}: {
+  id: string;
+  labelKey: TKey;
+  children: ReactNode;
+}) {
+  const headingId = sectionHeadingId(id);
+  return (
+    <section className="section settings-section" data-section={id} aria-labelledby={headingId}>
+      <h3 className="stitle" id={headingId}>
+        {t(labelKey)}
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 export function SettingsModal({
   settings,
-  fontScale,
-  onSetFontScale,
+  textSizePx,
+  onSetTextSize,
+  themeStyle,
+  onSetThemeStyle,
   fontFamily,
   onSetFontFamily,
   customFontFamily,
@@ -265,8 +361,10 @@ export function SettingsModal({
   onRefreshChangelog,
 }: {
   settings: SettingsType;
-  fontScale: FontScale;
-  onSetFontScale: (scale: FontScale) => void;
+  textSizePx: number;
+  onSetTextSize: (size: number) => void;
+  themeStyle: ThemeStyle;
+  onSetThemeStyle: (style: ThemeStyle) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
   customFontFamily: string;
@@ -331,12 +429,12 @@ export function SettingsModal({
   onUninstallPlugin: (name: string) => void;
   /** Edit one plugin's Settings default: what a new chat's picker starts from. */
   onTogglePlugin: (slug: string, disabled: boolean) => void;
-  /** Re-request the plugin inventory (the page calls this when it opens). */
+  /** Re-request the plugin inventory (the section calls this when it opens). */
   onRequestPlugins: () => void;
   onInstallSkill: (source: string) => void;
   /** Remove these skills in one pass: a Settings group drops whole. */
   onUninstallSkill: (names: string[]) => void;
-  /** Re-request the skill inventory (the Skills page calls this when it opens). */
+  /** Re-request the skill inventory (the Skills section calls this when it opens). */
   onRequestSkills: () => void;
   /** Opens the desktop file dialog for one cue's audio, for the pack wizard. */
   onPickSound: () => Promise<string | null>;
@@ -372,9 +470,9 @@ export function SettingsModal({
   changelog: ChangelogState;
   onRefreshChangelog: (force?: boolean) => void;
 }) {
-  const [page, setPage] = useState<PageId>(initialPage ?? "general");
-  // Both the MCP card and the Search page gate on managed-build state, so it is
-  // requested for either entry point rather than only when the MCP page opens.
+  const [page, setPage] = useState<PageId>(initialPage ?? "composer");
+  // Both the MCP section and the Search section gate on managed-build state, so it is
+  // requested for either entry point rather than only when the MCP section opens.
   useEffect(() => {
     onRequestMcpExtensionStatus();
   }, [onRequestMcpExtensionStatus]);
@@ -398,6 +496,16 @@ export function SettingsModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const currentMeta = PAGE_META.find((p) => p.id === page) ?? PAGE_META[0]!;
+  // The page body is the scroller the section index reads and moves. Held as state, not a
+  // ref, so reopening the window rebinds the index to the body that is actually mounted.
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
+  const sectionIds = useMemo(
+    () => (currentMeta.sections ?? []).map((section) => section.id),
+    [currentMeta],
+  );
+  const activeSection = useActiveSection(bodyEl, sectionIds);
+  // A window narrower than 70% of the screen gains nothing from the frame's margins.
+  const fullBleed = useFullBleed();
   return (
     <div
       className="settings-mask"
@@ -407,58 +515,197 @@ export function SettingsModal({
     >
       <div
         className="settings"
+        data-full={fullBleed || undefined}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
         <nav className="settings-side">
           <div className="sg">{t("settings.title")}</div>
-          {PAGE_META.map((p) => (
-            <div
-              key={p.id}
-              className="row"
-              data-active={page === p.id}
-              onClick={() => setPage(p.id)}
-              onKeyDown={activationHandler(() => setPage(p.id))}
-            >
-              <span className="ico">{I[p.icon]({ size: 13 })}</span>
-              <span>{t(`settings.page${p.id[0]!.toUpperCase()}${p.id.slice(1)}Label` as any)}</span>
-            </div>
-          ))}
+          {PAGE_META.map((entry) => {
+            const label = t(pageLabelKey(entry.id));
+            return (
+              <div key={entry.id}>
+                <div
+                  className="row"
+                  role="button"
+                  tabIndex={0}
+                  aria-current={page === entry.id ? "page" : undefined}
+                  data-active={page === entry.id}
+                  onClick={() => setPage(entry.id)}
+                  onKeyDown={activationHandler(() => setPage(entry.id))}
+                  title={label}
+                >
+                  <span className="ico">{I[entry.icon]({ size: 16 })}</span>
+                  <span>{label}</span>
+                </div>
+                {page === entry.id && entry.sections ? (
+                  <div className="kids">
+                    {entry.sections.map((section) => (
+                      <div
+                        key={section.id}
+                        className="row kid"
+                        role="button"
+                        tabIndex={0}
+                        data-active={activeSection === section.id}
+                        aria-current={activeSection === section.id ? "location" : undefined}
+                        onClick={() => scrollToSection(bodyEl, section.id)}
+                        onKeyDown={activationHandler(() => scrollToSection(bodyEl, section.id))}
+                        title={t(section.labelKey)}
+                      >
+                        <span>{t(section.labelKey)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </nav>
         <div className="settings-main">
           <div className="settings-head">
             <div>
-              <h2>
-                {t(
-                  `settings.page${currentMeta.id[0]!.toUpperCase()}${currentMeta.id.slice(1)}Label` as any,
-                )}
-              </h2>
-              <div className="desc">
-                {t(
-                  `settings.page${currentMeta.id[0]!.toUpperCase()}${currentMeta.id.slice(1)}Desc` as any,
-                )}
-              </div>
+              <h2>{t(pageLabelKey(currentMeta.id))}</h2>
+              <div className="desc">{t(pageDescKey(currentMeta.id))}</div>
             </div>
             <span className="grow" />
             <button type="button" className="close-btn" onClick={onClose}>
               <I.x size={14} />
             </button>
           </div>
-          <div className="settings-body">
-            {page === "general" && (
-              <PageGeneral
-                fontScale={fontScale}
-                onSetFontScale={onSetFontScale}
+          <div className="settings-body" ref={setBodyEl}>
+            {page === "composer" && <PageComposer settings={settings} onSave={onSave} />}
+            {page === "models" && (
+              <div className="page-models">
+                <SettingsSection id="models" labelKey="settings.modelsSection">
+                  <PageModels
+                    settings={settings}
+                    onSave={onSave}
+                    ollamaModels={ollamaModels}
+                    ollamaModelsError={ollamaModelsError}
+                    ollamaPlan={ollamaPlan}
+                    ollamaHiddenCount={ollamaHiddenCount}
+                    ollamaVisionModels={ollamaVisionModels}
+                    opencodeModels={opencodeModels}
+                    opencodeModelsError={opencodeModelsError}
+                    opencodeVisionModels={opencodeVisionModels}
+                    oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
+                    oauthAccount={settings.openaiOAuth?.account}
+                    oauthFlowError={settings.openaiOAuth?.flowError}
+                    oauthWaiting={oauthWaiting}
+                    onOAuthBegin={onOAuthBegin}
+                    onOAuthCancel={onOAuthCancel}
+                    onOAuthSignOut={onOAuthSignOut}
+                    antigravitySignedIn={settings.antigravityOAuth?.signedIn ?? false}
+                    antigravityAccount={settings.antigravityOAuth?.account}
+                    antigravityFlowError={settings.antigravityOAuth?.flowError}
+                    antigravityWaiting={antigravityOAuthWaiting}
+                    onAntigravityBegin={onAntigravityOAuthBegin}
+                    onAntigravityCancel={onAntigravityOAuthCancel}
+                    onAntigravitySignOut={onAntigravityOAuthSignOut}
+                    opencodeSignedIn={settings.opencodeOAuth?.signedIn ?? false}
+                    opencodeAccount={settings.opencodeOAuth?.account}
+                    opencodeOrgName={settings.opencodeOAuth?.orgName}
+                    opencodeFlowError={settings.opencodeOAuth?.flowError}
+                    opencodeWaiting={opencodeOAuthWaiting}
+                    onOpencodeBegin={onOpencodeOAuthBegin}
+                    onOpencodeCancel={onOpencodeOAuthCancel}
+                    onOpencodeSignOut={onOpencodeOAuthSignOut}
+                    freeTierStatus={freeTierStatus}
+                    bunInstall={bunInstall}
+                    onInstallBun={onInstallBun}
+                    mimoOAuthWaiting={mimoOAuthWaiting}
+                    onMiMoOAuthBegin={onMiMoOAuthBegin}
+                    onMiMoOAuthCancel={onMiMoOAuthCancel}
+                    onMiMoOAuthSignOut={onMiMoOAuthSignOut}
+                  />
+                </SettingsSection>
+                <SettingsSection id="fallbacks" labelKey="settings.fallbacksSection">
+                  <PageFallbacks
+                    settings={settings}
+                    onSave={onSave}
+                    ollamaModels={ollamaModels}
+                    opencodeModels={opencodeModels}
+                    ollamaVisionModels={ollamaVisionModels}
+                    opencodeVisionModels={opencodeVisionModels}
+                  />
+                </SettingsSection>
+                <SettingsSection id="search" labelKey="settings.searchSection">
+                  <PageSearch
+                    settings={settings}
+                    onSave={onSave}
+                    browserInstalls={mcpExtensionStatus?.installs ?? null}
+                  />
+                </SettingsSection>
+              </div>
+            )}
+            {page === "integrations" && (
+              <div className="page-integrations">
+                <SettingsSection id="mcp" labelKey="settings.integrationsMcp">
+                  <PageMCP
+                    specs={mcpSpecs}
+                    bridged={mcpBridged}
+                    onAdd={onAddMcpSpec}
+                    onRemove={onRemoveMcpSpec}
+                    onToggleServer={onToggleMcpServer}
+                    extensionStatus={mcpExtensionStatus}
+                    extensionCheck={mcpExtensionCheck}
+                    browserInstall={playwrightBrowserInstall}
+                    onRequestExtensionStatus={onRequestMcpExtensionStatus}
+                    onConfigureExtension={onConfigureMcpExtension}
+                    onCheckExtension={onCheckMcpExtension}
+                    onInstallBrowser={onInstallPlaywrightBrowser}
+                    onCancelBrowserInstall={onCancelPlaywrightBrowserInstall}
+                    mailProvider={mailProvider}
+                    mailAuth={mailAuth}
+                    onSetMailProvider={onSetMailProvider}
+                    onRequestMailStatus={onRequestMailStatus}
+                    onConfigureMail={onConfigureMail}
+                    onConnectMail={onConnectMail}
+                    onCancelMail={onCancelMail}
+                    onSignOutMail={onSignOutMail}
+                    mcpAuth={mcpAuth}
+                    onConnectServer={onConnectServer}
+                    onCancelServerSignIn={onCancelServerSignIn}
+                    onDisconnectServer={onDisconnectServer}
+                  />
+                </SettingsSection>
+                <SettingsSection id="plugins" labelKey="settings.integrationsPlugins">
+                  <PagePlugins
+                    plugins={plugins}
+                    onInstall={onInstallPlugin}
+                    onUninstall={onUninstallPlugin}
+                    onToggle={onTogglePlugin}
+                    onRequest={onRequestPlugins}
+                    mcpAuth={mcpAuth}
+                    onConnectServer={onConnectServer}
+                    onCancelServerSignIn={onCancelServerSignIn}
+                    onDisconnectServer={onDisconnectServer}
+                  />
+                </SettingsSection>
+                <SettingsSection id="skills" labelKey="settings.integrationsSkills">
+                  <PageSkills
+                    skills={skills}
+                    onInstall={onInstallSkill}
+                    onUninstall={onUninstallSkill}
+                    onRequest={onRequestSkills}
+                  />
+                </SettingsSection>
+              </div>
+            )}
+            {page === "about" && (
+              <PageAbout changelog={changelog} onRefreshChangelog={onRefreshChangelog} />
+            )}
+            {page === "customization" && (
+              <PageCustomization
+                textSizePx={textSizePx}
+                onSetTextSize={onSetTextSize}
+                themeStyle={themeStyle}
+                onSetThemeStyle={onSetThemeStyle}
                 fontFamily={fontFamily}
                 onSetFontFamily={onSetFontFamily}
                 customFontFamily={customFontFamily}
                 onSetCustomFontFamily={onSetCustomFontFamily}
                 onResetWindowState={onResetWindowState}
-              />
-            )}
-            {page === "quickSend" && <PageQuickSend settings={settings} onSave={onSave} />}
-            {page === "sound" && (
-              <PageSound
                 settings={settings}
                 onSave={onSave}
                 onPickSound={onPickSound}
@@ -466,120 +713,6 @@ export function SettingsModal({
                 onRemovePack={onRemoveSoundPack}
               />
             )}
-            {page === "search" && (
-              <PageSearch
-                settings={settings}
-                onSave={onSave}
-                browserInstalls={mcpExtensionStatus?.installs ?? null}
-              />
-            )}
-            {page === "models" && (
-              <PageModels
-                settings={settings}
-                onSave={onSave}
-                ollamaModels={ollamaModels}
-                ollamaModelsError={ollamaModelsError}
-                ollamaPlan={ollamaPlan}
-                ollamaHiddenCount={ollamaHiddenCount}
-                ollamaVisionModels={ollamaVisionModels}
-                opencodeModels={opencodeModels}
-                opencodeModelsError={opencodeModelsError}
-                opencodeVisionModels={opencodeVisionModels}
-                oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
-                oauthAccount={settings.openaiOAuth?.account}
-                oauthFlowError={settings.openaiOAuth?.flowError}
-                oauthWaiting={oauthWaiting}
-                onOAuthBegin={onOAuthBegin}
-                onOAuthCancel={onOAuthCancel}
-                onOAuthSignOut={onOAuthSignOut}
-                antigravitySignedIn={settings.antigravityOAuth?.signedIn ?? false}
-                antigravityAccount={settings.antigravityOAuth?.account}
-                antigravityFlowError={settings.antigravityOAuth?.flowError}
-                antigravityWaiting={antigravityOAuthWaiting}
-                onAntigravityBegin={onAntigravityOAuthBegin}
-                onAntigravityCancel={onAntigravityOAuthCancel}
-                onAntigravitySignOut={onAntigravityOAuthSignOut}
-                opencodeSignedIn={settings.opencodeOAuth?.signedIn ?? false}
-                opencodeAccount={settings.opencodeOAuth?.account}
-                opencodeOrgName={settings.opencodeOAuth?.orgName}
-                opencodeFlowError={settings.opencodeOAuth?.flowError}
-                opencodeWaiting={opencodeOAuthWaiting}
-                onOpencodeBegin={onOpencodeOAuthBegin}
-                onOpencodeCancel={onOpencodeOAuthCancel}
-                onOpencodeSignOut={onOpencodeOAuthSignOut}
-                freeTierStatus={freeTierStatus}
-                bunInstall={bunInstall}
-                onInstallBun={onInstallBun}
-                mimoOAuthWaiting={mimoOAuthWaiting}
-                onMiMoOAuthBegin={onMiMoOAuthBegin}
-                onMiMoOAuthCancel={onMiMoOAuthCancel}
-                onMiMoOAuthSignOut={onMiMoOAuthSignOut}
-              />
-            )}
-            {page === "fallbacks" && (
-              <PageFallbacks
-                settings={settings}
-                onSave={onSave}
-                ollamaModels={ollamaModels}
-                opencodeModels={opencodeModels}
-                ollamaVisionModels={ollamaVisionModels}
-                opencodeVisionModels={opencodeVisionModels}
-              />
-            )}
-            {page === "mcp" && (
-              <PageMCP
-                specs={mcpSpecs}
-                bridged={mcpBridged}
-                onAdd={onAddMcpSpec}
-                onRemove={onRemoveMcpSpec}
-                onToggleServer={onToggleMcpServer}
-                extensionStatus={mcpExtensionStatus}
-                extensionCheck={mcpExtensionCheck}
-                browserInstall={playwrightBrowserInstall}
-                onRequestExtensionStatus={onRequestMcpExtensionStatus}
-                onConfigureExtension={onConfigureMcpExtension}
-                onCheckExtension={onCheckMcpExtension}
-                onInstallBrowser={onInstallPlaywrightBrowser}
-                onCancelBrowserInstall={onCancelPlaywrightBrowserInstall}
-                mailProvider={mailProvider}
-                mailAuth={mailAuth}
-                onSetMailProvider={onSetMailProvider}
-                onRequestMailStatus={onRequestMailStatus}
-                onConfigureMail={onConfigureMail}
-                onConnectMail={onConnectMail}
-                onCancelMail={onCancelMail}
-                onSignOutMail={onSignOutMail}
-                mcpAuth={mcpAuth}
-                onConnectServer={onConnectServer}
-                onCancelServerSignIn={onCancelServerSignIn}
-                onDisconnectServer={onDisconnectServer}
-              />
-            )}
-            {page === "plugins" && (
-              <PagePlugins
-                plugins={plugins}
-                onInstall={onInstallPlugin}
-                onUninstall={onUninstallPlugin}
-                onToggle={onTogglePlugin}
-                onRequest={onRequestPlugins}
-                mcpAuth={mcpAuth}
-                onConnectServer={onConnectServer}
-                onCancelServerSignIn={onCancelServerSignIn}
-                onDisconnectServer={onDisconnectServer}
-              />
-            )}
-            {page === "skills" && (
-              <PageSkills
-                skills={skills}
-                onInstall={onInstallSkill}
-                onUninstall={onUninstallSkill}
-                onRequest={onRequestSkills}
-              />
-            )}
-            {page === "changelog" && (
-              <PageChangelog changelog={changelog} onRefresh={onRefreshChangelog} />
-            )}
-            {page === "shortcuts" && <PageShortcuts />}
           </div>
         </div>
       </div>
@@ -618,7 +751,7 @@ interface DeclaredSettingView {
   signupUrl?: string | null;
 }
 
-/** One declared setting, rendered the same way on the Search page and a provider card:
+/** One declared setting, rendered the same way on the Search section and a provider card:
  *  a masked row for secrets, a labelled input row otherwise. */
 function DeclaredSettingRow({
   setting,
@@ -688,7 +821,7 @@ function SearchEngineSettingRow({
   );
 }
 
-/** Picker copy for every connection mode, shared by the MCP card and the Search page. */
+/** Picker copy for every connection mode, shared by the MCP card and the Search section. */
 const MODE_LABEL_KEYS: Record<PlaywrightMcpConnectionMode, TKey> = {
   chromium: "settings.mcpModeChrome",
   firefox: "settings.mcpModeFirefox",
@@ -777,10 +910,11 @@ function isBuildMissing(
   return buildStateOf(installs, browser) === "missing";
 }
 
-/** One engine card on the Search page: the engine's own declared fields live inside,
- *  and its header carries the Active marker or the button that makes it the engine
- *  `web_search` uses. A shared engine names the Models-tab field that owns the key
- *  instead of rendering a second input for the same value. */
+/** One engine tile on the Search section: its own declared fields sit inside, and its
+ *  action slot carries the Active marker or the button that makes it the engine
+ *  `web_search` uses. A tile rather than a collapsible card, because expanding one revealed
+ *  a single field; the grid fits three engines in the space two cards took. A shared engine
+ *  names the Models field that owns the key instead of rendering a second input for it. */
 function SearchEngineCard({
   spec,
   active,
@@ -801,12 +935,31 @@ function SearchEngineCard({
   const ready = engineReady(spec, settings) && buildPresent(buildState);
   const owner = shared ? (providerSpec(shared.provider)?.label ?? shared.provider) : null;
   return (
-    <HeadActionCard
-      title={spec.label}
-      defaultOpen={active}
-      headActions={
-        active ? (
-          <span className="card-active-pill">✓ {t("settings.activePill")}</span>
+    <div className="tile" data-active={active}>
+      <div className="tile-head">
+        <div className="tile-title">{spec.label}</div>
+      </div>
+      {spec.description ? <div className="tile-desc">{spec.description}</div> : null}
+      {shared ? (
+        <div className="tile-desc">
+          {t("settings.searchSharedKeyNote", { provider: owner ?? "" })}
+        </div>
+      ) : spec.settings.length === 0 ? (
+        <div className="tile-desc">{t("settings.searchEngineNoSetup")}</div>
+      ) : (
+        spec.settings.map((setting) => (
+          <SearchEngineSettingRow
+            key={setting.key}
+            engineId={spec.id}
+            setting={setting}
+            value={settings.searchSettings?.[spec.id]?.[setting.key]}
+            onSave={onSave}
+          />
+        ))
+      )}
+      <div className="tile-actions">
+        {active ? (
+          <span className="tile-active">✓ {t("settings.activePill")}</span>
         ) : (
           <button
             type="button"
@@ -825,30 +978,9 @@ function SearchEngineCard({
           >
             {t("settings.searchEngineUse")}
           </button>
-        )
-      }
-    >
-      {spec.description ? <div className="card-hint">{spec.description}</div> : null}
-      {shared ? (
-        <div className="setting-row">
-          <div className="l">
-            <div className="h">{t("settings.searchSharedKeyNote", { provider: owner ?? "" })}</div>
-          </div>
-        </div>
-      ) : spec.settings.length === 0 ? (
-        <div className="card-hint">{t("settings.searchEngineNoSetup")}</div>
-      ) : (
-        spec.settings.map((setting) => (
-          <SearchEngineSettingRow
-            key={setting.key}
-            engineId={spec.id}
-            setting={setting}
-            value={settings.searchSettings?.[spec.id]?.[setting.key]}
-            onSave={onSave}
-          />
-        ))
-      )}
-    </HeadActionCard>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -863,8 +995,8 @@ function engineReady(spec: SearchEngineSpec, settings: SettingsType): boolean {
   );
 }
 
-/** Search configuration, generated from search-engines/*.json: one collapsible card per
- *  declared engine, mirroring the Models page's provider cards. */
+/** Search configuration, generated from search-engines/*.json: one tile per declared
+ *  engine, in the same grid the voice models use. */
 function PageSearch({
   settings,
   onSave,
@@ -877,164 +1009,138 @@ function PageSearch({
   const activeId = settings.webSearchEngine ?? "bing";
   return (
     <section className="section">
-      <div className="stitle">{t("settings.searchSection")}</div>
       {SEARCH_ENGINE_SPECS.length === 0 ? (
         <div className="section-hint">{t("settings.noSearchEnginesDeclared")}</div>
       ) : (
         <div className="section-hint">{t("settings.searchEnginesHint")}</div>
       )}
-      {SEARCH_ENGINE_SPECS.map((spec) => (
-        <SearchEngineCard
-          key={spec.id}
-          spec={spec}
-          active={spec.id === activeId}
-          onSelect={() =>
-            onSave({ webSearchEngine: spec.id as NonNullable<SettingsPatch["webSearchEngine"]> })
-          }
-          settings={settings}
-          onSave={onSave}
-          browserInstalls={browserInstalls}
-        />
-      ))}
+      <div className="tile-grid search-grid">
+        {SEARCH_ENGINE_SPECS.map((spec) => (
+          <SearchEngineCard
+            key={spec.id}
+            spec={spec}
+            active={spec.id === activeId}
+            onSelect={() =>
+              onSave({ webSearchEngine: spec.id as NonNullable<SettingsPatch["webSearchEngine"]> })
+            }
+            settings={settings}
+            onSave={onSave}
+            browserInstalls={browserInstalls}
+          />
+        ))}
+      </div>
     </section>
   );
 }
 
-/** One segmented setting row: a label, a hint, and the options that set the value. */
-function SegmentedSetting<T extends string>({
-  label,
-  hint,
+/** The font-family picker, system first: it is the one that matches the OS. Each row in the
+ *  menu previews its own face; custom has no known stack, so it previews the one in force.
+ *  A menu of our own rather than a native select, because the platform draws its highlight
+ *  in its own colour and no theme token reaches it. */
+const FONT_FAMILY_CHOICES: ReadonlyArray<{ value: FontFamily; labelKey: TKey }> = [
+  { value: FONT_FAMILY.SYSTEM, labelKey: "settings.fontFamilySystem" },
+  { value: FONT_FAMILY.SANS, labelKey: "settings.fontFamilySans" },
+  { value: FONT_FAMILY.SERIF, labelKey: "settings.fontFamilySerif" },
+  { value: FONT_FAMILY.CUSTOM, labelKey: "settings.fontFamilyCustom" },
+];
+
+function FontFamilyPicker({
   value,
-  options,
   onSelect,
 }: {
-  label: string;
-  hint?: string;
-  value: T;
-  options: ReadonlyArray<{ value: T; label: string }>;
-  onSelect: (next: T) => void;
+  value: FontFamily;
+  onSelect: (next: FontFamily) => void;
 }) {
-  return (
-    <div className="setting-row">
-      <div className="l">
-        <div className="n">{label}</div>
-        <div className="h">{hint}</div>
-      </div>
-      <div className="seg-ctrl">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            data-on={value === option.value}
-            onClick={() => onSelect(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const current = FONT_FAMILY_CHOICES.find((choice) => choice.value === value);
+  const label = t(current?.labelKey ?? "settings.fontFamilySans");
+  const faceOf = (family: FontFamily): string | undefined =>
+    family === FONT_FAMILY.CUSTOM ? undefined : FONT_FAMILY_STACK[family];
 
-function PageGeneral({
-  fontScale,
-  onSetFontScale,
-  fontFamily,
-  onSetFontFamily,
-  customFontFamily,
-  onSetCustomFontFamily,
-  onResetWindowState,
-}: {
-  fontScale: FontScale;
-  onSetFontScale: (scale: FontScale) => void;
-  fontFamily: FontFamily;
-  onSetFontFamily: (family: FontFamily) => void;
-  customFontFamily: string;
-  onSetCustomFontFamily: (family: string) => void;
-  onResetWindowState: () => void;
-}) {
-  const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
-    setCustomFontDraft(customFontFamily);
-  }, [customFontFamily]);
-  const commitCustomFont = (value: string) => {
-    const next = value.trim();
-    setCustomFontDraft(next);
-    onSetCustomFontFamily(next);
-  };
-  return (
-    <div className="page-general">
-      <section className="section">
-        <div className="stitle">{t("settings.appearanceSection")}</div>
-        <SegmentedSetting
-          label={t("settings.fontScale")}
-          hint={t("settings.fontScaleHint")}
-          value={fontScale}
-          onSelect={onSetFontScale}
-          options={[
-            { value: FONT_SCALE.SMALL, label: t("settings.fontScaleSmall") },
-            { value: FONT_SCALE.MEDIUM, label: t("settings.fontScaleMedium") },
-            { value: FONT_SCALE.LARGE, label: t("settings.fontScaleLarge") },
-          ]}
-        />
-        <SegmentedSetting
-          label={t("settings.fontFamily")}
-          hint={t("settings.fontFamilyHint")}
-          value={fontFamily}
-          onSelect={onSetFontFamily}
-          options={[
-            { value: FONT_FAMILY.SANS, label: t("settings.fontFamilySans") },
-            { value: FONT_FAMILY.SYSTEM, label: t("settings.fontFamilySystem") },
-            { value: FONT_FAMILY.SERIF, label: t("settings.fontFamilySerif") },
-            { value: FONT_FAMILY.CUSTOM, label: t("settings.fontFamilyCustom") },
-          ]}
-        />
-        {fontFamily === FONT_FAMILY.CUSTOM && (
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.customFontFamily")}</div>
-              <div className="h">{t("settings.customFontFamilyHint")}</div>
-            </div>
-            <input
-              className="field font-family-field"
-              value={customFontDraft}
-              placeholder={`"Microsoft YaHei", "PingFang SC", sans-serif`}
-              onChange={(e) => {
-                setCustomFontDraft(e.target.value);
-                onSetCustomFontFamily(e.target.value);
-              }}
-              onBlur={(e) => commitCustomFont(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-              }}
-            />
-          </div>
-        )}
-      </section>
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
-      <section className="section">
-        <div className="stitle">{t("settings.windowSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.windowState")}</div>
-            <div className="h">{t("settings.windowStateHint")}</div>
-          </div>
-          <button type="button" className="btn small" onClick={onResetWindowState}>
-            <I.refresh size={13} />
-            <span>{t("settings.windowStateReset")}</span>
-          </button>
+  return (
+    <div className="font-family-picker" ref={wrapRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="font-family-select"
+        style={{ fontFamily: faceOf(value) }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t("settings.fontFamily")}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span>{label}</span>
+        <I.chev size={10} />
+      </button>
+      {open ? (
+        <div className="font-family-menu" role="menu" aria-label={t("settings.fontFamily")}>
+          {FONT_FAMILY_CHOICES.map((choice) => (
+            <button
+              key={choice.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={choice.value === value}
+              data-on={choice.value === value}
+              style={{ fontFamily: faceOf(choice.value) }}
+              onClick={() => {
+                onSelect(choice.value);
+                setOpen(false);
+                buttonRef.current?.focus();
+              }}
+            >
+              {t(choice.labelKey)}
+            </button>
+          ))}
         </div>
-      </section>
-      <VoiceInputSettings />
+      ) : null}
     </div>
   );
 }
 
-/** Composer quick actions: the ordered shorthand to message list behind the Ctrl+Q
- *  dropdown and the Ctrl+1-9 hotkeys. */
-function PageQuickSend({
+/** Composer: what the box under the thread does. Voice carries the microphone and its models,
+ *  Quick send the list the Ctrl+Q dropdown and the Ctrl+1-9 hotkeys read. */
+function PageComposer({
+  settings,
+  onSave,
+}: {
+  settings: SettingsType;
+  onSave: (patch: SettingsPatch) => void;
+}) {
+  return (
+    <div className="page-composer">
+      <SettingsSection id="voice" labelKey="settings.composerVoice">
+        <VoiceInputSettings />
+      </SettingsSection>
+      <SettingsSection id="quickSend" labelKey="settings.composerQuickSend">
+        <QuickSendSettings settings={settings} onSave={onSave} />
+      </SettingsSection>
+    </div>
+  );
+}
+
+/** The ordered shorthand to message list behind the Ctrl+Q dropdown and the Ctrl+1-9
+ *  hotkeys. */
+function QuickSendSettings({
   settings,
   onSave,
 }: {
@@ -1104,7 +1210,7 @@ function PageQuickSend({
       )}
 
       {(settings.quickSends ?? []).length === 0 && (
-        <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-12)", marginBottom: 12 }}>
           {t("settings.quickSendNoCustom")}
         </div>
       )}
@@ -1129,7 +1235,7 @@ function PageQuickSend({
         <div className="rule-composer-row">
           <input
             type="text"
-            className="rule-input"
+            className="rule-input rule-shorthand"
             placeholder={t("settings.quickSendShorthandPlaceholder")}
             value={quickSendShorthand}
             maxLength={QUICK_SEND_SHORTHAND_MAX_LENGTH}
@@ -1163,27 +1269,20 @@ function PageQuickSend({
 const AUDIO_TEST_DURATION_MS = 4000;
 
 /**
- * Voice input card: the speech-to-text model picker on the left column, the
- * microphone picker and its record/playback test on the right.
+ * Voice input: the microphone first, then the speech-to-text models as cards. Nothing here is
+ *  collapsible: the section heading is the only title, and the page scrolls.
  */
 export function VoiceInputSettings() {
   return (
-    <ProviderCard
-      title={t("settings.voiceInputSection")}
-      models={<VoiceModelList />}
-      settings={
-        <div className="voice-settings">
-          <div className="voice-col-title">{t("settings.voiceInputDevice")}</div>
-          <AudioInputDevicePicker />
-        </div>
-      }
-    />
+    <div className="voice-settings">
+      <AudioInputDevicePicker />
+      <VoiceModelList />
+    </div>
   );
 }
 
 /**
- * Microphone picker for voice input, the right column of the voice input card.
- * Persists the choice in localStorage.
+ * Microphone picker for voice input. Persists the choice in localStorage.
  *
  * Microphone access is gated behind an explicit consent button: browsers only
  * reveal real device labels once permission is granted, and we never touch media
@@ -1247,42 +1346,48 @@ function AudioInputDevicePicker() {
 
   return (
     <div className="voice-device-settings">
-      <div className="voice-section-hint">{t("settings.voiceInputDeviceHint")}</div>
-
       {error && (
         <div className="voice-error-banner" role="alert">
           <span>{error}</span>
         </div>
       )}
 
-      {phase === "consent" ? (
-        <div className="voice-consent">
-          <button type="button" className="btn" onClick={handleAllow} disabled={granting}>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.voiceInputDevice")}</div>
+          <div className="h">{t("settings.voiceInputDeviceHint")}</div>
+        </div>
+        {phase === "consent" ? (
+          <button type="button" className="btn small" onClick={handleAllow} disabled={granting}>
             <I.mic size={13} />
             <span>{t("settings.voiceInputDeviceAllow")}</span>
           </button>
-          <div className="voice-section-hint">{t("settings.voiceInputDeviceAllowHint")}</div>
-        </div>
+        ) : (
+          <div className="voice-device-controls">
+            <select
+              className="voice-device-select"
+              value={selected}
+              onChange={(e) => handleChange(e.target.value)}
+              aria-label={t("settings.voiceInputDevice")}
+            >
+              <option value="">{t("settings.voiceInputDeviceDefault")}</option>
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn small" onClick={() => void refresh()}>
+              {t("settings.voiceInputDeviceRefresh")}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {phase === "consent" ? (
+        <div className="voice-section-hint">{t("settings.voiceInputDeviceAllowHint")}</div>
       ) : (
-        <>
-          <select
-            className="voice-device-select"
-            value={selected}
-            onChange={(e) => handleChange(e.target.value)}
-            aria-label={t("settings.voiceInputDevice")}
-          >
-            <option value="">{t("settings.voiceInputDeviceDefault")}</option>
-            {devices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="btn small" onClick={() => void refresh()}>
-            {t("settings.voiceInputDeviceRefresh")}
-          </button>
-          <AudioInputDeviceTest deviceId={selected} />
-        </>
+        <AudioInputDeviceTest deviceId={selected} />
       )}
     </div>
   );
@@ -1473,8 +1578,8 @@ const RUNTIME_STAGE_KEY: Record<BarkRuntimePhase, TKey> = {
 };
 
 /**
- * Speech-to-text model picker, the left column of the voice input card: each
- * model downloads on demand into the local cache and is then selectable.
+ * Speech-to-text model picker: each model downloads on demand into the local cache and is then
+ *  selectable.
  */
 function VoiceModelList() {
   const [activeModel, setActiveModel] = useState<VoiceModelId>(() => getActiveVoiceModelId());
@@ -1581,118 +1686,116 @@ function VoiceModelList() {
           </button>
         </div>
       )}
-      <div className="provider-models-scroll">
-        <div className="voice-card-grid">
-          {VOICE_MODELS.map((model) => {
-            const isActive = activeModel === model.modelId;
-            const isDownloaded = Boolean(downloadedMap[model.modelId]);
-            const isDownloading = downloadingModel === model.modelId;
-            const engine = VOICE_ENGINES[model.engine];
+      <div className="tile-grid">
+        {VOICE_MODELS.map((model) => {
+          const isActive = activeModel === model.modelId;
+          const isDownloaded = Boolean(downloadedMap[model.modelId]);
+          const isDownloading = downloadingModel === model.modelId;
+          const engine = VOICE_ENGINES[model.engine];
 
-            return (
-              <div
-                key={model.modelId}
-                className={`voice-card ${isActive ? "active" : ""}`}
-                data-active={isActive}
-              >
-                <div className="voice-card-header">
-                  <div className="voice-card-title">{model.name}</div>
-                  <span className="voice-badge">{model.badge ?? "Balanced"}</span>
-                </div>
+          return (
+            <div
+              key={model.modelId}
+              className={`tile ${isActive ? "active" : ""}`}
+              data-active={isActive}
+            >
+              <div className="tile-head">
+                <div className="tile-title">{model.name}</div>
+                <span className="tile-badge">{model.badge ?? "Balanced"}</span>
+              </div>
 
-                <div className="voice-card-meta">
-                  {model.parameters && (
-                    <>
-                      <span>{model.parameters} params</span>
-                      <span>•</span>
-                    </>
-                  )}
-                  <span>{model.size}</span>
-                  {engine.labelKey && (
-                    <>
-                      <span>•</span>
-                      <span>{t(engine.labelKey)}</span>
-                    </>
-                  )}
-                </div>
-
-                <div className="voice-card-desc">{model.description}</div>
-
-                {engine.runtime && (
-                  <div className="voice-card-desc voice-runtime-note">
-                    {t("settings.voiceRuntimeNote", {
-                      size: formatBytes(engine.runtime.estimatedBytes),
-                    })}
-                  </div>
+              <div className="tile-meta">
+                {model.parameters && (
+                  <>
+                    <span>{model.parameters} params</span>
+                    <span>•</span>
+                  </>
                 )}
+                <span>{model.size}</span>
+                {engine.labelKey && (
+                  <>
+                    <span>•</span>
+                    <span>{t(engine.labelKey)}</span>
+                  </>
+                )}
+              </div>
 
-                {isDownloading && (
-                  <div className="voice-download-box">
-                    <div className="voice-progress-meta">
-                      <span className="voice-file-name">
-                        {downloadStage
-                          ? t(RUNTIME_STAGE_KEY[downloadStage])
-                          : downloadFile || t("settings.voiceDownloading")}
-                      </span>
-                      {!downloadStage && <span className="voice-pct">{downloadProgress}%</span>}
-                    </div>
+              <div className="tile-desc">{model.description}</div>
+
+              {engine.runtime && (
+                <div className="tile-desc voice-runtime-note">
+                  {t("settings.voiceRuntimeNote", {
+                    size: formatBytes(engine.runtime.estimatedBytes),
+                  })}
+                </div>
+              )}
+
+              {isDownloading && (
+                <div className="voice-download-box">
+                  <div className="voice-progress-meta">
+                    <span className="voice-file-name">
+                      {downloadStage
+                        ? t(RUNTIME_STAGE_KEY[downloadStage])
+                        : downloadFile || t("settings.voiceDownloading")}
+                    </span>
+                    {!downloadStage && <span className="voice-pct">{downloadProgress}%</span>}
+                  </div>
+                  <div
+                    className={`voice-progress-track${downloadStage ? " indeterminate" : ""}`}
+                    role="progressbar"
+                    aria-busy={Boolean(downloadStage)}
+                  >
                     <div
-                      className={`voice-progress-track${downloadStage ? " indeterminate" : ""}`}
-                      role="progressbar"
-                      aria-busy={Boolean(downloadStage)}
-                    >
-                      <div
-                        className="voice-progress-bar"
-                        style={downloadStage ? undefined : { width: `${downloadProgress}%` }}
-                      />
-                    </div>
+                      className="voice-progress-bar"
+                      style={downloadStage ? undefined : { width: `${downloadProgress}%` }}
+                    />
                   </div>
-                )}
+                </div>
+              )}
 
-                <div className="voice-card-actions">
-                  {engine.requirementKey ? (
-                    <span className="voice-requirement">{t(engine.requirementKey)}</span>
-                  ) : isDownloading ? (
-                    <button type="button" className="btn" disabled>
-                      {t("settings.voiceDownloading")}
-                    </button>
-                  ) : isDownloaded ? (
-                    <>
-                      {isActive ? (
-                        <span className="voice-active-label">✓ {t("settings.voiceActive")}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => handleSelect(model.modelId)}
-                        >
-                          {t("settings.voiceSelect")}
-                        </button>
-                      )}
+              <div className="tile-actions">
+                {engine.requirementKey ? (
+                  <span className="voice-requirement">{t(engine.requirementKey)}</span>
+                ) : isDownloading ? (
+                  <button type="button" className="btn" disabled>
+                    {t("settings.voiceDownloading")}
+                  </button>
+                ) : isDownloaded ? (
+                  <>
+                    {isActive ? (
+                      <span className="tile-active">✓ {t("settings.voiceActive")}</span>
+                    ) : (
                       <button
                         type="button"
-                        className="btn btn-subtle"
-                        title="Delete downloaded files to free space"
-                        onClick={() => handleDelete(model.modelId)}
+                        className="btn"
+                        onClick={() => handleSelect(model.modelId)}
                       >
-                        {t("settings.voiceDelete")}
+                        {t("settings.voiceSelect")}
                       </button>
-                    </>
-                  ) : (
+                    )}
                     <button
                       type="button"
-                      className="btn btn-download"
-                      disabled={downloadingModel !== null}
-                      onClick={() => handleDownload(model.modelId)}
+                      className="btn btn-subtle"
+                      title="Delete downloaded files to free space"
+                      onClick={() => handleDelete(model.modelId)}
                     >
-                      {t("settings.voiceDownload")}
+                      {t("settings.voiceDelete")}
                     </button>
-                  )}
-                </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-download"
+                    disabled={downloadingModel !== null}
+                    onClick={() => handleDownload(model.modelId)}
+                  >
+                    {t("settings.voiceDownload")}
+                  </button>
+                )}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1949,11 +2052,10 @@ export function OpencodeFreeTierSection({
   );
 }
 
-/** One collapsible card on the Models page.
- *  The header toggles a two-column
- *  body: the left `models` column (a scrollable per-provider model list) and the
- *  right `settings` column (that provider's keys, base URLs and auth). Cards
- *  without a model list (audio input) render one full-width column. */
+/** One collapsible card on the Models page. The header toggles a body that reads top to
+ *  bottom: the provider's own settings and sign-in first, its model list below, so the
+ *  list gets the card's full width. Cards without a model list (the search engines)
+ *  render the settings block alone. */
 function ProviderCard({
   title,
   defaultOpen = true,
@@ -1980,9 +2082,9 @@ function ProviderCard({
         <span className="provider-title">{title}</span>
       </button>
       {open ? (
-        <div className="provider-body" data-has-models={models ? "true" : "false"}>
-          {models ? <div className="provider-col">{models}</div> : null}
-          <div className="provider-col">{settings}</div>
+        <div className="provider-body">
+          <div className="provider-col provider-settings-col">{settings}</div>
+          {models ? <div className="provider-col provider-models-col">{models}</div> : null}
         </div>
       ) : null}
     </section>
@@ -2039,7 +2141,7 @@ function HeadActionCard({
         {headActions ? <div className="provider-head-actions">{headActions}</div> : null}
       </div>
       {open ? (
-        <div className="provider-body" data-has-models="false">
+        <div className="provider-body">
           <div className="provider-col">{children}</div>
         </div>
       ) : null}
@@ -2055,7 +2157,7 @@ function TitleNote({ tone, children }: { tone?: "accent"; children: ReactNode })
       style={{
         color: tone === "accent" ? "var(--accent)" : "var(--muted)",
         marginLeft: 6,
-        fontSize: 11,
+        fontSize: "var(--fs-11)",
       }}
     >
       {children}
@@ -2820,7 +2922,7 @@ function MailStatusLine({
     <div
       style={{
         marginTop: 8,
-        fontSize: 11,
+        fontSize: "var(--fs-11)",
         color:
           mail?.phase === "error"
             ? "var(--danger)"
@@ -2905,13 +3007,12 @@ function PageFallbacks({
 
   return (
     <section className="section">
-      <div className="stitle">{t("settings.fallbacksSection")}</div>
       <div className="h" style={{ marginBottom: 12 }}>
         {t("settings.fallbacksHint")}
       </div>
 
       {list.length === 0 && (
-        <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-12)", marginBottom: 12 }}>
           {enabled.size === 0
             ? t("settings.fallbacksNeedsEnabledModels")
             : t("settings.fallbacksEmpty")}
@@ -3042,7 +3143,7 @@ function ServerAuthRow({
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span
           style={{
-            fontSize: 11,
+            fontSize: "var(--fs-11)",
             color: signedIn ? "var(--accent)" : "var(--muted)",
           }}
         >
@@ -3082,7 +3183,7 @@ function McpToolList({ tools }: { tools: string[] }) {
       <button
         type="button"
         className="btn ghost"
-        style={{ fontSize: 11, paddingLeft: 0 }}
+        style={{ fontSize: "var(--fs-11)", paddingLeft: 0 }}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
@@ -3091,7 +3192,7 @@ function McpToolList({ tools }: { tools: string[] }) {
       </button>
       {open ? (
         names.length === 0 ? (
-          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
             {t("settings.mcpToolsEmpty")}
           </div>
         ) : (
@@ -3110,7 +3211,7 @@ function McpToolList({ tools }: { tools: string[] }) {
                 style={{
                   maxWidth: "100%",
                   overflowWrap: "anywhere",
-                  fontSize: 11,
+                  fontSize: "var(--fs-11)",
                   background: "var(--panel)",
                   border: "1px solid var(--border)",
                   borderRadius: 4,
@@ -3321,7 +3422,7 @@ export function PageMCP({
           </button>
         ) : null}
       </div>
-      <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+      <div style={{ marginTop: 8, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
         {extensionStatus
           ? extensionStatus.server.configured
             ? `✓ ${t("settings.mcpConfiguredMode", { mode: configuredMode ? modeLabel(configuredMode) : "…" })}${
@@ -3365,7 +3466,7 @@ export function PageMCP({
         })}
       </div>
       {connection ? (
-        <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: connection.color }}>
           {connection.text}
           {playwrightSpec?.status === "failed" &&
           /Node\.js is outdated/i.test(playwrightSpec.statusReason ?? "") ? (
@@ -3383,7 +3484,7 @@ export function PageMCP({
       ) : null}
       {installRunning ? (
         <div className="playwright-download-box">
-          <output style={{ marginBottom: 4, fontSize: 11, color: "var(--muted)" }}>
+          <output style={{ marginBottom: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
             {t("settings.mcpBrowserInstalling", { browser: modeLabel(browserInstall.browser) })} ·{" "}
             <span>
               {browserInstall.source === "backup"
@@ -3436,7 +3537,7 @@ export function PageMCP({
         <div
           style={{
             marginTop: 4,
-            fontSize: 11,
+            fontSize: "var(--fs-11)",
             color: browserInstall.ok ? "var(--accent)" : "var(--danger)",
           }}
         >
@@ -3446,14 +3547,14 @@ export function PageMCP({
         </div>
       ) : null}
       {extensionMode && extensionCheck?.phase === "running" ? (
-        <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
           {t("settings.mcpTestRunning")}
         </div>
       ) : extensionCheck?.phase === "done" ? (
         <div
           style={{
             marginTop: 4,
-            fontSize: 11,
+            fontSize: "var(--fs-11)",
             color: extensionCheck.ok ? "var(--accent)" : "var(--danger)",
           }}
         >
@@ -3463,7 +3564,7 @@ export function PageMCP({
         </div>
       ) : null}
       {extensionMode || mode === "cdp" ? (
-        <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
           {t(extensionMode ? "settings.mcpTokenHint" : "settings.mcpCdpHint")}
         </div>
       ) : null}
@@ -3496,7 +3597,7 @@ export function PageMCP({
             {t("settings.gmailMailDesc")}
           </div>
           <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: "var(--muted)" }}>
+            <label style={{ fontSize: "var(--fs-11)", color: "var(--muted)" }}>
               {t("settings.gmailClientIdLabel")}
               <input
                 type="text"
@@ -3509,7 +3610,7 @@ export function PageMCP({
                 onChange={(event) => setGmailClientId(event.target.value)}
               />
             </label>
-            <label style={{ fontSize: 11, color: "var(--muted)" }}>
+            <label style={{ fontSize: "var(--fs-11)", color: "var(--muted)" }}>
               {t("settings.gmailClientSecretLabel")}
               <input
                 type="password"
@@ -3544,7 +3645,7 @@ export function PageMCP({
             }
           />
           <MailStatusLine provider={MailProvider.Gmail} mail={mail} />
-          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
             {t("settings.gmailCallbackHint", { url: mail?.callbackUrl ?? "" })}
           </div>
         </div>
@@ -3561,14 +3662,14 @@ export function PageMCP({
           />
           {mail?.userCode ? (
             <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
+              <div style={{ fontSize: "var(--fs-11)", color: "var(--muted)", marginBottom: 4 }}>
                 {t("settings.outlookMailCodeLabel")}
               </div>
-              <code style={{ fontSize: 18, userSelect: "all" }}>{mail.userCode}</code>
+              <code style={{ fontSize: "var(--fs-18)", userSelect: "all" }}>{mail.userCode}</code>
             </div>
           ) : null}
           <MailStatusLine provider={MailProvider.Outlook} mail={mail} />
-          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
             {t("settings.outlookMailPrivacy")}
           </div>
         </div>
@@ -3581,11 +3682,11 @@ export function PageMCP({
         <div className="stitle">
           {t("settings.mcpConfigured", { count: ownSpecs.length })}
           {bridged ? (
-            <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: 11 }}>
+            <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: "var(--fs-11)" }}>
               {t("settings.mcpBridged")}
             </span>
           ) : (
-            <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
+            <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: "var(--fs-11)" }}>
               {t("settings.mcpNotBridged")}
             </span>
           )}
@@ -3597,7 +3698,7 @@ export function PageMCP({
               background: "var(--card)",
               border: "1px solid var(--border)",
               borderRadius: 10,
-              fontSize: 12,
+              fontSize: "var(--fs-12)",
               color: "var(--muted)",
             }}
           >
@@ -3655,7 +3756,7 @@ export function PageMCP({
               {s.tools ? (
                 <McpToolList tools={s.tools} />
               ) : (
-                <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+                <div style={{ marginTop: 8, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
                   {t("settings.mcpToolsUnavailable")}
                 </div>
               )}
@@ -3750,7 +3851,7 @@ export function PagePlugins({
               background: "var(--card)",
               border: "1px solid var(--border)",
               borderRadius: 10,
-              fontSize: 12,
+              fontSize: "var(--fs-12)",
               color: "var(--muted)",
             }}
           >
@@ -3848,7 +3949,9 @@ function PluginCard({
         </div>
       ) : null}
       {byline ? (
-        <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>{byline}</div>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-11)", color: "var(--muted)" }}>
+          {byline}
+        </div>
       ) : null}
       {plugin.capabilities.length > 0 ? (
         <div className="tools-list">
@@ -3877,10 +3980,14 @@ function PluginCard({
             return (
               <div key={server.name}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <code style={{ fontSize: 11 }}>{mcpServerLabel(server)}</code>
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{server.transport}</span>
+                  <code style={{ fontSize: "var(--fs-11)" }}>{mcpServerLabel(server)}</code>
+                  <span style={{ fontSize: "var(--fs-11)", color: "var(--muted)" }}>
+                    {server.transport}
+                  </span>
                   <span className="grow" />
-                  <span style={{ fontSize: 11, color: status.color }}>{status.text}</span>
+                  <span style={{ fontSize: "var(--fs-11)", color: status.color }}>
+                    {status.text}
+                  </span>
                 </div>
                 <ServerAuthRow
                   name={server.name}
@@ -3934,10 +4041,10 @@ function PluginSkillList({ skills }: { skills: PluginSkillInfo[] }) {
             </div>
             {group.map((skill) => (
               <div key={skill.name} style={{ marginBottom: 8 }}>
-                <code style={{ fontSize: 11 }} title={skill.path}>
+                <code style={{ fontSize: "var(--fs-11)" }} title={skill.path}>
                   {skill.name}
                 </code>
-                <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+                <div style={{ fontSize: "var(--fs-11)", color: "var(--muted)", lineHeight: 1.5 }}>
                   {skill.description}
                 </div>
               </div>
@@ -3987,7 +4094,7 @@ export function PageSkills({
               background: "var(--card)",
               border: "1px solid var(--border)",
               borderRadius: 10,
-              fontSize: 12,
+              fontSize: "var(--fs-12)",
               color: "var(--muted)",
             }}
           >
@@ -4093,9 +4200,9 @@ function SkillGroupCard({
         {group.skills.map((skill) => (
           <div key={skill.id} style={{ marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <code style={{ fontSize: 11 }}>{skill.name}</code>
+              <code style={{ fontSize: "var(--fs-11)" }}>{skill.name}</code>
               {skill.active ? (
-                <span style={{ fontSize: 11, color: "var(--accent)" }}>
+                <span style={{ fontSize: "var(--fs-11)", color: "var(--accent)" }}>
                   {t("settings.skillsActiveHere")}
                 </span>
               ) : null}
@@ -4168,6 +4275,30 @@ function PageShortcuts() {
   );
 }
 
+/** About: the version and update check, then the two reference lists that used to be pages of
+ *  their own. */
+function PageAbout({
+  changelog,
+  onRefreshChangelog,
+}: {
+  changelog: ChangelogState;
+  onRefreshChangelog: (force?: boolean) => void;
+}) {
+  return (
+    <div className="page-about">
+      <SettingsSection id="version" labelKey="settings.aboutVersion">
+        <AboutPanel />
+      </SettingsSection>
+      <SettingsSection id="shortcuts" labelKey="settings.aboutShortcuts">
+        <PageShortcuts />
+      </SettingsSection>
+      <SettingsSection id="changelog" labelKey="settings.aboutChangelog">
+        <PageChangelog changelog={changelog} onRefresh={onRefreshChangelog} />
+      </SettingsSection>
+    </div>
+  );
+}
+
 function SectionRow({ nm, keys }: { nm: string; keys: ShortcutKey[] }): ReactNode {
   return (
     <>
@@ -4176,6 +4307,210 @@ function SectionRow({ nm, keys }: { nm: string; keys: ShortcutKey[] }): ReactNod
         <Shortcut keys={keys} />
       </div>
     </>
+  );
+}
+
+/** The picker's order: light styles first, then dark, each group keeping the palette's own
+ *  order. Sorting is stable, so the palette decides within a group. */
+const THEME_STYLE_ORDER: ReadonlyArray<ThemeStyle> = [...THEME_STYLES].sort(
+  (a, b) => Number(themeForStyle(a) === THEME.DARK) - Number(themeForStyle(b) === THEME.DARK),
+);
+
+/** Customization: one page holding the app's look and its sound. Appearance carries the
+ *  controls that used to sit on the General page, Themes the style picker that used to sit in
+ *  the status bar, and Sound cues the pack cards that used to be a page of their own. */
+function PageCustomization({
+  textSizePx,
+  onSetTextSize,
+  themeStyle,
+  onSetThemeStyle,
+  fontFamily,
+  onSetFontFamily,
+  customFontFamily,
+  onSetCustomFontFamily,
+  onResetWindowState,
+  settings,
+  onSave,
+  onPickSound,
+  onCreatePack,
+  onRemovePack,
+}: {
+  textSizePx: number;
+  onSetTextSize: (size: number) => void;
+  themeStyle: ThemeStyle;
+  onSetThemeStyle: (style: ThemeStyle) => void;
+  fontFamily: FontFamily;
+  onSetFontFamily: (family: FontFamily) => void;
+  customFontFamily: string;
+  onSetCustomFontFamily: (family: string) => void;
+  onResetWindowState: () => void;
+  settings: SettingsType;
+  onSave: (patch: SettingsPatch) => void;
+  /** Opens the desktop file dialog for one cue's audio. */
+  onPickSound: () => Promise<string | null>;
+  onCreatePack: (draft: SoundPackDraft) => void;
+  onRemovePack: (id: string) => void;
+}) {
+  const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
+  useEffect(() => {
+    setCustomFontDraft(customFontFamily);
+  }, [customFontFamily]);
+  const commitCustomFont = (value: string) => {
+    const next = value.trim();
+    setCustomFontDraft(next);
+    onSetCustomFontFamily(next);
+  };
+  const packs = useMemo(() => mergeSoundPacks(settings.soundPacks), [settings.soundPacks]);
+  const activeId = resolveSoundPackId(settings.soundPackId, packs);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // Every card tests its own cues, so warm all packs on open: a test then plays on the
+  // first click instead of only decoding the audio after it.
+  useEffect(() => {
+    for (const pack of packs) preloadSoundPack(pack.id);
+  }, [packs]);
+  return (
+    <div className="page-customization">
+      <SettingsSection id="appearance" labelKey="settings.appearanceSection">
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.textSize")}</div>
+            <div className="h">{t("settings.textSizeHint")}</div>
+          </div>
+          <div
+            className="text-size-control"
+            // The readout rides above the knob, so it needs the knob's share of the track.
+            style={
+              {
+                "--knob": `${((textSizePx - TEXT_SIZE_RANGE.min) / (TEXT_SIZE_RANGE.max - TEXT_SIZE_RANGE.min)) * 100}%`,
+              } as CSSProperties
+            }
+          >
+            <input
+              type="range"
+              min={TEXT_SIZE_RANGE.min}
+              max={TEXT_SIZE_RANGE.max}
+              step={TEXT_SIZE_RANGE.step}
+              value={textSizePx}
+              aria-label={t("settings.textSize")}
+              onChange={(e) => onSetTextSize(clampTextSizePx(Number(e.target.value)))}
+            />
+            {/* After the input, so the readout can follow the slider's own state. */}
+            <span className="text-size-value">{textSizePx} px</span>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.fontFamily")}</div>
+            <div className="h">{t("settings.fontFamilyHint")}</div>
+          </div>
+          <FontFamilyPicker value={fontFamily} onSelect={onSetFontFamily} />
+        </div>
+        {fontFamily === FONT_FAMILY.CUSTOM && (
+          <div className="setting-row">
+            <div className="l">
+              <div className="n">{t("settings.customFontFamily")}</div>
+              <div className="h">{t("settings.customFontFamilyHint")}</div>
+            </div>
+            <input
+              className="field font-family-field"
+              value={customFontDraft}
+              placeholder={`"Microsoft YaHei", "PingFang SC", sans-serif`}
+              onChange={(e) => {
+                setCustomFontDraft(e.target.value);
+                onSetCustomFontFamily(e.target.value);
+              }}
+              onBlur={(e) => commitCustomFont(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          </div>
+        )}
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.windowState")}</div>
+            <div className="h">{t("settings.windowStateHint")}</div>
+          </div>
+          <button type="button" className="btn small window-reset" onClick={onResetWindowState}>
+            <I.refresh size={13} />
+            <span>{t("settings.windowStateReset")}</span>
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection id="themes" labelKey="settings.customizationThemes">
+        <div
+          className="theme-grid"
+          role="radiogroup"
+          aria-labelledby={sectionHeadingId("themes")}
+        >
+          {THEME_STYLE_ORDER.map((style) => (
+            <button
+              key={style}
+              type="button"
+              role="radio"
+              aria-checked={themeStyle === style}
+              className="theme-pop-item"
+              data-on={themeStyle === style}
+              data-style={style}
+              onClick={() => onSetThemeStyle(style)}
+            >
+              <span className="style-swatches" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="txt">
+                <span className="nm">
+                  {t(`settings.themeStyle${style[0]!.toUpperCase()}${style.slice(1)}` as TKey)}
+                </span>
+                <span className="md">
+                  {themeForStyle(style) === THEME.DARK
+                    ? t("settings.themeDark")
+                    : t("settings.themeLight")}
+                </span>
+              </span>
+              {themeStyle === style ? <I.check size={13} /> : null}
+            </button>
+          ))}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection id="soundCues" labelKey="settings.customizationSoundCues">
+        <div className="setting-row">
+          <div className="l">
+            <div className="h">{t("settings.soundSectionHint")}</div>
+          </div>
+          <button type="button" className="btn small" onClick={() => setWizardOpen(true)}>
+            <I.plus size={12} /> {t("settings.soundPackNew")}
+          </button>
+        </div>
+        {packs.map((pack) => (
+          <SoundPackCard
+            key={pack.id}
+            pack={pack}
+            active={pack.id === activeId}
+            settings={settings}
+            onSave={onSave}
+            onSelect={() => onSave({ soundPackId: pack.id })}
+            onRemove={() => {
+              onRemovePack(pack.id);
+              // The silent pack is the fallback the daemon resolves a dead selection to, so
+              // make the UI show that immediately instead of on the next echo.
+              if (pack.id === activeId) onSave({ soundPackId: NOTHING_SOUND_PACK_ID });
+            }}
+          />
+        ))}
+      </SettingsSection>
+      <PackWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onPickSound={onPickSound}
+        onCreate={onCreatePack}
+      />
+    </div>
   );
 }
 
@@ -4353,71 +4688,5 @@ function PackCueTable({
         })}
       </tbody>
     </table>
-  );
-}
-
-/** The desktop-notification switches. One list for the whole app: notifications are not
- *  audio, so choosing another sound pack can never silence them. *//** Settings > Sound: the pack cues play through, each card holding that pack's own cue
- *  audio. Packs render from the shipped folders, the implicit silent pack and the ones this
- *  user created, so a new pack adds a card. That switch is also the notification gate: one
- *  Off/On per pack per cue, no second matrix above it. */
-function PageSound({
-  settings,
-  onSave,
-  onPickSound,
-  onCreatePack,
-  onRemovePack,
-}: {
-  settings: SettingsType;
-  onSave: (patch: SettingsPatch) => void;
-  /** Opens the desktop file dialog for one cue's audio. */
-  onPickSound: () => Promise<string | null>;
-  onCreatePack: (draft: SoundPackDraft) => void;
-  onRemovePack: (id: string) => void;
-}) {
-  const packs = useMemo(() => mergeSoundPacks(settings.soundPacks), [settings.soundPacks]);
-  const activeId = resolveSoundPackId(settings.soundPackId, packs);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  // Every card tests its own cues, so warm all packs on open: a test then plays on the
-  // first click instead of only decoding the audio after it.
-  useEffect(() => {
-    for (const pack of packs) preloadSoundPack(pack.id);
-  }, [packs]);
-  return (
-    <>
-      <section className="section">
-        <div className="stitle">{t("settings.soundSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="h">{t("settings.soundSectionHint")}</div>
-          </div>
-          <button type="button" className="btn small" onClick={() => setWizardOpen(true)}>
-            <I.plus size={12} /> {t("settings.soundPackNew")}
-          </button>
-        </div>
-        {packs.map((pack) => (
-          <SoundPackCard
-            key={pack.id}
-            pack={pack}
-            active={pack.id === activeId}
-            settings={settings}
-            onSave={onSave}
-            onSelect={() => onSave({ soundPackId: pack.id })}
-            onRemove={() => {
-              onRemovePack(pack.id);
-              // The silent pack is the fallback the daemon resolves a dead selection to, so
-              // make the UI show that immediately instead of on the next echo.
-              if (pack.id === activeId) onSave({ soundPackId: NOTHING_SOUND_PACK_ID });
-            }}
-          />
-        ))}
-      </section>
-      <PackWizard
-        open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        onPickSound={onPickSound}
-        onCreate={onCreatePack}
-      />
-    </>
   );
 }
